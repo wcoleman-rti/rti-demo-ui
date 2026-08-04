@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTI Demo GUI SDK — Gallery</title>
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="sdk-app" id="sdk-app">
+  <div class="sdk-connection-banner" id="sdk-connection-banner">
+    Connection lost. Retrying&hellip;
+  </div>
+  <h1 id="sdk-app-title"></h1>
+  <div id="sdk-cards"></div>
+
+  <div class="sdk-card">
+    <h2 class="sdk-card-title">Gallery controls</h2>
+    <div class="sdk-metric">
+      <span class="sdk-metric-label">Sample metric</span>
+      <span class="sdk-metric-value sdk-status-success" id="gallery-metric">42</span>
+    </div>
+    <table class="sdk-table">
+      <thead><tr><th>Name</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Row A</td><td class="sdk-status-success">success</td></tr>
+        <tr><td>Row B</td><td class="sdk-status-warning">warning</td></tr>
+      </tbody>
+    </table>
+    <button class="sdk-button" id="gallery-button" type="button">Click me</button>
+    <input class="sdk-slider" id="gallery-slider" type="range" min="0" max="100" value="50">
+  </div>
+</div>
+<script src="/runtime.js"></script>
+<script>
+document.getElementById('gallery-button').addEventListener('click', function () {
+  var metric = document.getElementById('gallery-metric');
+  metric.textContent = String(Number(metric.textContent) + 1);
+});
+document.getElementById('gallery-slider').addEventListener('input', function (event) {
+  document.getElementById('gallery-metric').textContent = event.target.value;
+});
+</script>
+</body>
+</html>
