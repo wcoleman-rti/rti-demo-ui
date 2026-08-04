@@ -33,7 +33,10 @@ def test_scene_renders_without_console_errors(running_app):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page()
-        page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+        page.on(
+            "console",
+            lambda msg: errors.append(msg.text) if msg.type == "error" else None,
+        )
         page.goto(base_url + "/")
         page.wait_for_selector("svg.sdk-scene2d circle")
         title = page.inner_text("#sdk-app-title")

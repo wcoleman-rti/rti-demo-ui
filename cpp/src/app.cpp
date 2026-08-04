@@ -153,7 +153,7 @@ TimerHandle CoreApp::add_timer(int interval_ms,
     });
 
     auto state = std::make_shared<detail::TimerState>(std::move(thread),
-                                                       stop_flag, cv, cv_mutex);
+                                                      stop_flag, cv, cv_mutex);
     // CoreApp retains a reference so the timer keeps running even if the
     // caller discards the returned TimerHandle (matches the Python backend).
     timers_.push_back(state);

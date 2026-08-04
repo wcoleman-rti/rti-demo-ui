@@ -26,7 +26,8 @@ docs/         implementation plan
 
 ```bash
 pip install -e ./python           # editable install (required in v1)
-pip install -e './python[dev]'    # + pytest, playwright, clang-format
+pip install -e './python[dev]'    # + pytest, playwright, clang-format, pre-commit
+pre-commit install                # run repository checks before each commit
 playwright install chromium       # one-time browser binary download, needed for tests/browser
 python examples/py/simple.py      # prints the URL to open, then blocks
 ```
@@ -93,11 +94,12 @@ start their own DDS/worker threads must join those workers themselves after
 ## Quality gates
 
 ```bash
-pip install pre-commit && pre-commit run --all-files   # ruff, clang-format, whitespace/YAML checks
+pre-commit run --all-files  # ruff, clang-format, whitespace/YAML checks
 PYTHONPATH=python pytest tests/py                       # model + HTTP contract
 PYTHONPATH=python pytest tests/browser                  # Playwright (see `playwright install chromium` above)
 cmake --build build && ctest --test-dir build            # C++ model + HTTP contract
 ```
 
-`clang-format` comes from the `dev` extra's pip wheel (no system package/sudo
-required); `pre-commit` picks it up from the active virtualenv.
+`clang-format` and `pre-commit` come from the `dev` extra (no system
+package/sudo required); `pre-commit` picks `clang-format` up from the active
+virtualenv.

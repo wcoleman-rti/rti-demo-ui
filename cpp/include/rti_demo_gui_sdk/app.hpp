@@ -67,8 +67,7 @@ class Model {
 // TimerHandle returned to the caller, so dropping the handle never stops it.
 class TimerState {
    public:
-    TimerState(std::thread thread,
-               std::shared_ptr<std::atomic<bool>> stop_flag,
+    TimerState(std::thread thread, std::shared_ptr<std::atomic<bool>> stop_flag,
                std::shared_ptr<std::condition_variable> cv,
                std::shared_ptr<std::mutex> cv_mutex);
     ~TimerState();
