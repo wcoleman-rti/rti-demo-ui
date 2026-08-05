@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 
-add_executable(rti_demo_gui_sdk_simple simple.cpp)
-target_link_libraries(rti_demo_gui_sdk_simple PRIVATE rti_demo_gui_sdk::core)
+add_executable(rti_demo_ui_simple simple.cpp)
+target_link_libraries(rti_demo_ui_simple PRIVATE rti_demo_ui::core)
 
-add_executable(rti_demo_gui_sdk_gallery gallery.cpp)
-target_link_libraries(rti_demo_gui_sdk_gallery PRIVATE rti_demo_gui_sdk::core)
+add_executable(rti_demo_ui_gallery gallery.cpp)
+target_link_libraries(rti_demo_ui_gallery PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_gallery PRIVATE
+    RTI_DEMO_GALLERY_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/gallery"
+)
 
 option(BUILD_CONNEXT_EXAMPLE "Build the guarded Connext DDS example" OFF)
 if(BUILD_CONNEXT_EXAMPLE)
@@ -31,16 +34,16 @@ if(BUILD_CONNEXT_EXAMPLE)
         LANG C++11
     )
 
-    add_executable(rti_demo_gui_sdk_connext
+    add_executable(rti_demo_ui_connext
         connext.cpp
         ${VehicleState_CXX11_SOURCES}
     )
-    target_include_directories(rti_demo_gui_sdk_connext PRIVATE
+    target_include_directories(rti_demo_ui_connext PRIVATE
         ${VehicleState_CXX11_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}/generated"
     )
-    target_link_libraries(rti_demo_gui_sdk_connext PRIVATE
-        rti_demo_gui_sdk::core
+    target_link_libraries(rti_demo_ui_connext PRIVATE
+        rti_demo_ui::core
         RTIConnextDDS::cpp2_api
     )
 endif()

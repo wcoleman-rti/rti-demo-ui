@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace rti_demo_gui_sdk {
+namespace rti::demo::ui {
 
 using GridBounds = std::array<double, 4>;
 
@@ -106,4 +106,4 @@ inline void require_valid_color(const std::string& color,
 }
 
 }  // namespace detail
-}  // namespace rti_demo_gui_sdk
+}  // namespace rti::demo::ui

@@ -1,7 +1,7 @@
 // HTTP contract tests against the C++ backend. See
 // docs/architecture.md §11.2.
 #include <httplib.h>
-#include <rti_demo_gui_sdk/gui_sdk.hpp>
+#include <rti_demo_ui/gui_sdk.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -9,7 +9,7 @@
 #include <sstream>
 #include <thread>
 
-using namespace rti_demo_gui_sdk;
+using namespace rti::demo::ui;
 
 static int g_failures = 0;
 
@@ -23,7 +23,7 @@ static int g_failures = 0;
 
 int main() {
     const int port = 19280;
-    CoreApp app("Test App", port);
+    DemoUiApp app("Test App", port);
     app.add_card("Fleet");
 
     std::thread server_thread([&app]() { app.run(); });
@@ -37,9 +37,8 @@ int main() {
     };
     Route routes[] = {
         {"/", "text/html; charset=utf-8"},
-        {"/runtime.js", "application/javascript; charset=utf-8"},
-        {"/theme.css", "text/css; charset=utf-8"},
-        {"/gallery", "text/html; charset=utf-8"},
+        {"/sdk/runtime.js", "application/javascript; charset=utf-8"},
+        {"/sdk/theme.css", "text/css; charset=utf-8"},
     };
     for (const auto& route : routes) {
         auto res = client.Get(route.path);
@@ -73,7 +72,7 @@ int main() {
     std::ifstream theme_file(SOURCE_ROOT "/assets/theme.css", std::ios::binary);
     std::ostringstream theme_contents;
     theme_contents << theme_file.rdbuf();
-    auto theme_response = client.Get("/theme.css");
+    auto theme_response = client.Get("/sdk/theme.css");
     CHECK(theme_response != nullptr);
     if (theme_response) CHECK(theme_response->body == theme_contents.str());
 

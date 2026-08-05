@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "rti_demo_gui_sdk/types.hpp"
+#include "rti_demo_ui/types.hpp"
 
-namespace rti_demo_gui_sdk {
+namespace rti::demo::ui {
 
 namespace detail {
 class Model;
@@ -88,4 +88,4 @@ class Card {
     std::vector<std::unique_ptr<Scene2DViewport>> components_;
 };
 
-}  // namespace rti_demo_gui_sdk
+}  // namespace rti::demo::ui

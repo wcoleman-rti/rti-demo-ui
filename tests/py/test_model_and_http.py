@@ -1,4 +1,5 @@
 import json
+import socket
 import threading
 import time
 import urllib.error
@@ -6,11 +7,11 @@ import urllib.request
 
 import pytest
 
-from rti_demo_gui_sdk import CoreApp, Severity
+from rti_demo_ui import DemoUiApp, Severity
 
 
 def make_app(port):
-    return CoreApp(title="Test App", port=port)
+    return DemoUiApp(title="Test App", port=port)
 
 
 def test_revision_increments_once_per_mutation():
@@ -113,9 +114,8 @@ def test_http_contract_routes():
     try:
         for path, content_type in [
             ("/", "text/html; charset=utf-8"),
-            ("/runtime.js", "application/javascript; charset=utf-8"),
-            ("/theme.css", "text/css; charset=utf-8"),
-            ("/gallery", "text/html; charset=utf-8"),
+            ("/sdk/runtime.js", "application/javascript; charset=utf-8"),
+            ("/sdk/theme.css", "text/css; charset=utf-8"),
         ]:
             response = urllib.request.urlopen(base + path)
             assert response.status == 200
@@ -140,3 +140,38 @@ def test_http_contract_routes():
 
 def test_severity_enum_values():
     assert Severity.success.value == "success"
+
+
+def test_stop_before_run_prevents_binding():
+    app = make_app(19087)
+    app.stop()
+    thread = threading.Thread(target=app.run)
+    thread.start()
+    thread.join(1)
+    assert not thread.is_alive()
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 19087))
+
+
+def test_bind_failure_does_not_print_listening_url(capsys):
+    blocker = socket.socket()
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind(("127.0.0.1", 19088))
+    blocker.listen()
+    try:
+        with pytest.raises(OSError):
+            make_app(19088).run()
+        assert "listening" not in capsys.readouterr().out
+    finally:
+        blocker.close()
+
+
+def test_immediate_restart_after_stop():
+    for _ in range(2):
+        app = make_app(19089)
+        thread = threading.Thread(target=app.run)
+        thread.start()
+        time.sleep(0.1)
+        app.stop()
+        thread.join(1)
+        assert not thread.is_alive()

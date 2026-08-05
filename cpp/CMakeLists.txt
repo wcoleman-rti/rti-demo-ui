@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.16)
-project(rti_demo_gui_sdk_core LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,25 +22,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cpp_httplib nlohmann_json)
 
-set(RTI_DEMO_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets")
+set(RTI_DEMO_UI_ASSETS_DIR "${CMAKE_CURRENT_LIST_DIR}/../assets")
 set(RTI_DEMO_ASSET_FILES
-    "${RTI_DEMO_ASSETS_DIR}/index.html"
-    "${RTI_DEMO_ASSETS_DIR}/runtime.js"
-    "${RTI_DEMO_ASSETS_DIR}/theme.css"
-    "${RTI_DEMO_ASSETS_DIR}/gallery.html"
+    "${RTI_DEMO_UI_ASSETS_DIR}/index.html"
+    "${RTI_DEMO_UI_ASSETS_DIR}/runtime.js"
+    "${RTI_DEMO_UI_ASSETS_DIR}/theme.css"
 )
 foreach(asset_file ${RTI_DEMO_ASSET_FILES})
     if(NOT EXISTS "${asset_file}")
-        message(FATAL_ERROR "RTI Demo GUI SDK asset not found: ${asset_file}")
+        message(FATAL_ERROR "RTI Demo UI asset not found: ${asset_file}")
     endif()
 endforeach()
 
-file(READ "${RTI_DEMO_ASSETS_DIR}/index.html" RTI_DEMO_INDEX_HTML)
-file(READ "${RTI_DEMO_ASSETS_DIR}/runtime.js" RTI_DEMO_RUNTIME_JS)
-file(READ "${RTI_DEMO_ASSETS_DIR}/theme.css" RTI_DEMO_THEME_CSS)
-file(READ "${RTI_DEMO_ASSETS_DIR}/gallery.html" RTI_DEMO_GALLERY_HTML)
+file(READ "${RTI_DEMO_UI_ASSETS_DIR}/index.html" RTI_DEMO_INDEX_HTML)
+file(READ "${RTI_DEMO_UI_ASSETS_DIR}/runtime.js" RTI_DEMO_RUNTIME_JS)
+file(READ "${RTI_DEMO_UI_ASSETS_DIR}/theme.css" RTI_DEMO_THEME_CSS)
 
-foreach(asset_var RTI_DEMO_INDEX_HTML RTI_DEMO_RUNTIME_JS RTI_DEMO_THEME_CSS RTI_DEMO_GALLERY_HTML)
+foreach(asset_var RTI_DEMO_INDEX_HTML RTI_DEMO_RUNTIME_JS RTI_DEMO_THEME_CSS)
     string(FIND "${${asset_var}}" "RTI_ASSET" RTI_DEMO_ASSET_DELIMITER_INDEX)
     if(NOT RTI_DEMO_ASSET_DELIMITER_INDEX EQUAL -1)
         message(FATAL_ERROR "${asset_var} contains the reserved raw-string delimiter RTI_ASSET")
@@ -55,12 +52,12 @@ configure_file(
     @ONLY
 )
 
-add_library(rti_demo_gui_sdk_core STATIC
-    src/app.cpp
+add_library(rti_demo_ui_core STATIC
+    src/demo_ui_app.cpp
     src/components.cpp
 )
 
-target_include_directories(rti_demo_gui_sdk_core
+target_include_directories(rti_demo_ui_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
@@ -68,19 +65,22 @@ target_include_directories(rti_demo_gui_sdk_core
         "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
 
-target_link_libraries(rti_demo_gui_sdk_core
+target_link_libraries(rti_demo_ui_core
     PUBLIC httplib::httplib
     PRIVATE nlohmann_json::nlohmann_json
 )
 
-add_library(rti_demo_gui_sdk::core ALIAS rti_demo_gui_sdk_core)
+add_library(rti_demo_ui::core ALIAS rti_demo_ui_core)
 
-if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-    option(RTI_DEMO_BUILD_EXAMPLES "Build SDK examples" ON)
-    include(CTest)
-else()
-    option(RTI_DEMO_BUILD_EXAMPLES "Build SDK examples" OFF)
+if(NOT DEFINED RTI_DEMO_TOP_LEVEL_BUILD)
+    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+        set(RTI_DEMO_TOP_LEVEL_BUILD ON)
+    else()
+        set(RTI_DEMO_TOP_LEVEL_BUILD OFF)
+    endif()
 endif()
+
+option(RTI_DEMO_BUILD_EXAMPLES "Build SDK examples" ${RTI_DEMO_TOP_LEVEL_BUILD})
 
 if(RTI_DEMO_BUILD_EXAMPLES)
     add_subdirectory(
@@ -89,7 +89,7 @@ if(RTI_DEMO_BUILD_EXAMPLES)
     )
 endif()
 
-if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+if(BUILD_TESTING AND RTI_DEMO_TOP_LEVEL_BUILD)
     add_subdirectory(
         "${CMAKE_CURRENT_SOURCE_DIR}/../tests/cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/tests"

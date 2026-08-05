@@ -1,4 +1,4 @@
-// RTI Demo GUI SDK Core — shared browser runtime.
+// RTI Demo UI — shared browser runtime.
 // Polls GET /api/state every 200ms, reconciles SDK-owned DOM/SVG by stable
 // IDs, and interpolates entity poses between snapshots.
 (function () {

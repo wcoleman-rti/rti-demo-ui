@@ -1,13 +1,13 @@
 // Model tests: validation, revision counting, atomic link removal, ordering.
 // See docs/architecture.md §11.1.
-#include <rti_demo_gui_sdk/gui_sdk.hpp>
+#include <rti_demo_ui/gui_sdk.hpp>
 
 #include <cassert>
 #include <chrono>
 #include <cstdio>
 #include <thread>
 
-using namespace rti_demo_gui_sdk;
+using namespace rti::demo::ui;
 
 static int g_failures = 0;
 
@@ -31,7 +31,7 @@ static int g_failures = 0;
     } while (0)
 
 void test_revision_increments_once_per_mutation() {
-    CoreApp app("Test", 19180);
+    DemoUiApp app("Test", 19180);
     Card* card = app.add_card("Fleet");
     Scene2DViewport* scene = card->add_scene_2d(600, 400, {-100.0, 100.0, -100.0, 100.0});
     scene->add_entity("v1", 0.0, 0.0);
@@ -39,7 +39,7 @@ void test_revision_increments_once_per_mutation() {
 }
 
 void test_failed_mutation_does_not_change_revision() {
-    CoreApp app("Test", 19181);
+    DemoUiApp app("Test", 19181);
     Card* card = app.add_card("Fleet");
     Scene2DViewport* scene = card->add_scene_2d(600, 400, {-100.0, 100.0, -100.0, 100.0});
     scene->add_entity("v1", 0.0, 0.0);
@@ -47,7 +47,7 @@ void test_failed_mutation_does_not_change_revision() {
 }
 
 void test_entity_removal_removes_links() {
-    CoreApp app("Test", 19182);
+    DemoUiApp app("Test", 19182);
     Card* card = app.add_card("Fleet");
     Scene2DViewport* scene = card->add_scene_2d(600, 400, {-100.0, 100.0, -100.0, 100.0});
     scene->add_entity("v1", 0.0, 0.0);
@@ -59,7 +59,7 @@ void test_entity_removal_removes_links() {
 }
 
 void test_validation_errors() {
-    CoreApp app("Test", 19183);
+    DemoUiApp app("Test", 19183);
     Card* card = app.add_card("Fleet");
     EXPECT_THROWS(card->add_scene_2d(-1, 400, {-100.0, 100.0, -100.0, 100.0}));
     EXPECT_THROWS(card->add_scene_2d(600, 400, {100.0, -100.0, -100.0, 100.0}));
@@ -78,7 +78,7 @@ void test_validation_errors() {
 }
 
 void test_timer_cancel_idempotent() {
-    CoreApp app("Test", 19184);
+    DemoUiApp app("Test", 19184);
     int counter = 0;
     TimerHandle handle = app.add_timer(20, [&counter]() { ++counter; });
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

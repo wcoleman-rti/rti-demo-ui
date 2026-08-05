@@ -1,15 +1,19 @@
-// Gallery example: serves the shared /gallery asset (see
-// docs/architecture.md §10.4).
+// Gallery example: serves an application-owned static root.
+#include <filesystem>
 #include <iostream>
-#include <rti_demo_gui_sdk/gui_sdk.hpp>
+#include <rti_demo_ui/gui_sdk.hpp>
+
+#include "console_control.hpp"
 
 int main() {
-    rti_demo_gui_sdk::CoreApp app("Gallery");
-    // "/" is intentionally blank here: this example adds no cards, so the
-    // widget gallery only lives at "/gallery".
-    std::cout << "Open http://localhost:8080/gallery in your browser to view "
+    rti_demo_ui_examples::ConsoleControl control;
+    rti::demo::ui::DemoUiApp app("Gallery", 8080, "0.0.0.0",
+                                 std::filesystem::path(RTI_DEMO_GALLERY_ROOT));
+    control.start([&app]() { app.stop(); });
+    std::cout << "Open http://localhost:8080/ in your browser to view "
                  "the widget gallery."
               << std::endl;
     app.run();
+    control.finish();
     return 0;
 }

@@ -22,7 +22,7 @@ from .types import (
 
 
 class Card:
-    """Titled grouping of components. Owned exclusively by CoreApp."""
+    """Titled grouping of components. Owned exclusively by DemoUiApp."""
 
     def __init__(self, model, card_id: str, title: str) -> None:
         require_non_empty(title, "title", "Card: ")

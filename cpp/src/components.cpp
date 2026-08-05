@@ -1,13 +1,13 @@
 // Implements Card and Scene2DViewport (see docs/architecture.md
 // §7.2-§7.4).
-#include "rti_demo_gui_sdk/components.hpp"
+#include "rti_demo_ui/components.hpp"
 
 #include <algorithm>
 #include <sstream>
 
-#include "rti_demo_gui_sdk/app.hpp"
+#include "rti_demo_ui/demo_ui_app.hpp"
 
-namespace rti_demo_gui_sdk {
+namespace rti::demo::ui {
 
 namespace {
 
@@ -216,4 +216,4 @@ std::string Card::to_json_locked() const {
     return out.str();
 }
 
-}  // namespace rti_demo_gui_sdk
+}  // namespace rti::demo::ui

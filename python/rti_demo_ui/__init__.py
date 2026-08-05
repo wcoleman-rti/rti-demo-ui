@@ -1,11 +1,11 @@
-"""RTI Demo GUI SDK Core (Python)."""
+"""RTI Demo UI (Python)."""
 
-from .app import CoreApp, TimerHandle
+from .demo_ui_app import DemoUiApp, TimerHandle
 from .components import Card, Scene2DViewport
 from .types import Freshness, Severity
 
 __all__ = [
-    "CoreApp",
+    "DemoUiApp",
     "TimerHandle",
     "Card",
     "Scene2DViewport",

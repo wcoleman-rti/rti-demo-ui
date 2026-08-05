@@ -4,11 +4,11 @@ moving one entity. See docs/architecture.md §10.1.
 
 import math
 
-from rti_demo_gui_sdk import CoreApp
+from rti_demo_ui import DemoUiApp
 
 
 def main() -> None:
-    app = CoreApp(title="Simple Demo")
+    app = DemoUiApp(title="Simple Demo")
     card = app.add_card("Fleet Telemetry")
     scene = card.add_scene_2d(
         width=600, height=400, bounds=(-100.0, 100.0, -100.0, 100.0)
@@ -30,7 +30,12 @@ def main() -> None:
         )
 
     app.add_timer(100, tick)
-    app.run()
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        app.stop()
 
 
 if __name__ == "__main__":

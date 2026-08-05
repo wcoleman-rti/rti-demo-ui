@@ -1,0 +1,76 @@
+import http.client
+import json
+import shutil
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from rti_demo_ui import DemoUiApp
+
+
+FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures"
+VECTORS = json.loads((FIXTURE_ROOT / "static_route_vectors.json").read_text())
+
+
+def _prepare_static_root(destination: Path) -> Path:
+    root = destination / "web"
+    shutil.copytree(FIXTURE_ROOT / "static_root", root)
+    (root / "inside-link.txt").symlink_to("symlink-target.txt")
+    (root / "broken-link.txt").symlink_to("missing-target.txt")
+    (root / "directory-link").symlink_to("nested", target_is_directory=True)
+    outside = destination / "outside.txt"
+    outside.write_text("outside\n")
+    (root / "escape-link.txt").symlink_to(outside)
+    return root
+
+
+def _request(port: int, path: str):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    connection.request("GET", path)
+    response = connection.getresponse()
+    body = response.read()
+    headers = dict(response.getheaders())
+    connection.close()
+    return response.status, headers, body
+
+
+@pytest.fixture
+def custom_app(tmp_path):
+    root = _prepare_static_root(tmp_path)
+    app = DemoUiApp("Custom fixture", port=19390, host="127.0.0.1", static_root=root)
+    thread = threading.Thread(target=app.run, daemon=True)
+    thread.start()
+    time.sleep(0.2)
+    yield app, root
+    app.stop()
+    thread.join(2)
+    assert not thread.is_alive()
+
+
+def test_static_root_vectors(custom_app):
+    app, _root = custom_app
+    del app
+    for vector in VECTORS:
+        status, headers, body = _request(19390, vector["path"])
+        assert status == vector["status"], vector["name"]
+        assert headers["Content-Type"] == vector["content_type"], vector["name"]
+        assert headers["X-Content-Type-Options"] == "nosniff", vector["name"]
+        if "body_contains" in vector:
+            assert vector["body_contains"].encode() in body, vector["name"]
+        if vector["response_class"] == "api_json":
+            json.loads(body)
+
+
+def test_static_root_rejected_before_run(tmp_path):
+    with pytest.raises(ValueError, match="static_root"):
+        DemoUiApp("invalid", static_root=tmp_path / "missing")
+    file_path = tmp_path / "not-a-directory"
+    file_path.write_text("file")
+    with pytest.raises(ValueError, match="static_root"):
+        DemoUiApp("invalid", static_root=file_path)
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    with pytest.raises(ValueError, match="index.html"):
+        DemoUiApp("invalid", static_root=empty_root)

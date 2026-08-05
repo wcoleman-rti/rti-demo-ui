@@ -10,7 +10,7 @@ import time
 import rti.connextdds as dds
 import rti.types as idl
 
-from rti_demo_gui_sdk import CoreApp
+from rti_demo_ui import DemoUiApp
 
 
 @idl.struct
@@ -22,7 +22,7 @@ class VehicleState:
 
 
 def main() -> None:
-    app = CoreApp(title="Connext Demo")
+    app = DemoUiApp(title="Connext Demo")
     card = app.add_card("Fleet Telemetry")
     scene = card.add_scene_2d(
         width=600, height=400, bounds=(-100.0, 100.0, -100.0, 100.0)
@@ -66,10 +66,13 @@ def main() -> None:
 
     try:
         app.run()
+    except KeyboardInterrupt:
+        pass
     finally:
         stop_event.set()
         writer_thread.join()
         reader_thread.join()
+        app.stop()
 
 
 if __name__ == "__main__":

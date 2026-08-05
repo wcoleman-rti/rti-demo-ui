@@ -4,15 +4,18 @@
 #include <chrono>
 #include <cmath>
 #include <dds/dds.hpp>
-#include <rti_demo_gui_sdk/gui_sdk.hpp>
+#include <rti_demo_ui/gui_sdk.hpp>
 #include <thread>
 
 #include "VehicleState.hpp"
+#include "console_control.hpp"
 
 int main() {
-    using namespace rti_demo_gui_sdk;
+    using namespace rti::demo::ui;
 
-    CoreApp app("Connext Demo");
+    rti_demo_ui_examples::ConsoleControl control;
+    DemoUiApp app("Connext Demo");
+    control.start([&app]() { app.stop(); });
     Card* card = app.add_card("Fleet Telemetry");
     Scene2DViewport* scene =
         card->add_scene_2d(600, 400, {-100.0, 100.0, -100.0, 100.0});
@@ -61,5 +64,6 @@ int main() {
     stop_reader.store(true);
     writer_thread.join();
     reader_thread.join();
+    control.finish();
     return 0;
 }

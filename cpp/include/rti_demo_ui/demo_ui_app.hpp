@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -12,17 +13,17 @@
 #include <thread>
 #include <vector>
 
-#include "rti_demo_gui_sdk/components.hpp"
+#include "rti_demo_ui/components.hpp"
 
 namespace httplib {
 class Server;
 }  // namespace httplib
 
-namespace rti_demo_gui_sdk {
+namespace rti::demo::ui {
 
 namespace detail {
 
-// Internal model state shared by CoreApp, Card, and Scene2DViewport.
+// Internal model state shared by DemoUiApp, Card, and Scene2DViewport.
 class Model {
    public:
     explicit Model(std::string title) : title_(std::move(title)) {}
@@ -31,7 +32,7 @@ class Model {
 
     void ensure_running() const {
         if (!running_) {
-            throw std::runtime_error("CoreApp: model is stopped");
+            throw std::runtime_error("DemoUiApp: model is stopped");
         }
     }
 
@@ -63,7 +64,7 @@ class Model {
 };
 
 // Thread + synchronization state for one SDK-owned periodic timer. Shared
-// between CoreApp (which keeps the timer alive/cancels it at stop()) and any
+// between DemoUiApp (which keeps the timer alive/cancels it at stop()) and any
 // TimerHandle returned to the caller, so dropping the handle never stops it.
 class TimerState {
    public:
@@ -83,7 +84,7 @@ class TimerState {
 
 }  // namespace detail
 
-// Cancelable reference to an SDK-owned periodic timer. CoreApp keeps the
+// Cancelable reference to an SDK-owned periodic timer. DemoUiApp keeps the
 // underlying thread running independent of this handle's lifetime; call
 // cancel() explicitly to stop it early.
 class TimerHandle {
@@ -97,14 +98,15 @@ class TimerHandle {
     std::shared_ptr<detail::TimerState> state_;
 };
 
-class CoreApp {
+class DemoUiApp {
    public:
-    explicit CoreApp(std::string title, int port = 8080,
-                     std::string host = "0.0.0.0");
-    ~CoreApp();
+    explicit DemoUiApp(std::string title, int port = 8080,
+                       std::string host = "0.0.0.0",
+                       std::filesystem::path static_root = {});
+    ~DemoUiApp();
 
-    CoreApp(const CoreApp&) = delete;
-    CoreApp& operator=(const CoreApp&) = delete;
+    DemoUiApp(const DemoUiApp&) = delete;
+    DemoUiApp& operator=(const DemoUiApp&) = delete;
 
     Card* add_card(const std::string& title);
     TimerHandle add_timer(int interval_ms, std::function<void()> callback);
@@ -114,10 +116,11 @@ class CoreApp {
    private:
     std::string host_;
     int port_;
+    std::filesystem::path static_root_;
     detail::Model model_;
     std::unique_ptr<httplib::Server> server_;
     std::vector<std::shared_ptr<detail::TimerState>> timers_;
     bool stopped_ = false;
 };
 
-}  // namespace rti_demo_gui_sdk
+}  // namespace rti::demo::ui
