@@ -27,7 +27,7 @@ docs/         implementation plan
 ```bash
 pip install -e ./python           # editable install (required in v1)
 pip install -e './python[dev]'    # + pytest, playwright, clang-format, pre-commit
-pre-commit install                # run repository checks before each commit
+pre-commit install --install-hooks # install and provision checks before commits
 # One-time browser binary download, needed for tests/browser.
 playwright install chromium
 python examples/py/simple.py      # prints the URL to open, then blocks
