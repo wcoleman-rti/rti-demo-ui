@@ -1,5 +1,5 @@
 """Basic RTI Connext DDS pub/sub wired into an asyncio TaskGroup. Requires
-rti.connext, installed separately (not an SDK runtime dependency).
+rti.connextdds and rti.types, installed separately (not an SDK runtime dependency).
 """
 
 import asyncio

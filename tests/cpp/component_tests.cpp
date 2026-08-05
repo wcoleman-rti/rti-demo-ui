@@ -54,7 +54,7 @@ void test_entity_removal_removes_links() {
     scene->add_entity("v2", 1.0, 1.0);
     scene->add_link("v1", "v2");
     scene->remove_entity("v1");
-    std::string json = scene->to_json_locked();
+    std::string json = scene->to_json_locked().dump();
     CHECK(json.find("\"links\":[]") != std::string::npos);
 }
 

@@ -7,12 +7,9 @@
 
 int main() {
     rti_demo_ui_examples::ConsoleControl control;
-    rti::demo::ui::DemoUiApp app("Gallery", 8080, "0.0.0.0",
+    rti::demo::ui::DemoUiApp app("Gallery", 0, "127.0.0.1",
                                  std::filesystem::path(RTI_DEMO_GALLERY_ROOT));
     control.start([&app]() { app.stop(); });
-    std::cout << "Open http://localhost:8080/ in your browser to view "
-                 "the widget gallery."
-              << std::endl;
     app.run();
     control.finish();
     return 0;

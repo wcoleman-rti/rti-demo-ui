@@ -22,14 +22,23 @@ static int g_failures = 0;
     } while (0)
 
 int main() {
-    const int port = 19280;
-    DemoUiApp app("Test App", port);
+    DemoUiApp app("Test App");
+    app.register_command(
+        "echo",
+        CommandSchema(Json{{"type", "object"},
+                           {"properties", Json{{"message", Json{{"type", "string"}}}}},
+                           {"required", Json::array({"message"})},
+                           {"additionalProperties", false}}),
+        [](const Json& payload) { return payload; });
     app.add_card("Fleet");
 
     std::thread server_thread([&app]() { app.run(); });
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    app.wait_until_ready();
+    const auto info = app.ready_info();
+    CHECK(info.has_value());
+    if (!info) return 1;
 
-    httplib::Client client("127.0.0.1", port);
+    httplib::Client client(info->host, info->port);
 
     struct Route {
         const char* path;
@@ -38,6 +47,7 @@ int main() {
     Route routes[] = {
         {"/", "text/html; charset=utf-8"},
         {"/sdk/runtime.js", "application/javascript; charset=utf-8"},
+        {"/sdk/client.js", "application/javascript; charset=utf-8"},
         {"/sdk/theme.css", "text/css; charset=utf-8"},
     };
     for (const auto& route : routes) {
@@ -57,8 +67,37 @@ int main() {
     auto state = client.Get("/api/state");
     CHECK(state != nullptr && state->status == 200);
     if (state) {
-        CHECK(state->body.find("\"schema_version\":1") != std::string::npos);
-        CHECK(state->body.find("\"title\":\"Test App\"") != std::string::npos);
+        const auto snapshot = Json::parse(state->body);
+        CHECK(snapshot["schema_version"] == 2);
+        CHECK(snapshot["title"] == "Test App");
+        CHECK(snapshot["data"].is_object());
+        CHECK(snapshot["cards"].size() == 1);
+    }
+
+    httplib::Headers origin_headers{{"Origin", info->url}};
+    auto capability = client.Get("/api/command-capability", origin_headers);
+    CHECK(capability != nullptr && capability->status == 200);
+    if (capability) {
+        const auto capability_body = Json::parse(capability->body);
+        CHECK(capability_body["capability"].is_string());
+        httplib::Headers command_headers = origin_headers;
+        command_headers.emplace("X-RTI-Demo-Command-Capability",
+                                capability_body["capability"].get<std::string>());
+        auto command = client.Post(
+            "/api/commands/echo", command_headers,
+            R"({"message":"hello"})", "application/json");
+        CHECK(command != nullptr && command->status == 200);
+        if (command) {
+            const auto command_body = Json::parse(command->body);
+            CHECK(command_body["ok"] == true);
+            CHECK(command_body["result"]["message"] == "hello");
+        }
+        auto oversized = client.Post(
+            "/api/commands/echo", command_headers,
+            std::string(64 * 1024 + 1, 'x'), "application/json");
+        CHECK(oversized != nullptr && oversized->status == 413);
+        if (oversized) CHECK(Json::parse(oversized->body)["error"]["code"] ==
+                             "payload_too_large");
     }
 
     auto missing = client.Get("/does-not-exist");

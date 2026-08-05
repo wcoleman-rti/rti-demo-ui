@@ -1,6 +1,6 @@
 """Playwright browser tests run against the Python backend (shared assets mean
-the same assertions apply to the C++ backend — see docs/architecture.md
-§11.3). Run explicitly: `pytest tests/py/test_browser.py`.
+the same assertions apply to the C++ backend — see docs/architecture.md.
+Run explicitly: `pytest tests/browser/test_browser.py`.
 """
 
 import asyncio
@@ -22,13 +22,13 @@ def _start_app_on_thread(app):
 
     thread = threading.Thread(target=run_app, daemon=True)
     thread.start()
-    asyncio.run_coroutine_threadsafe(app._wait_until_ready(), loop).result(2)
+    asyncio.run_coroutine_threadsafe(app.wait_until_ready(), loop).result(2)
     return loop, thread
 
 
 @pytest.fixture
 def running_app():
-    app = DemoUiApp(title="Browser Test", port=19380)
+    app = DemoUiApp(title="Browser Test")
     card = app.add_card("Fleet Telemetry")
     scene = card.add_scene_2d(600, 400, (-100.0, 100.0, -100.0, 100.0))
     scene.add_entity("vehicle-1", 0.0, 0.0, status="warning")
@@ -36,7 +36,7 @@ def running_app():
     scene.add_link("vehicle-1", "vehicle-2")
     loop, thread = _start_app_on_thread(app)
     try:
-        yield app, "http://127.0.0.1:19380"
+        yield app, app.ready_info.url
     finally:
         asyncio.run_coroutine_threadsafe(app.stop(), loop).result(2)
         thread.join(2)
@@ -47,10 +47,10 @@ def running_app():
 @pytest.fixture
 def running_gallery_app():
     static_root = Path(__file__).parents[2] / "examples" / "web" / "gallery"
-    app = DemoUiApp(title="Gallery", port=19381, static_root=static_root)
+    app = DemoUiApp(title="Gallery", static_root=static_root)
     loop, thread = _start_app_on_thread(app)
     try:
-        yield app, "http://127.0.0.1:19381"
+        yield app, app.ready_info.url
     finally:
         asyncio.run_coroutine_threadsafe(app.stop(), loop).result(2)
         thread.join(2)

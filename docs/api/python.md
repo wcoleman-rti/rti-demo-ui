@@ -32,7 +32,9 @@ asyncio.run(main())
 ```
 
 The app instance is single-use. `stop()` is idempotent and waits for aiohttp
-cleanup. Component factory and mutation methods remain synchronous, but after
+cleanup. The default host is `127.0.0.1` and port `0`; call
+`await app.wait_until_ready()` and inspect `app.ready_info` for the actual URL.
+Component factory and mutation methods remain synchronous, but after
 startup they must run on the app's owner event loop and thread. A foreign
 thread must schedule its work with `loop.call_soon_threadsafe`.
 
@@ -79,3 +81,12 @@ route and security contract.
 
 For complete signatures and validation semantics, use the Python type hints,
 docstrings, and [architecture](../architecture.md) as the source of truth.
+
+`DemoUiApp.set_data(value)` and `update_data(path, value, create_missing=False)`
+manage application-owned JSON state. `Card` also provides `add_table`,
+`add_metric`, `add_text`, `add_badge`, `add_log`, and
+`add_custom_component`; returned handles expose the live mutation methods
+described by their type hints. Register opt-in actions with
+`register_command(name, schema, handler, confirmation=None)`. Command schemas
+use the shared restricted subset, handlers receive validated objects, and
+responses are JSON envelopes.

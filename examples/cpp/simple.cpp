@@ -1,5 +1,5 @@
 // No Connext/DDS dependency — DemoUiApp, Card, Scene2DViewport, one synthetic
-// timer (see docs/architecture.md §10.1).
+// timer (see docs/architecture.md, Runtime Flow and Ownership).
 #include <cmath>
 #include <rti_demo_ui/gui_sdk.hpp>
 

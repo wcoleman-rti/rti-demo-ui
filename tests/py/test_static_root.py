@@ -45,14 +45,14 @@ def _start_app_on_thread(app):
 
     thread = threading.Thread(target=run_app, daemon=True)
     thread.start()
-    asyncio.run_coroutine_threadsafe(app._wait_until_ready(), loop).result(2)
+    asyncio.run_coroutine_threadsafe(app.wait_until_ready(), loop).result(2)
     return loop, thread
 
 
 @pytest.fixture
 def custom_app(tmp_path):
     root = _prepare_static_root(tmp_path)
-    app = DemoUiApp("Custom fixture", port=19390, host="127.0.0.1", static_root=root)
+    app = DemoUiApp("Custom fixture", static_root=root)
     loop, thread = _start_app_on_thread(app)
     try:
         yield app, root
@@ -65,9 +65,9 @@ def custom_app(tmp_path):
 
 def test_static_root_vectors(custom_app):
     app, _root = custom_app
-    del app
+    port = app.ready_info.port
     for vector in VECTORS:
-        status, headers, body = _request(19390, vector["path"])
+        status, headers, body = _request(port, vector["path"])
         assert status == vector["status"], vector["name"]
         assert headers["Content-Type"] == vector["content_type"], vector["name"]
         assert headers["X-Content-Type-Options"] == "nosniff", vector["name"]

@@ -13,6 +13,10 @@ inline const char* embedded_runtime_js() {
     return R"RTI_ASSET(@RTI_DEMO_RUNTIME_JS@)RTI_ASSET";
 }
 
+inline const char* embedded_client_js() {
+    return R"RTI_ASSET(@RTI_DEMO_CLIENT_JS@)RTI_ASSET";
+}
+
 inline const char* embedded_theme_css() {
     return R"RTI_ASSET(@RTI_DEMO_THEME_CSS@)RTI_ASSET";
 }

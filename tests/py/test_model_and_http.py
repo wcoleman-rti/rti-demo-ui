@@ -21,7 +21,7 @@ def configure_scene(app):
 
 async def start_app(app):
     task = asyncio.create_task(app.run())
-    await app._wait_until_ready()
+    await app.wait_until_ready()
     return task
 
 
@@ -59,8 +59,8 @@ def test_entity_removal_removes_links():
     scene.add_link("v1", "v2")
     scene.remove_entity("v1")
     snapshot = scene.to_dict()
-    assert snapshot["links"] == []
-    assert [entity["id"] for entity in snapshot["entities"]] == ["v2"]
+    assert snapshot["data"]["links"] == []
+    assert [entity["id"] for entity in snapshot["data"]["entities"]] == ["v2"]
 
 
 def test_insertion_order_stable():
@@ -69,7 +69,7 @@ def test_insertion_order_stable():
     scene.add_entity("v3", 0.0, 0.0)
     scene.add_entity("v1", 0.0, 0.0)
     scene.add_entity("v2", 0.0, 0.0)
-    assert [entity["id"] for entity in scene.to_dict()["entities"]] == [
+    assert [entity["id"] for entity in scene.to_dict()["data"]["entities"]] == [
         "v3",
         "v1",
         "v2",
@@ -106,31 +106,108 @@ def test_validation_errors():
 
 @pytest.mark.asyncio
 async def test_http_contract_routes():
-    app = make_app(19086)
+    app = make_app(0)
     run_task = await start_app(app)
     try:
+        base_url = app.ready_info.url
         async with ClientSession() as session:
             for path, content_type in [
                 ("/", "text/html; charset=utf-8"),
                 ("/sdk/runtime.js", "application/javascript; charset=utf-8"),
+                ("/sdk/client.js", "application/javascript; charset=utf-8"),
                 ("/sdk/theme.css", "text/css; charset=utf-8"),
             ]:
-                response = await session.get(f"http://127.0.0.1:19086{path}")
+                response = await session.get(f"{base_url}{path}")
                 assert response.status == 200
                 assert response.headers["Content-Type"] == content_type
                 assert response.headers["X-Content-Type-Options"] == "nosniff"
 
-            health = await session.get("http://127.0.0.1:19086/api/health")
+            health = await session.get(f"{base_url}/api/health")
             assert json.loads(await health.read()) == {"status": "ok"}
 
-            state = await session.get("http://127.0.0.1:19086/api/state")
+            state = await session.get(f"{base_url}/api/state")
             payload = json.loads(await state.read())
-            assert payload["schema_version"] == 1
+            assert payload["schema_version"] == 2
             assert payload["title"] == "Test App"
+            assert payload["data"] == {}
 
-            missing = await session.get("http://127.0.0.1:19086/does-not-exist")
+            missing = await session.get(f"{base_url}/does-not-exist")
             assert missing.status == 404
             assert json.loads(await missing.read()) == {"error": "not found"}
+    finally:
+        await app.stop()
+        await run_task
+
+
+@pytest.mark.asyncio
+async def test_command_contract_and_busy_admission():
+    app = make_app(0)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def echo(payload):
+        started.set()
+        await release.wait()
+        return payload
+
+    app.register_command(
+        "echo",
+        {
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+        echo,
+    )
+    run_task = await start_app(app)
+    try:
+        base_url = app.ready_info.url
+        async with ClientSession() as session:
+            capability_response = await session.get(
+                f"{base_url}/api/command-capability",
+                headers={"Origin": base_url},
+            )
+            assert capability_response.status == 200
+            capability = (await capability_response.json())["capability"]
+            headers = {
+                "Origin": base_url,
+                "X-RTI-Demo-Command-Capability": capability,
+            }
+            first = asyncio.create_task(
+                session.post(
+                    f"{base_url}/api/commands/echo",
+                    headers=headers,
+                    json={"message": "hello"},
+                )
+            )
+            await started.wait()
+            busy = await session.post(
+                f"{base_url}/api/commands/echo",
+                headers=headers,
+                json={"message": "again"},
+            )
+            assert busy.status == 409
+            assert (await busy.json())["error"]["code"] == "command_busy"
+            release.set()
+            response = await first
+            assert response.status == 200
+            assert (await response.json())["result"] == {"message": "hello"}
+
+            invalid = await session.post(
+                f"{base_url}/api/commands/echo",
+                headers=headers,
+                json={},
+            )
+            assert invalid.status == 400
+            assert (await invalid.json())["error"]["code"] == "validation_error"
+            oversized = await session.post(
+                f"{base_url}/api/commands/echo",
+                headers=headers,
+                data="x" * (64 * 1024 + 1),
+            )
+            assert oversized.status == 413
+            assert (await oversized.json())["error"]["code"] == "payload_too_large"
     finally:
         await app.stop()
         await run_task
