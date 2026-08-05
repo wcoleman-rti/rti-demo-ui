@@ -11,6 +11,10 @@ python3 -m venv .venv
 pre-commit install --install-hooks
 ```
 
+The development extra pins `pytest==8.4.2` and `pytest-asyncio==1.4.0`.
+These versions support Python 3.11+ and avoid the Python 3.14 event-loop
+policy deprecation warnings emitted by older `pytest-asyncio` releases.
+
 The C++ configure step fetches pinned `cpp-httplib` and `nlohmann/json` only
 when the local CMake cache does not already contain them.
 

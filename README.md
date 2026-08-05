@@ -26,7 +26,8 @@ docs/         architecture, API, frontend, lifecycle, and contributor guides
 
 ```bash
 pip install -e .                  # editable install
-pip install -e '.[dev]'           # + pytest, playwright, clang-format, pre-commit
+pip install -e '.[dev]'           # + test, browser, and commit tooling
+# Pins: pytest 8.4.2, pytest-asyncio 1.4.0
 pre-commit install --install-hooks # install and provision checks before commits
 # One-time browser binary download, needed for tests/browser.
 playwright install chromium
