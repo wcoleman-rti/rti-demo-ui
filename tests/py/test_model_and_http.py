@@ -164,16 +164,37 @@ async def test_command_contract_and_busy_admission():
     try:
         base_url = app.ready_info.url
         async with ClientSession() as session:
+            browser_capability_response = await session.get(
+                f"{base_url}/api/command-capability"
+            )
+            assert browser_capability_response.status == 200
+            browser_capability = (await browser_capability_response.json())[
+                "capability"
+            ]
+
+            mismatched_host_response = await session.get(
+                f"{base_url}/api/command-capability",
+                headers={"Host": "localhost:1"},
+            )
+            assert mismatched_host_response.status == 404
+
             capability_response = await session.get(
                 f"{base_url}/api/command-capability",
                 headers={"Origin": base_url},
             )
             assert capability_response.status == 200
             capability = (await capability_response.json())["capability"]
+            assert browser_capability == capability
             headers = {
                 "Origin": base_url,
                 "X-RTI-Demo-Command-Capability": capability,
             }
+            missing_origin = await session.post(
+                f"{base_url}/api/commands/echo",
+                headers={"X-RTI-Demo-Command-Capability": browser_capability},
+                json={"message": "missing origin"},
+            )
+            assert missing_origin.status == 403
             first = asyncio.create_task(
                 session.post(
                     f"{base_url}/api/commands/echo",

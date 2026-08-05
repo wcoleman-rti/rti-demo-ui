@@ -75,14 +75,32 @@ int main() {
     }
 
     httplib::Headers origin_headers{{"Origin", info->url}};
+    auto browser_capability = client.Get("/api/command-capability");
+    CHECK(browser_capability != nullptr && browser_capability->status == 200);
+    httplib::Headers mismatched_host_headers{{"Host", "localhost:1"}};
+    auto mismatched_host = client.Get("/api/command-capability",
+                                      mismatched_host_headers);
+    CHECK(mismatched_host != nullptr && mismatched_host->status == 404);
     auto capability = client.Get("/api/command-capability", origin_headers);
     CHECK(capability != nullptr && capability->status == 200);
     if (capability) {
         const auto capability_body = Json::parse(capability->body);
         CHECK(capability_body["capability"].is_string());
+        CHECK(browser_capability != nullptr);
+        if (browser_capability) {
+            CHECK(Json::parse(browser_capability->body)["capability"] ==
+                  capability_body["capability"]);
+        }
         httplib::Headers command_headers = origin_headers;
         command_headers.emplace("X-RTI-Demo-Command-Capability",
                                 capability_body["capability"].get<std::string>());
+        httplib::Headers missing_origin_headers{
+            {"X-RTI-Demo-Command-Capability",
+             capability_body["capability"].get<std::string>()}};
+        auto missing_origin = client.Post(
+            "/api/commands/echo", missing_origin_headers,
+            R"({"message":"missing origin"})", "application/json");
+        CHECK(missing_origin != nullptr && missing_origin->status == 403);
         auto command = client.Post(
             "/api/commands/echo", command_headers,
             R"({"message":"hello"})", "application/json");

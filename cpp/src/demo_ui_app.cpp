@@ -633,7 +633,13 @@ void DemoUiApp::run() {
                                                    httplib::Response& res) {
         const auto info = ready_info();
         const std::string origin = req.get_header_value("Origin");
-        if (commands_.empty() || !info || origin != info->url) {
+        const bool trusted_origin =
+            req.has_header("Origin") && origin == (info ? info->url : "");
+        const bool trusted_local_host =
+            !req.has_header("Origin") && info &&
+            "http://" + req.get_header_value("Host") == info->url;
+        if (commands_.empty() || !info ||
+            (!trusted_origin && !trusted_local_host)) {
             send_not_found(res);
             return;
         }

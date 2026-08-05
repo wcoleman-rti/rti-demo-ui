@@ -330,6 +330,15 @@ class DemoUiApp:
             return False
         return request.headers.get("Origin") == self._ready_info.url
 
+    def _command_capability_request_is_trusted(self, request: web.Request) -> bool:
+        if self._command_origin_is_trusted(request):
+            return True
+        if self._ready_info is None or "Origin" in request.headers:
+            return False
+        return request.scheme == "http" and (
+            f"http://{request.host}" == self._ready_info.url
+        )
+
     @staticmethod
     def _decode_command_name(encoded_name: str) -> Optional[str]:
         try:
@@ -344,7 +353,9 @@ class DemoUiApp:
         return decoded
 
     async def _handle_command_capability(self, request: web.Request):
-        if not self._commands or not self._command_origin_is_trusted(request):
+        if not self._commands or not self._command_capability_request_is_trusted(
+            request
+        ):
             return _json_response(404, {"error": "not found"})
         return _json_response(200, {"capability": self._command_capability})
 
