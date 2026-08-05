@@ -26,6 +26,7 @@ set(RTI_DEMO_UI_ASSETS_DIR "${CMAKE_CURRENT_LIST_DIR}/../assets")
 set(RTI_DEMO_ASSET_FILES
     "${RTI_DEMO_UI_ASSETS_DIR}/index.html"
     "${RTI_DEMO_UI_ASSETS_DIR}/runtime.js"
+    "${RTI_DEMO_UI_ASSETS_DIR}/client.js"
     "${RTI_DEMO_UI_ASSETS_DIR}/theme.css"
 )
 foreach(asset_file ${RTI_DEMO_ASSET_FILES})
@@ -36,9 +37,10 @@ endforeach()
 
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/index.html" RTI_DEMO_INDEX_HTML)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/runtime.js" RTI_DEMO_RUNTIME_JS)
+file(READ "${RTI_DEMO_UI_ASSETS_DIR}/client.js" RTI_DEMO_CLIENT_JS)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/theme.css" RTI_DEMO_THEME_CSS)
 
-foreach(asset_var RTI_DEMO_INDEX_HTML RTI_DEMO_RUNTIME_JS RTI_DEMO_THEME_CSS)
+foreach(asset_var RTI_DEMO_INDEX_HTML RTI_DEMO_RUNTIME_JS RTI_DEMO_CLIENT_JS RTI_DEMO_THEME_CSS)
     string(FIND "${${asset_var}}" "RTI_ASSET" RTI_DEMO_ASSET_DELIMITER_INDEX)
     if(NOT RTI_DEMO_ASSET_DELIMITER_INDEX EQUAL -1)
         message(FATAL_ERROR "${asset_var} contains the reserved raw-string delimiter RTI_ASSET")
@@ -66,8 +68,7 @@ target_include_directories(rti_demo_ui_core
 )
 
 target_link_libraries(rti_demo_ui_core
-    PUBLIC httplib::httplib
-    PRIVATE nlohmann_json::nlohmann_json
+    PUBLIC httplib::httplib nlohmann_json::nlohmann_json
 )
 
 add_library(rti_demo_ui::core ALIAS rti_demo_ui_core)

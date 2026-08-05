@@ -3,23 +3,36 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import logging
 import os
+import secrets
 import threading
+from copy import deepcopy
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import unquote
+from urllib.parse import unquote_to_bytes
 
 from aiohttp import web
 
 from .components import Card
-from .types import require_non_empty
+from .commands import COMMAND_NAME, Command, CommandConfirmation, CommandSchema
+from .types import copy_json_value, require_non_empty
+
+_COMMAND_BODY_LIMIT = 64 * 1024
+_COMMAND_CAPABILITY_HEADER = "X-RTI-Demo-Command-Capability"
+_COMMAND_PATH_PREFIX = "/api/commands/"
+_logger = logging.getLogger(__name__)
 
 _ASSET_ROUTES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/sdk/index.html": ("index.html", "text/html; charset=utf-8"),
     "/sdk/runtime.js": ("runtime.js", "application/javascript; charset=utf-8"),
+    "/sdk/client.js": ("client.js", "application/javascript; charset=utf-8"),
     "/sdk/theme.css": ("theme.css", "text/css; charset=utf-8"),
 }
 
@@ -42,6 +55,13 @@ _MIME_TYPES = {
     ".woff": "font/woff",
     ".woff2": "font/woff2",
 }
+
+
+@dataclass(frozen=True)
+class ReadyInfo:
+    host: str
+    port: int
+    url: str
 
 
 def _load_assets() -> Dict[str, bytes]:
@@ -110,7 +130,8 @@ class _Model:
         self._owner_loop = None
         self._owner_thread_id = None
         self._next_card_id = 1
-        self._next_scene_id = 1
+        self._next_component_ids = {}
+        self.data: Any = {}
 
     def set_owner(self, loop) -> None:
         self._owner_loop = loop
@@ -149,18 +170,50 @@ class _Model:
         self._next_card_id += 1
         return card_id
 
-    def next_scene_id(self) -> str:
-        scene_id = f"scene-{self._next_scene_id}"
-        self._next_scene_id += 1
-        return scene_id
+    def next_component_id(self, component_type: str) -> str:
+        next_id = self._next_component_ids.get(component_type, 1)
+        self._next_component_ids[component_type] = next_id + 1
+        return f"{component_type}-{next_id}"
+
+    def update_value(self, current, path, value, create_missing=False):
+        if (
+            not isinstance(path, (list, tuple))
+            or not path
+            or any(not isinstance(segment, str) or not segment for segment in path)
+        ):
+            raise ValueError("DemoUiApp: path must contain non-empty string segments")
+        replacement = deepcopy(current)
+        if not isinstance(replacement, dict):
+            raise ValueError("DemoUiApp: path requires an object value")
+        target = replacement
+        for segment in path[:-1]:
+            if segment not in target:
+                if not create_missing:
+                    raise ValueError(
+                        f"DemoUiApp: path segment '{segment}' does not exist"
+                    )
+                target[segment] = {}
+            if not isinstance(target[segment], dict):
+                raise ValueError(
+                    f"DemoUiApp: path segment '{segment}' is not an object"
+                )
+            target = target[segment]
+        leaf = path[-1]
+        if not create_missing and leaf not in target:
+            raise ValueError(f"DemoUiApp: path segment '{leaf}' does not exist")
+        target[leaf] = deepcopy(value)
+        from .types import copy_json_value
+
+        return copy_json_value(replacement, "DemoUiApp: ")
 
     def snapshot(self) -> dict:
         self.check_owner()
         self.ensure_running()
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "revision": self.revision,
             "title": self.title,
+            "data": copy_json_value(self.data, "DemoUiApp: "),
             "cards": [card.to_dict() for card in self.cards],
         }
 
@@ -177,14 +230,14 @@ class DemoUiApp:
     def __init__(
         self,
         title: str,
-        port: int = 8080,
-        host: str = "0.0.0.0",
+        port: int = 0,
+        host: str = "127.0.0.1",
         static_root: str | os.PathLike[str] | None = None,
     ) -> None:
         require_non_empty(title, "title", "DemoUiApp: ")
         require_non_empty(host, "host", "DemoUiApp: ")
-        if not (1 <= port <= 65535):
-            raise ValueError("DemoUiApp: port must be between 1 and 65535")
+        if not (0 <= port <= 65535):
+            raise ValueError("DemoUiApp: port must be between 0 and 65535")
         self._static_root = self._canonical_static_root(static_root)
         self._model = _Model(title)
         self._assets = _load_assets()
@@ -200,6 +253,12 @@ class DemoUiApp:
         self._cleanup_task = None
         self._runner = None
         self._site = None
+        self._ready_info = None
+        self._commands: Dict[str, Command] = {}
+        self._command_capability = None
+        self._active_commands = set()
+        self._commands_done = asyncio.Event()
+        self._commands_done.set()
 
     @staticmethod
     def _canonical_static_root(
@@ -249,15 +308,143 @@ class DemoUiApp:
         return resolved, content_type
 
     def _application(self) -> web.Application:
-        application = web.Application()
+        application = web.Application(client_max_size=_COMMAND_BODY_LIMIT + 1024)
         application.router.add_route("*", "/{path:.*}", self._handle_request)
         return application
 
+    def _command_error(self, status: int, code: str, message: str, details=None):
+        return _json_response(
+            status,
+            {
+                "ok": False,
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "details": details or [],
+                },
+            },
+        )
+
+    def _command_origin_is_trusted(self, request: web.Request) -> bool:
+        if self._ready_info is None:
+            return False
+        return request.headers.get("Origin") == self._ready_info.url
+
+    @staticmethod
+    def _decode_command_name(encoded_name: str) -> Optional[str]:
+        try:
+            decoded_bytes = unquote_to_bytes(encoded_name)
+            if b"%" in decoded_bytes:
+                return None
+            decoded = decoded_bytes.decode("utf-8", "strict")
+        except (UnicodeDecodeError, ValueError):
+            return None
+        if "/" in decoded or not COMMAND_NAME.fullmatch(decoded):
+            return None
+        return decoded
+
+    async def _handle_command_capability(self, request: web.Request):
+        if not self._commands or not self._command_origin_is_trusted(request):
+            return _json_response(404, {"error": "not found"})
+        return _json_response(200, {"capability": self._command_capability})
+
+    async def _handle_command_request(self, request: web.Request, path: str):
+        if request.method != "POST":
+            return self._command_error(405, "method_not_allowed", "method not allowed")
+        if not self._command_origin_is_trusted(request):
+            return self._command_error(
+                403, "forbidden", "origin or capability rejected"
+            )
+        if request.headers.get(_COMMAND_CAPABILITY_HEADER) != self._command_capability:
+            return self._command_error(
+                403, "forbidden", "origin or capability rejected"
+            )
+        command_name = self._decode_command_name(path[len(_COMMAND_PATH_PREFIX) :])
+        if command_name is None:
+            return self._command_error(400, "validation_error", "invalid command name")
+        command = self._commands.get(command_name)
+        if command is None:
+            return self._command_error(404, "unknown_command", "unknown command")
+        if self._state in (self._STOPPING, self._STOPPED):
+            return self._command_error(
+                409, "command_stopping", "command service is stopping"
+            )
+        if command_name in self._active_commands:
+            return self._command_error(
+                409, "command_busy", "command is already running"
+            )
+        self._active_commands.add(command_name)
+        self._commands_done.clear()
+        try:
+            if (
+                request.content_length is not None
+                and request.content_length > _COMMAND_BODY_LIMIT
+            ):
+                return self._command_error(
+                    413, "payload_too_large", "command body exceeds 64 KiB"
+                )
+            body = bytearray()
+            try:
+                while True:
+                    chunk = await request.content.read(8192)
+                    if not chunk:
+                        break
+                    body.extend(chunk)
+                    if len(body) > _COMMAND_BODY_LIMIT:
+                        return self._command_error(
+                            413, "payload_too_large", "command body exceeds 64 KiB"
+                        )
+            except web.HTTPRequestEntityTooLarge:
+                return self._command_error(
+                    413, "payload_too_large", "command body exceeds 64 KiB"
+                )
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return self._command_error(
+                    400, "validation_error", "request body is not valid JSON"
+                )
+            if not isinstance(payload, dict):
+                return self._command_error(
+                    400, "validation_error", "command payload must be an object"
+                )
+            details = command.schema.validate(payload)
+            if details:
+                return self._command_error(
+                    400,
+                    "validation_error",
+                    "command payload failed schema validation",
+                    details,
+                )
+            try:
+                result = command.handler(payload)
+                if inspect.isawaitable(result):
+                    result = await result
+                result = copy_json_value(result, "DemoUiApp: ")
+                return _json_response(200, {"ok": True, "result": result})
+            except Exception:
+                _logger.exception(
+                    "RTI Demo UI command handler failed: %s", command_name
+                )
+                return self._command_error(
+                    500, "handler_error", "command handler failed"
+                )
+        finally:
+            self._active_commands.discard(command_name)
+            if not self._active_commands:
+                self._commands_done.set()
+
     async def _handle_request(self, request: web.Request) -> web.StreamResponse:
+        path = request.raw_path.split("?", 1)[0]
+        if path == "/api/command-capability":
+            if request.method != "GET":
+                return _json_response(405, {"error": "method not allowed"})
+            return await self._handle_command_capability(request)
+        if path.startswith(_COMMAND_PATH_PREFIX):
+            return await self._handle_command_request(request, path)
         if request.method != "GET":
             return _json_response(405, {"error": "method not allowed"})
 
-        path = request.raw_path.split("?", 1)[0]
         if path == "/" and self._static_root is not None:
             return self._static_response("/index.html")
         if path in _ASSET_ROUTES:
@@ -294,11 +481,14 @@ class DemoUiApp:
             },
         )
 
-    async def _wait_until_ready(self) -> None:
+    async def wait_until_ready(self) -> ReadyInfo:
         await self._ready_event.wait()
+        return self._ready_info
 
     async def _cleanup_impl(self) -> None:
         try:
+            if self._active_commands:
+                await self._commands_done.wait()
             if self._runner is not None:
                 await self._runner.cleanup()
         finally:
@@ -307,6 +497,7 @@ class DemoUiApp:
             self._shutdown_event = None
             if self._ready_event is not None:
                 self._ready_event.clear()
+            self._ready_info = None
             self._model.stop()
             self._state = self._STOPPED
             if self._cleanup_complete is not None:
@@ -341,6 +532,52 @@ class DemoUiApp:
         self._model.bump_revision_locked()
         return card
 
+    def set_data(self, value) -> None:
+        self._model.check_owner()
+        self._model.ensure_running()
+        from .types import copy_json_value
+
+        self._model.data = copy_json_value(value, "DemoUiApp: ")
+        self._model.bump_revision_locked()
+
+    def update_data(self, path, value, create_missing=False) -> None:
+        self._model.check_owner()
+        self._model.ensure_running()
+        self._model.data = self._model.update_value(
+            self._model.data, path, value, create_missing
+        )
+        self._model.bump_revision_locked()
+
+    @property
+    def ready_info(self) -> Optional[ReadyInfo]:
+        return self._ready_info
+
+    def register_command(
+        self,
+        name: str,
+        schema: dict | CommandSchema,
+        handler,
+        confirmation: Optional[CommandConfirmation] = None,
+    ) -> Command:
+        if self._run_started:
+            raise RuntimeError(
+                "DemoUiApp: command registration is closed after run() begins"
+            )
+        if not COMMAND_NAME.fullmatch(name):
+            raise ValueError("DemoUiApp: command name is invalid")
+        if self._host not in {"127.0.0.1", "::1"}:
+            raise ValueError("DemoUiApp: commands require a literal loopback host")
+        if name in self._commands:
+            raise ValueError(f"DemoUiApp: command '{name}' is already registered")
+        command_schema = (
+            schema if isinstance(schema, CommandSchema) else CommandSchema(schema)
+        )
+        command = Command(name, command_schema, handler, confirmation)
+        self._commands[name] = command
+        if self._command_capability is None:
+            self._command_capability = secrets.token_urlsafe(32)
+        return command
+
     async def run(self) -> None:
         loop = asyncio.get_running_loop()
         if self._run_started:
@@ -361,12 +598,18 @@ class DemoUiApp:
             self._site = web.TCPSite(self._runner, self._host, self._port)
             await self._site.start()
             sockets = self._site._server.sockets
+            if sockets is None or len(sockets) != 1:
+                raise RuntimeError("DemoUiApp: expected exactly one bound socket")
             actual_port = sockets[0].getsockname()[1]
             if self._state == self._STOPPING:
                 return
+            display_host = f"[{self._host}]" if ":" in self._host else self._host
+            self._ready_info = ReadyInfo(
+                self._host, actual_port, f"http://{display_host}:{actual_port}"
+            )
             self._state = self._RUNNING
             self._ready_event.set()
-            print(f"RTI Demo UI listening on http://{self._host}:{actual_port}/")
+            print(f"RTI Demo UI listening on {self._ready_info.url}/")
             await self._shutdown_event.wait()
         except asyncio.CancelledError:
             cancelled = True

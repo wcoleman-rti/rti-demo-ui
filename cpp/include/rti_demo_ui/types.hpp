@@ -4,11 +4,14 @@
 
 #include <array>
 #include <cmath>
+#include <nlohmann/json.hpp>
 #include <regex>
 #include <stdexcept>
 #include <string>
 
 namespace rti::demo::ui {
+
+using Json = nlohmann::json;
 
 using GridBounds = std::array<double, 4>;
 
@@ -102,6 +105,21 @@ inline void require_valid_color(const std::string& color,
     if (!is_valid_color(color)) {
         throw std::invalid_argument(error_prefix +
                                     "color must match #RRGGBB or var(--name)");
+    }
+}
+
+inline void require_json_compatible(const Json& value,
+                                    const std::string& error_prefix) {
+    if (value.is_number_float() && !std::isfinite(value.get<double>())) {
+        throw std::invalid_argument(error_prefix +
+                                    "data must be JSON-compatible");
+    }
+    if (value.is_array()) {
+        for (const auto& item : value)
+            require_json_compatible(item, error_prefix);
+    } else if (value.is_object()) {
+        for (const auto& item : value.items())
+            require_json_compatible(item.value(), error_prefix);
     }
 }
 

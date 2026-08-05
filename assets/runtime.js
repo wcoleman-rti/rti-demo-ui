@@ -1,21 +1,17 @@
+import { createClient } from './client.js';
+
 // RTI Demo UI — shared browser runtime.
 // Polls GET /api/state every 200ms, reconciles SDK-owned DOM/SVG by stable
 // IDs, and interpolates entity poses between snapshots.
 (function () {
     'use strict';
 
-    var POLL_INTERVAL_MS = 200;
-    var BACKOFF_STEPS_MS = [500, 1000, 2000, 5000];
     var SVG_NS = 'http://www.w3.org/2000/svg';
 
     var reducedMotion = window.matchMedia
         ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
         : false;
 
-    var lastRevision = null;
-    var backoffIndex = 0;
-    var pollTimer = null;
-    var inFlight = false;
     var sceneStates = Object.create(null); // scene id -> { entities: Map, links, boundsEl, config }
 
     function byId(id) {
@@ -28,37 +24,8 @@
         banner.classList.toggle('sdk-visible', visible);
     }
 
-    function schedulePoll(delayMs) {
-        if (pollTimer) clearTimeout(pollTimer);
-        pollTimer = setTimeout(poll, delayMs);
-    }
-
-    function poll() {
-        if (inFlight) return;
-        inFlight = true;
-        fetch('/api/state', { cache: 'no-store' })
-            .then(function (response) {
-                if (!response.ok) throw new Error('bad status ' + response.status);
-                return response.json();
-            })
-            .then(function (snapshot) {
-                inFlight = false;
-                backoffIndex = 0;
-                showBanner(false);
-                applySnapshot(snapshot);
-                schedulePoll(POLL_INTERVAL_MS);
-            })
-            .catch(function () {
-                inFlight = false;
-                showBanner(true);
-                var delay = BACKOFF_STEPS_MS[Math.min(backoffIndex, BACKOFF_STEPS_MS.length - 1)];
-                backoffIndex++;
-                schedulePoll(delay);
-            });
-    }
-
     function applySnapshot(snapshot) {
-        if (snapshot.schema_version !== 1) {
+        if (snapshot.schema_version !== 2) {
             var cardsEl = byId('sdk-cards');
             if (cardsEl) {
                 cardsEl.textContent = 'Unsupported schema_version: ' + snapshot.schema_version;
@@ -68,10 +35,6 @@
         var titleEl = byId('sdk-app-title');
         if (titleEl) titleEl.textContent = snapshot.title || '';
 
-        if (lastRevision !== null && snapshot.revision === lastRevision) {
-            return;
-        }
-        lastRevision = snapshot.revision;
         reconcileCards(snapshot.cards || []);
     }
 
@@ -114,6 +77,10 @@
             seenIds[component.id] = true;
             if (component.type === 'scene2d') {
                 reconcileScene2d(container, component);
+            } else if (component.type === 'table') {
+                renderTable(container, component);
+            } else if (component.type === 'metric' || component.type === 'text' || component.type === 'badge' || component.type === 'log') {
+                renderTextComponent(container, component);
             } else {
                 renderUnsupported(container, component);
             }
@@ -136,6 +103,46 @@
             container.appendChild(el);
         }
         el.textContent = 'Unsupported component type: ' + component.type;
+    }
+
+    function renderTextComponent(container, component) {
+        var el = document.getElementById(component.id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = component.id;
+            el.dataset.componentId = component.id;
+            el.className = 'sdk-generic-component sdk-' + component.type;
+            container.appendChild(el);
+        }
+        var data = component.data || {};
+        if (component.type === 'metric') el.textContent = data.label + ': ' + data.value;
+        else if (component.type === 'log') el.textContent = (data.entries || []).map(function (entry) { return entry.message; }).join('\n') || data.empty_state || '';
+        else el.textContent = data.text || '';
+    }
+
+    function renderTable(container, component) {
+        var el = document.getElementById(component.id);
+        if (!el) {
+            el = document.createElement('table');
+            el.id = component.id;
+            el.dataset.componentId = component.id;
+            el.className = 'sdk-generic-component sdk-table';
+            container.appendChild(el);
+        }
+        var data = component.data || {};
+        el.textContent = '';
+        var head = document.createElement('tr');
+        (data.columns || []).forEach(function (column) {
+            var th = document.createElement('th'); th.textContent = column.label; head.appendChild(th);
+        });
+        el.appendChild(head);
+        (data.rows || []).forEach(function (row) {
+            var tr = document.createElement('tr');
+            (data.columns || []).forEach(function (column) {
+                var td = document.createElement('td'); td.textContent = row.cells && row.cells[column.id] !== undefined ? String(row.cells[column.id]) : ''; tr.appendChild(td);
+            });
+            el.appendChild(tr);
+        });
     }
 
     function projectPoint(x, y, bounds, width, height) {
@@ -163,6 +170,7 @@
     }
 
     function reconcileScene2d(container, component) {
+        var data = component.data || {};
         var svg = document.getElementById(component.id);
         var state = sceneStates[component.id];
         if (!svg) {
@@ -173,18 +181,18 @@
             container.appendChild(svg);
             state = sceneStates[component.id] = { entities: Object.create(null), links: [] };
         }
-        svg.setAttribute('width', component.width);
-        svg.setAttribute('height', component.height);
-        svg.setAttribute('viewBox', '0 0 ' + component.width + ' ' + component.height);
+        svg.setAttribute('width', data.width);
+        svg.setAttribute('height', data.height);
+        svg.setAttribute('viewBox', '0 0 ' + data.width + ' ' + data.height);
 
-        var bounds = component.grid_bounds;
-        var width = component.width;
-        var height = component.height;
+        var bounds = data.grid_bounds;
+        var width = data.width;
+        var height = data.height;
         var clipRect = [0, width, 0, height];
 
         // Update pose targets for interpolation.
         var seenEntityIds = Object.create(null);
-        (component.entities || []).forEach(function (entity) {
+        (data.entities || []).forEach(function (entity) {
             seenEntityIds[entity.id] = true;
             var prior = state.entities[entity.id];
             var projected = projectPoint(entity.x, entity.y, bounds, width, height);
@@ -209,7 +217,7 @@
         Object.keys(state.entities).forEach(function (id) {
             if (!seenEntityIds[id]) delete state.entities[id];
         });
-        state.links = component.links || [];
+        state.links = data.links || [];
         state.clipRect = clipRect;
 
         renderScene(svg, state);
@@ -332,6 +340,11 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-        poll();
+        var client = createClient();
+        client.subscribe(function (snapshot) {
+            showBanner(client.getConnectionState() === 'reconnecting');
+            if (snapshot) applySnapshot(snapshot);
+        });
+        client.start();
     });
 })();

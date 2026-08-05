@@ -6,9 +6,11 @@ See docs/architecture.md §7.1 and §7.4.
 from __future__ import annotations
 
 import math
+import json
 import re
 from enum import Enum
-from typing import Tuple
+from copy import deepcopy
+from typing import Any, Tuple
 
 GridBounds = Tuple[float, float, float, float]
 
@@ -83,3 +85,11 @@ def coerce_severity(value) -> Severity:
 
 def coerce_freshness(value) -> Freshness:
     return value if isinstance(value, Freshness) else Freshness(value)
+
+
+def copy_json_value(value: Any, error_prefix: str = "") -> Any:
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{error_prefix}data must be JSON-compatible") from error
+    return deepcopy(value)
