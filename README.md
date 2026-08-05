@@ -12,6 +12,53 @@ Each backend owns the authoritative component model (`DemoUiApp`, `Card`,
 DOM/SVG rendering via one shared `runtime.js`. There is no Node.js process,
 frontend build step, or DDS dependency in the SDK itself.
 
+## Quick usage
+
+Python:
+
+```python
+import asyncio
+
+from rti_demo_ui import DemoUiApp
+
+
+async def main() -> None:
+  app = DemoUiApp(title="Fleet Telemetry")
+  scene = app.add_card("Vehicles").add_scene_2d(
+    width=600, height=400, bounds=(-100.0, 100.0, -100.0, 100.0)
+  )
+  scene.add_entity("vehicle-1", x=0.0, y=0.0, heading=0.0)
+
+  try:
+    await app.run()
+  finally:
+    await app.stop()
+
+
+asyncio.run(main())
+```
+
+C++:
+
+```cpp
+#include <rti_demo_ui/gui_sdk.hpp>
+
+int main() {
+  using namespace rti::demo::ui;
+
+  DemoUiApp app("Fleet Telemetry");
+  auto* scene = app.add_card("Vehicles")->add_scene_2d(
+    600, 400, {-100.0, 100.0, -100.0, 100.0});
+  scene->add_entity("vehicle-1", 0.0, 0.0, 0.0);
+
+  app.run();
+}
+```
+
+See [examples/py/simple.py](examples/py/simple.py) and
+[examples/cpp/simple.cpp](examples/cpp/simple.cpp) for animation and graceful
+interactive shutdown.
+
 ## Repository layout
 
 ```text
