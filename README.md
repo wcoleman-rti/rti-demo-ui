@@ -4,7 +4,8 @@ A small GUI SDK for local RTI Connext demos with one shared browser frontend
 and two interchangeable state servers: Python 3.11+ with native
 `asyncio`/`aiohttp`, and C++17 (pinned `cpp-httplib` + `nlohmann/json` via
 CMake `FetchContent`). See [docs/architecture.md](docs/architecture.md)
-for the full design.
+for the full design. Direct third-party dependencies and licenses are listed
+in [docs/third-party.md](docs/third-party.md).
 
 Each backend owns the authoritative component model (`DemoUiApp`, `Card`,
 `Scene2DViewport`) and serves an identical JSON snapshot; the browser owns
