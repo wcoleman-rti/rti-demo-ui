@@ -1,5 +1,5 @@
 // Shared telemetry/pose types plus the generic Severity/Freshness model (see
-// docs/implementation_plan.md §7.1, §7.4).
+// docs/architecture.md §7.1, §7.4).
 #pragma once
 
 #include <array>

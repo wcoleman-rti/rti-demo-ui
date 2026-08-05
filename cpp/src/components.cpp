@@ -1,4 +1,4 @@
-// Implements Card and Scene2DViewport (see docs/implementation_plan.md
+// Implements Card and Scene2DViewport (see docs/architecture.md
 // §7.2-§7.4).
 #include "rti_demo_gui_sdk/components.hpp"
 

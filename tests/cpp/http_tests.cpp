@@ -1,5 +1,5 @@
 // HTTP contract tests against the C++ backend. See
-// docs/implementation_plan.md §11.2.
+// docs/architecture.md §11.2.
 #include <httplib.h>
 #include <rti_demo_gui_sdk/gui_sdk.hpp>
 
@@ -69,7 +69,7 @@ int main() {
     auto method_not_allowed = client.Post("/api/state", "", "text/plain");
     CHECK(method_not_allowed != nullptr && method_not_allowed->status == 405);
 
-    // Canonical asset-byte equality (see docs/implementation_plan.md §11.2).
+    // Canonical asset-byte equality (see docs/architecture.md §11.2).
     std::ifstream theme_file(SOURCE_ROOT "/assets/theme.css", std::ios::binary);
     std::ostringstream theme_contents;
     theme_contents << theme_file.rdbuf();

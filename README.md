@@ -3,7 +3,7 @@
 A small GUI SDK for local RTI Connext demos with one shared browser frontend
 and two interchangeable state servers: Python 3.10+ (`ThreadingHTTPServer`,
 standard library only) and C++17 (pinned `cpp-httplib` + `nlohmann/json` via
-CMake `FetchContent`). See [docs/implementation_plan.md](docs/implementation_plan.md)
+CMake `FetchContent`). See [docs/architecture.md](docs/architecture.md)
 for the full design.
 
 Each backend owns the authoritative component model (`CoreApp`, `Card`,
@@ -28,7 +28,8 @@ docs/         implementation plan
 pip install -e ./python           # editable install (required in v1)
 pip install -e './python[dev]'    # + pytest, playwright, clang-format, pre-commit
 pre-commit install                # run repository checks before each commit
-playwright install chromium       # one-time browser binary download, needed for tests/browser
+# One-time browser binary download, needed for tests/browser.
+playwright install chromium
 python examples/py/simple.py      # prints the URL to open, then blocks
 ```
 
@@ -96,7 +97,8 @@ start their own DDS/worker threads must join those workers themselves after
 ```bash
 pre-commit run --all-files  # ruff, clang-format, whitespace/YAML checks
 PYTHONPATH=python pytest tests/py                       # model + HTTP contract
-PYTHONPATH=python pytest tests/browser                  # Playwright (see `playwright install chromium` above)
+# Playwright; first run `playwright install chromium`.
+PYTHONPATH=python pytest tests/browser
 cmake --build build && ctest --test-dir build            # C++ model + HTTP contract
 ```
 

@@ -1,5 +1,5 @@
 // Gallery example: serves the shared /gallery asset (see
-// docs/implementation_plan.md §10.4).
+// docs/architecture.md §10.4).
 #include <iostream>
 #include <rti_demo_gui_sdk/gui_sdk.hpp>
 

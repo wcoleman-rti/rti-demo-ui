@@ -1,5 +1,5 @@
 """Playwright browser tests run against the Python backend (shared assets mean
-the same assertions apply to the C++ backend — see docs/implementation_plan.md
+the same assertions apply to the C++ backend — see docs/architecture.md
 §11.3). Run explicitly: `pytest tests/py/test_browser.py`.
 """
 

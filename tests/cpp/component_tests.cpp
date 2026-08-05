@@ -1,5 +1,5 @@
 // Model tests: validation, revision counting, atomic link removal, ordering.
-// See docs/implementation_plan.md §11.1.
+// See docs/architecture.md §11.1.
 #include <rti_demo_gui_sdk/gui_sdk.hpp>
 
 #include <cassert>

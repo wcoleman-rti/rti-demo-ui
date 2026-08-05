@@ -1,5 +1,5 @@
 """Basic RTI Connext DDS pub/sub wired in via the §10 polling pattern (see
-docs/implementation_plan.md §10.2). Requires rti.connext, installed
+docs/architecture.md §10.2). Requires rti.connext, installed
 separately (not an SDK runtime dependency).
 """
 

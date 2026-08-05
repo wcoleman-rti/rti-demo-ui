@@ -1,5 +1,5 @@
 // Pre-built C++ widgets, Card and Scene2DViewport (see
-// docs/implementation_plan.md §7.2-§7.4).
+// docs/architecture.md §7.2-§7.4).
 #pragma once
 
 #include <map>

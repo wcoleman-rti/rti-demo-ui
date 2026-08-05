@@ -1,6 +1,6 @@
 """Card and Scene2DViewport components.
 
-See docs/implementation_plan.md §7.2, §7.4, §8.
+See docs/architecture.md §7.2, §7.4, §8.
 """
 
 from __future__ import annotations

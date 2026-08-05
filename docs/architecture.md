@@ -103,7 +103,10 @@ tests/
   python/
   browser/
 docs/
-  implementation_plan.md
+  architecture.md
+  development/
+    implementation-plans/
+      custom_frontend_and_lifecycle.md
 README.md
 .pre-commit-config.yaml
 ```
@@ -115,7 +118,7 @@ README.md
 Both backends implement exactly:
 
 | Request | Response | Cache policy |
-|---|---|---|
+| --- | --- | --- |
 | `GET /` | canonical `index.html` | `no-cache` |
 | `GET /runtime.js` | canonical JavaScript | `no-cache` |
 | `GET /theme.css` | canonical CSS | `no-cache` |
@@ -317,7 +320,8 @@ Both languages use `snake_case` methods and explicit parent factory methods. The
 - Removing an entity removes every incoming/outgoing link in the same mutation/revision.
 - Entity color is immutable after add in v1.
 
-Python raises `ValueError`; C++ throws `std::invalid_argument`. Scene errors begin `Scene2DViewport: `. Failed operations do not change state or revision.
+Python raises `ValueError`; C++ throws `std::invalid_argument`. Scene errors begin
+`Scene2DViewport:`. Failed operations do not change state or revision.
 
 ### 7.5 Scene Geometry
 

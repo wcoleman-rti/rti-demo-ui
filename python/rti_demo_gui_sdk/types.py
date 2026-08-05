@@ -1,6 +1,6 @@
 """Shared Severity/Freshness model and validation helpers.
 
-See docs/implementation_plan.md §7.1 and §7.4.
+See docs/architecture.md §7.1 and §7.4.
 """
 
 from __future__ import annotations

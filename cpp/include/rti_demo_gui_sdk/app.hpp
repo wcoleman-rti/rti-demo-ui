@@ -1,5 +1,5 @@
 // Base C++ application class: model ownership and local HTTP lifecycle (see
-// docs/implementation_plan.md §3, §7.2, §8).
+// docs/architecture.md §3, §7.2, §8).
 #pragma once
 
 #include <atomic>

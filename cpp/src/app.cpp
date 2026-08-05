@@ -1,4 +1,4 @@
-// Implements CoreApp (see docs/implementation_plan.md §3, §7.2-§7.3, §8).
+// Implements CoreApp (see docs/architecture.md §3, §7.2-§7.3, §8).
 #include "rti_demo_gui_sdk/app.hpp"
 
 #include <httplib.h>

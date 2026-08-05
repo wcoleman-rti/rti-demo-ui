@@ -1,5 +1,5 @@
 """Minimal example: one card, one scene, two entities, one link, and a timer
-moving one entity. See docs/implementation_plan.md §10.1.
+moving one entity. See docs/architecture.md §10.1.
 """
 
 import math

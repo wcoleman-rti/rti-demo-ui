@@ -1,4 +1,4 @@
-// Phase 3: canonical generated type input for the guarded Connext example (see docs/implementation_plan.md §9.4).
+// Phase 3: canonical generated type input for the guarded Connext example (see docs/architecture.md §9.4).
 struct VehicleState {
     string vehicle_id;
     double x;

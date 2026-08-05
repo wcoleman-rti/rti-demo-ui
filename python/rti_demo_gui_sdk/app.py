@@ -1,6 +1,6 @@
 """CoreApp: model ownership and local HTTP lifecycle.
 
-See docs/implementation_plan.md §3, §5, §7.2, §8.
+See docs/architecture.md §3, §5, §7.2, §8.
 """
 
 from __future__ import annotations

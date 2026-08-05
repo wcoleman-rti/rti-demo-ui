@@ -1,5 +1,5 @@
 // No Connext/DDS dependency — CoreApp, Card, Scene2DViewport, one synthetic
-// timer (see docs/implementation_plan.md §10.1).
+// timer (see docs/architecture.md §10.1).
 #include <cmath>
 #include <rti_demo_gui_sdk/gui_sdk.hpp>
 
