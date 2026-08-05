@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <dds/dds.hpp>
+#include <rti/rti.hpp>
 #include <rti_demo_ui/gui_sdk.hpp>
 #include <thread>
 
@@ -24,10 +25,16 @@ int main() {
     // Declared in parent-to-child order so reverse destruction is safe.
     dds::domain::DomainParticipant participant(0);
     dds::topic::Topic<VehicleState> topic(participant, "VehicleStateTopic");
-    dds::pub::Publisher publisher(participant);
-    dds::pub::DataWriter<VehicleState> writer(publisher, topic);
-    dds::sub::Subscriber subscriber(participant);
-    dds::sub::DataReader<VehicleState> reader(subscriber, topic);
+    dds::pub::DataWriter<VehicleState> writer(topic);
+    dds::sub::DataReader<VehicleState> reader(topic);
+
+    rti::sub::SampleProcessor processor;
+    processor.attach_reader(
+        reader, [&scene](const rti::sub::LoanedSample<VehicleState>& sample) {
+            if (!sample.info().valid()) return;
+            const auto& data = sample.data();
+            scene->update_entity(data.vehicle_id, data.x, data.y, data.heading);
+        });
 
     std::atomic<bool> stop_writer{false};
     std::thread writer_thread([&writer, &stop_writer]() {
@@ -44,26 +51,10 @@ int main() {
         }
     });
 
-    std::atomic<bool> stop_reader{false};
-    std::thread reader_thread([&reader, scene, &stop_reader]() {
-        while (!stop_reader.load()) {
-            auto samples = reader.take();
-            for (const auto& sample : samples) {
-                if (!sample.info().valid()) continue;
-                const auto& data = sample.data();
-                scene->update_entity(data.vehicle_id, data.x, data.y,
-                                     data.heading);
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-    });
-
     app.run();
 
     stop_writer.store(true);
-    stop_reader.store(true);
     writer_thread.join();
-    reader_thread.join();
     control.finish();
     return 0;
 }
