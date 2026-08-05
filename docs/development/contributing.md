@@ -2,7 +2,7 @@
 
 ## Setup
 
-Use Python 3.10 or newer and install the pinned contributor tools from the
+Use Python 3.11 or newer and install the contributor tools from the
 repository root:
 
 ```bash

@@ -1,6 +1,6 @@
 # RTI Demo UI (Python)
 
-RTI Demo UI for Python (standard-library `ThreadingHTTPServer` backend).
+RTI Demo UI for Python with a native `asyncio`/`aiohttp` backend.
 Provides the shared `DemoUiApp`, `Card`, and `Scene2DViewport`
 components described in the top-level repository README.
 
@@ -14,7 +14,9 @@ app = DemoUiApp(
     "Fleet monitor",
     static_root=Path(__file__).parent / "web",
 )
-app.run()
+import asyncio
+
+asyncio.run(app.run())
 ```
 
 `static_root` accepts a string or `os.PathLike[str]` directory containing

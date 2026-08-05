@@ -5,7 +5,7 @@
 Build a small GUI SDK for local RTI Connext demos with one browser frontend and
 two interchangeable state servers:
 
-- Python 3.10+ using `ThreadingHTTPServer` from the standard library.
+- Python 3.11+ using native `asyncio` and `aiohttp`.
 - C++17 using pinned `cpp-httplib`, acquired with CMake `FetchContent`.
 - SDK-owned `index.html`, `runtime.js`, and `theme.css` shared byte-for-byte by
   both backends.
@@ -45,18 +45,17 @@ frames, or DDS objects.
 ### 3.1 Runtime Flow
 
 The demo executable is also the local web server; users start exactly one Python
-or C++ process. `DemoUiApp.run()` starts the embedded server and blocks, the app
-prints its URL, and the user opens that URL in VS Code Simple Browser or a
-normal browser. There is no Node.js process, frontend build/watch command, or
-separately managed web server. Stopping the app stops its HTTP server and SDK
-timers.
+or C++ process. Python `await app.run()` starts the embedded aiohttp server and
+waits, while C++ `app.run()` starts its blocking server. Both print the URL
+after binding. There is no Node.js process, frontend build/watch command, or
+separately managed web server. Stopping the app stops its HTTP server; only
+C++ also owns SDK timers.
 
 1. Application code creates `DemoUiApp`, cards, and scenes.
-2. Application or DDS worker threads mutate the model through SDK methods.
-3. Every successful mutation increments one application-wide `revision` while
-   holding the model mutex.
-4. `GET /api/state` copies a consistent snapshot while holding the mutex, then
-   serializes after releasing it.
+2. Python application coroutines mutate the model on the owner event loop;
+   C++ application or DDS worker threads use the thread-safe SDK methods.
+3. Every successful mutation increments one application-wide `revision`.
+4. `GET /api/state` copies a consistent snapshot before serializing it.
 5. The browser polls every 200 ms and skips reconciliation when `revision` is
    unchanged.
 6. `runtime.js` reconciles SDK-owned DOM/SVG and uses `requestAnimationFrame()`
@@ -73,10 +72,11 @@ missing/expired revision must fall back to a full snapshot.
 - C++ stores `std::unique_ptr<Card>` and each card stores
   `std::unique_ptr<Scene2DViewport>`; factory methods return non-owning pointers
   valid until `DemoUiApp` destruction.
-- A single model mutex protects the complete model and revision. Components do
-  not have independent locks.
+- Python model state is owned by the event loop and owner thread captured by
+  `run()`; foreign threads must use `loop.call_soon_threadsafe`.
+- C++ uses one model mutex to protect the complete model and revision.
 - HTTP handlers never retain pointers/references into mutable model storage
-  after releasing the lock.
+  after taking a snapshot.
 - Browser state is disposable; refreshing reconstructs it from the next
   snapshot.
 
@@ -316,14 +316,9 @@ class DemoUiApp:
     self, title: str, port: int = 8080, host: str = "0.0.0.0",
     static_root: str | os.PathLike[str] | None = None
   ) -> None: ...
-    def add_card(self, title: str) -> Card: ...
-  def add_timer(
-    self, interval_ms: int, callback: Callable[[], None]
-  ) -> TimerHandle: ...
-    def run(self) -> None: ...
-    async def run_async(self) -> None: ...
-    def stop(self) -> None: ...
-    async def stop_async(self) -> None: ...
+  def add_card(self, title: str) -> Card: ...
+  async def run(self) -> None: ...
+  async def stop(self) -> None: ...
 
 class Card:
   def add_scene_2d(
@@ -428,37 +423,50 @@ lines.
 
 ## 8. Lifecycle and Threading
 
-Model methods are safe from any application thread; no UI-thread marshaling
+### 8.1 Python
+
+Python uses `aiohttp.web.AppRunner` and `web.TCPSite`. The app instance is
+single-use and follows `NEW -> STARTING -> RUNNING -> STOPPING -> STOPPED`.
+`await app.run()` captures its owner event loop and thread, binds before
+printing the URL, waits on a private shutdown signal, and performs aiohttp
+cleanup exactly once. `await app.stop()` is idempotent, safe before or during
+startup, and schedules its shutdown operation on the owner loop when called
+from another event loop. Cancellation performs the same cleanup before
+propagating `CancelledError`.
+
+Component methods remain synchronous. Configuration before startup is allowed;
+after startup, mutations and snapshots verify the owner event loop and thread.
+Foreign threads must schedule application-owned work with
+`loop.call_soon_threadsafe`. The SDK owns no Python worker or timer tasks;
+applications use `asyncio.TaskGroup` or explicitly retained tasks.
+
+### 8.2 C++
+
+C++ model methods are safe from any application thread; no UI-thread marshaling
 exists. Each method validates inputs before acquiring the model mutex where
 practical, locks once, performs one logical mutation, and increments revision
 once.
 
-`add_timer()` starts an SDK-owned periodic `std::thread`/`threading.Thread` and
-returns a movable/cancelable `TimerHandle`. The first callback occurs after one
-interval. Exceptions are logged and stop that timer. Callbacks must be short;
-DDS blocking reads belong on application-owned workers.
+`add_timer()` starts an SDK-owned periodic `std::thread` and returns a movable/
+cancelable `TimerHandle`. The first callback occurs after one interval.
+Exceptions are logged and stop that timer. Callbacks must be short; DDS
+blocking reads belong on application-owned workers.
 
 `run()` binds before entering the HTTP server loop. `stop()` is idempotent and
 may be called from another thread or a signal handler's deferred control path.
 Shutdown order:
 
-1. Mark stopping; reject new timers and mutations with
-   `RuntimeError`/`std::runtime_error`.
+1. Mark stopping; reject new timers and mutations with `std::runtime_error`.
 2. Stop accepting HTTP requests and wake `run()`.
 3. Cancel and join SDK timers. A timer must not join itself.
 4. Wait for in-flight handlers to finish.
 5. Return from `run()`; the consuming app then joins its DDS workers before
-   `DemoUiApp` destruction.
+  `DemoUiApp` destruction.
 
 Destructors call `stop()` and join SDK-owned threads. Application-owned workers
 must not retain component pointers beyond app lifetime. Do not hold the model
 mutex while serializing JSON, writing sockets, invoking callbacks, or joining
 threads.
-
-Python also provides `run_async()` and `stop_async()` as asyncio-compatible
-wrappers around this threaded lifecycle. They do not change the HTTP backend or
-SDK timers to native async implementations. Cancelling `run_async()` stops the
-app before it propagates cancellation.
 
 ## 9. Build and Packaging
 
@@ -499,11 +507,12 @@ defaults OFF.
 
 ### 9.2 Python
 
-The root `pyproject.toml` has `requires-python = ">=3.10"` and no runtime
-dependencies. Setuptools maps packages from `python/`, stages canonical root
-assets into wheel package data, and loads them with `importlib.resources`.
-`MANIFEST.in` includes the canonical assets in source distributions. Dev extras
-pin pytest and Playwright.
+The root `pyproject.toml` requires Python 3.11+, depends directly on
+`aiohttp>=3.10,<4`, and configures strict `pytest-asyncio` mode. Setuptools
+maps packages from `python/`, stages canonical root assets into wheel package
+data, and loads them with `importlib.resources`. `MANIFEST.in` includes the
+canonical assets in source distributions. Dev extras include pytest,
+pytest-asyncio, and Playwright.
 
 ### 9.3 Quality Gates
 
@@ -520,9 +529,9 @@ pin pytest and Playwright.
 ### 10.1 Simple Examples
 
 Python and C++ examples create the same model shape: one card, one 600x400
-scene, two entities, and one link. A 100 ms SDK timer updates entity
-position/heading. Each executable prints its URL and blocks in `run()`. No
-browser is opened automatically.
+scene, two entities, and one link. The Python example owns a 100 ms animation
+coroutine in an `asyncio.TaskGroup`; C++ uses its SDK timer. Python awaits
+`app.run()` and C++ blocks in `run()`. No browser is opened automatically.
 
 ### 10.2 Connext Python Example
 
@@ -533,9 +542,8 @@ Use Connext Professional 7.7.0 and `rti.connextdds`:
 - Create `dds.DomainParticipant`, `dds.Topic`, `dds.DataWriter`, and
   `dds.DataReader` in parent-to-child order.
 - Use an in-process writer so the example runs independently.
-- Poll `reader.take_data()` from a dedicated application worker at a bounded
-  rate; call scene methods directly because they are thread-safe.
-- Signal and join writer/reader workers before app destruction.
+- Use `reader.take_async()` and update the scene on the owner event loop.
+- Cancel and await publisher/reader tasks before final app cleanup.
 
 Do not add Connext to SDK runtime dependencies.
 
@@ -607,8 +615,8 @@ SDK asset packaging or the reserved SDK routes.
 - Entity removal also removes related links atomically.
 - Creation/insertion order is stable.
 - Snapshot under concurrent mutation always parses and satisfies invariants.
-- Stop and timer cancellation are idempotent; no callbacks occur after shutdown
-  returns.
+- C++ stop and timer cancellation are idempotent; Python stop and cancellation
+  complete aiohttp cleanup before returning.
 
 ### 11.2 HTTP Contract Tests
 
@@ -655,8 +663,8 @@ points. Apply these targeted replacements before Phase 1:
   through the pinned dependencies in §9.1.
 - Delete `cpp/src/theme_css.hpp.in`; replace it with
   `cpp/src/web_assets.hpp.in`.
-- Rewrite the root `pyproject.toml` for Python 3.10+ with no NiceGUI/runtime
-  dependency.
+- Configure the root `pyproject.toml` for Python 3.11+ with its aiohttp runtime
+  dependency and strict asyncio test mode.
 - Rename `examples/{cpp,py}/native_gallery.*` to `gallery.*`.
 - Add the three missing shared browser assets and rewrite the comment-only API,
   source, example, and test scaffolds in place.
@@ -690,15 +698,17 @@ contract.
 ## 13. Acceptance Criteria
 
 - [ ] No Wt, NiceGUI, GTK, Qt, Boost, TLS, or compression dependency is
-      required.
-- [ ] Python runtime uses only the standard library; C++ links pinned MIT
-      `cpp-httplib` plus pinned JSON serialization.
+  required.
+- [ ] Python uses Python 3.11+, `aiohttp>=3.10,<4`, and strict
+  `pytest-asyncio`; C++ links pinned MIT `cpp-httplib` plus pinned JSON
+  serialization.
 - [ ] Both servers return byte-identical SDK assets and schema-compatible
       snapshots.
 - [ ] Public model APIs and validation semantics match across languages.
-- [ ] All model mutations are thread-safe and revisioned exactly once.
-- [ ] Shutdown joins SDK-owned threads and supports application-owned worker
-      cleanup.
+- [ ] C++ model mutations are thread-safe and revisioned exactly once; Python
+  mutations are owner-loop constrained and revisioned exactly once.
+- [ ] Python cancellation/stop releases aiohttp resources; C++ shutdown joins
+  SDK-owned threads and supports application-owned worker cleanup.
 - [ ] Browser polling works through VS Code/Codespaces forwarding without
       WebSocket support.
 - [ ] `Scene2DViewport` rendering and interpolation pass the same Playwright

@@ -1,7 +1,4 @@
-"""DemoUiApp: model ownership and local HTTP lifecycle.
-
-See docs/architecture.md §3, §5, §7.2, §8.
-"""
+"""DemoUiApp model ownership and native asyncio HTTP lifecycle."""
 
 from __future__ import annotations
 
@@ -9,14 +6,15 @@ import asyncio
 import json
 import os
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Dict, Optional
 from urllib.parse import unquote
 
+from aiohttp import web
+
 from .components import Card
-from .types import require_non_empty, require_positive_int
+from .types import require_non_empty
 
 _ASSET_ROUTES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -60,38 +58,88 @@ def _load_assets() -> Dict[str, bytes]:
     return assets
 
 
-class TimerHandle:
-    """Cancelable handle for an SDK-owned periodic timer."""
+def _json_response(status: int, payload: dict) -> web.Response:
+    body = json.dumps(payload, allow_nan=False).encode("utf-8")
+    return web.Response(
+        status=status,
+        body=body,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(len(body)),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
+    )
 
-    def __init__(self, thread: threading.Thread, stop_event: threading.Event) -> None:
-        self._thread = thread
-        self._stop_event = stop_event
 
-    def cancel(self) -> None:
-        self._stop_event.set()
-        if threading.current_thread() is not self._thread:
-            self._thread.join()
+def _asset_response(body: bytes, content_type: str) -> web.Response:
+    return web.Response(
+        status=200,
+        body=body,
+        headers={
+            "Content-Type": content_type,
+            "Content-Length": str(len(body)),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+def _static_not_found_response() -> web.Response:
+    body = b"not found"
+    return web.Response(
+        status=404,
+        body=body,
+        headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Length": str(len(body)),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 class _Model:
     """Internal model state shared by DemoUiApp, Card, and Scene2DViewport."""
 
     def __init__(self, title: str) -> None:
-        self.lock = threading.RLock()
         self.title = title
         self.revision = 0
         self.cards = []
         self._running = True
+        self._owner_loop = None
+        self._owner_thread_id = None
         self._next_card_id = 1
         self._next_scene_id = 1
+
+    def set_owner(self, loop) -> None:
+        self._owner_loop = loop
+        self._owner_thread_id = threading.get_ident()
+
+    def check_owner(self) -> None:
+        if self._owner_thread_id is None:
+            return
+        if threading.get_ident() != self._owner_thread_id:
+            raise RuntimeError(
+                "DemoUiApp: model access must run on the owner event loop; "
+                "use loop.call_soon_threadsafe"
+            )
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is not self._owner_loop:
+            raise RuntimeError(
+                "DemoUiApp: model access must run on the owner event loop; "
+                "use loop.call_soon_threadsafe"
+            )
 
     def ensure_running(self) -> None:
         if not self._running:
             raise RuntimeError("DemoUiApp: model is stopped")
 
     def stop(self) -> None:
-        with self.lock:
-            self._running = False
+        self._running = False
 
     def bump_revision_locked(self) -> None:
         self.revision += 1
@@ -107,94 +155,24 @@ class _Model:
         return scene_id
 
     def snapshot(self) -> dict:
-        with self.lock:
-            return {
-                "schema_version": 1,
-                "revision": self.revision,
-                "title": self.title,
-                "cards": [card.to_dict() for card in self.cards],
-            }
-
-
-class _RequestHandler(BaseHTTPRequestHandler):
-    app: "DemoUiApp"
-
-    def log_message(self, format, *args):  # noqa: A002 - stdlib signature
-        pass
-
-    def _send_json(self, status: int, payload: dict) -> None:
-        body = json.dumps(payload, allow_nan=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_asset(self, route: str) -> None:
-        body = self.app._assets[route]
-        content_type = _ASSET_ROUTES[route][1]
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_static(self, path: str) -> None:
-        asset = self.app._resolve_static_asset(path)
-        if asset is None:
-            self.app._send_static_not_found(self)
-            return
-        file_path, content_type = asset
-        try:
-            body = file_path.read_bytes()
-        except OSError:
-            self.app._send_static_not_found(self)
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self) -> None:  # noqa: N802 - stdlib signature
-        path = self.path.split("?", 1)[0]
-        if path == "/" and self.app._static_root is not None:
-            self._send_static("/index.html")
-        elif path in _ASSET_ROUTES:
-            self._send_asset(path)
-        elif path == "/api/health":
-            self._send_json(200, {"status": "ok"})
-        elif path == "/api/state":
-            self._send_json(200, self.app._model.snapshot())
-        elif path == "/api" or path.startswith("/api/"):
-            self._send_json(404, {"error": "not found"})
-        elif path == "/sdk" or path.startswith("/sdk/"):
-            self.app._send_static_not_found(self)
-        elif self.app._static_root is not None:
-            self._send_static(path)
-        else:
-            self._send_json(404, {"error": "not found"})
-
-    def do_POST(self) -> None:  # noqa: N802
-        self._send_json(405, {"error": "method not allowed"})
-
-    do_PUT = do_POST
-    do_DELETE = do_POST
-    do_PATCH = do_POST
-
-
-class _ReusableThreadingHTTPServer(ThreadingHTTPServer):
-    allow_reuse_address = True
+        self.check_owner()
+        self.ensure_running()
+        return {
+            "schema_version": 1,
+            "revision": self.revision,
+            "title": self.title,
+            "cards": [card.to_dict() for card in self.cards],
+        }
 
 
 class DemoUiApp:
-    """Model ownership and local HTTP lifecycle for one SDK demo process."""
+    """Model ownership and local asyncio HTTP lifecycle for one SDK process."""
+
+    _NEW = "NEW"
+    _STARTING = "STARTING"
+    _RUNNING = "RUNNING"
+    _STOPPING = "STOPPING"
+    _STOPPED = "STOPPED"
 
     def __init__(
         self,
@@ -212,10 +190,16 @@ class DemoUiApp:
         self._assets = _load_assets()
         self._host = host
         self._port = port
-        self._server: Optional[ThreadingHTTPServer] = None
-        self._lifecycle_lock = threading.Lock()
-        self._timers = []
-        self._stopped = False
+        self._state = self._NEW
+        self._run_started = False
+        self._owner_loop = None
+        self._owner_thread_id = None
+        self._shutdown_event = None
+        self._ready_event = asyncio.Event()
+        self._cleanup_complete = None
+        self._cleanup_task = None
+        self._runner = None
+        self._site = None
 
     @staticmethod
     def _canonical_static_root(
@@ -264,95 +248,146 @@ class DemoUiApp:
         )
         return resolved, content_type
 
-    @staticmethod
-    def _send_static_not_found(handler: _RequestHandler) -> None:
-        body = b"not found"
-        handler.send_response(404)
-        handler.send_header("Content-Type", "text/plain; charset=utf-8")
-        handler.send_header("Content-Length", str(len(body)))
-        handler.send_header("X-Content-Type-Options", "nosniff")
-        handler.send_header("Cache-Control", "no-cache")
-        handler.end_headers()
-        handler.wfile.write(body)
+    def _application(self) -> web.Application:
+        application = web.Application()
+        application.router.add_route("*", "/{path:.*}", self._handle_request)
+        return application
+
+    async def _handle_request(self, request: web.Request) -> web.StreamResponse:
+        if request.method != "GET":
+            return _json_response(405, {"error": "method not allowed"})
+
+        path = request.raw_path.split("?", 1)[0]
+        if path == "/" and self._static_root is not None:
+            return self._static_response("/index.html")
+        if path in _ASSET_ROUTES:
+            _filename, content_type = _ASSET_ROUTES[path]
+            return _asset_response(self._assets[path], content_type)
+        if path == "/api/health":
+            return _json_response(200, {"status": "ok"})
+        if path == "/api/state":
+            return _json_response(200, self._model.snapshot())
+        if path == "/api" or path.startswith("/api/"):
+            return _json_response(404, {"error": "not found"})
+        if path == "/sdk" or path.startswith("/sdk/"):
+            return _static_not_found_response()
+        if self._static_root is not None:
+            return self._static_response(path)
+        return _json_response(404, {"error": "not found"})
+
+    def _static_response(self, path: str) -> web.StreamResponse:
+        asset = self._resolve_static_asset(path)
+        if asset is None:
+            return _static_not_found_response()
+        file_path, content_type = asset
+        try:
+            content_length = file_path.stat().st_size
+        except OSError:
+            return _static_not_found_response()
+        return web.FileResponse(
+            path=file_path,
+            headers={
+                "Content-Type": content_type,
+                "Content-Length": str(content_length),
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    async def _wait_until_ready(self) -> None:
+        await self._ready_event.wait()
+
+    async def _cleanup_impl(self) -> None:
+        try:
+            if self._runner is not None:
+                await self._runner.cleanup()
+        finally:
+            self._runner = None
+            self._site = None
+            self._shutdown_event = None
+            if self._ready_event is not None:
+                self._ready_event.clear()
+            self._model.stop()
+            self._state = self._STOPPED
+            if self._cleanup_complete is not None:
+                self._cleanup_complete.set()
+
+    async def _cleanup(self) -> None:
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(self._cleanup_impl())
+        await asyncio.shield(self._cleanup_task)
+
+    def _request_stop(self) -> None:
+        if self._state == self._NEW:
+            self._model.stop()
+            self._state = self._STOPPED
+        elif self._state in (self._STARTING, self._RUNNING):
+            self._model.stop()
+            self._state = self._STOPPING
+            if self._shutdown_event is not None:
+                self._shutdown_event.set()
+
+    async def _stop_on_owner_loop(self) -> None:
+        self._request_stop()
+        if self._cleanup_complete is not None and self._state != self._STOPPED:
+            await self._cleanup_complete.wait()
 
     def add_card(self, title: str) -> Card:
-        with self._model.lock:
-            self._model.ensure_running()
-            card_id = self._model.next_card_id()
-            card = Card(self._model, card_id, title)
-            self._model.cards.append(card)
-            self._model.bump_revision_locked()
+        self._model.check_owner()
+        self._model.ensure_running()
+        card_id = self._model.next_card_id()
+        card = Card(self._model, card_id, title)
+        self._model.cards.append(card)
+        self._model.bump_revision_locked()
         return card
 
-    def add_timer(self, interval_ms: int, callback: Callable[[], None]) -> TimerHandle:
-        require_positive_int(interval_ms, "interval_ms", "DemoUiApp: ")
-        with self._model.lock:
-            self._model.ensure_running()
-        stop_event = threading.Event()
-
-        def _run() -> None:
-            interval_s = interval_ms / 1000.0
-            while not stop_event.wait(interval_s):
-                try:
-                    callback()
-                except Exception:
-                    return
-
-        thread = threading.Thread(target=_run, daemon=True)
-        handle = TimerHandle(thread, stop_event)
-        self._timers.append(handle)
-        thread.start()
-        return handle
-
-    def run(self) -> None:
-        handler = type("_BoundHandler", (_RequestHandler,), {"app": self})
-        with self._lifecycle_lock:
-            if self._stopped:
-                return
-            server = _ReusableThreadingHTTPServer((self._host, self._port), handler)
-            self._server = server
-        if self._stopped:
-            server.server_close()
-            with self._lifecycle_lock:
-                self._server = None
+    async def run(self) -> None:
+        loop = asyncio.get_running_loop()
+        if self._run_started:
+            raise RuntimeError("DemoUiApp: run() may only be called once")
+        self._run_started = True
+        if self._state == self._STOPPED:
             return
-        actual_port = server.server_address[1]
-        print(f"RTI Demo UI listening on http://{self._host}:{actual_port}/")
+        self._owner_loop = loop
+        self._owner_thread_id = threading.get_ident()
+        self._model.set_owner(loop)
+        self._state = self._STARTING
+        self._shutdown_event = asyncio.Event()
+        self._cleanup_complete = asyncio.Event()
+        cancelled = False
         try:
-            server.serve_forever(poll_interval=0.2)
-        finally:
-            server.server_close()
-            with self._lifecycle_lock:
-                self._server = None
-
-    async def run_async(self) -> None:
-        """Run the blocking HTTP server without blocking an event loop."""
-        run_task = asyncio.create_task(asyncio.to_thread(self.run))
-        try:
-            await asyncio.shield(run_task)
-        except asyncio.CancelledError:
-            await asyncio.shield(self.stop_async())
-            await asyncio.shield(run_task)
-            raise
-
-    def stop(self) -> None:
-        with self._lifecycle_lock:
-            if self._stopped:
+            self._runner = web.AppRunner(self._application(), handle_signals=False)
+            await self._runner.setup()
+            self._site = web.TCPSite(self._runner, self._host, self._port)
+            await self._site.start()
+            sockets = self._site._server.sockets
+            actual_port = sockets[0].getsockname()[1]
+            if self._state == self._STOPPING:
                 return
-            self._stopped = True
-            server = self._server
-        self._model.stop()
-        if server is not None:
-            server.shutdown()
-        for handle in self._timers:
-            handle.cancel()
+            self._state = self._RUNNING
+            self._ready_event.set()
+            print(f"RTI Demo UI listening on http://{self._host}:{actual_port}/")
+            await self._shutdown_event.wait()
+        except asyncio.CancelledError:
+            cancelled = True
+            self._request_stop()
+        finally:
+            if self._state != self._STOPPED:
+                self._state = self._STOPPING
+            await self._cleanup()
+        if cancelled:
+            raise asyncio.CancelledError
 
-    async def stop_async(self) -> None:
-        """Stop the app without blocking an event loop during shutdown."""
-        await asyncio.to_thread(self.stop)
-
-    def __del__(self) -> None:
-        try:
-            self.stop()
-        except Exception:
-            pass
+    async def stop(self) -> None:
+        owner_loop = self._owner_loop
+        if owner_loop is None:
+            self._request_stop()
+            return
+        current_loop = asyncio.get_running_loop()
+        if current_loop is owner_loop:
+            await self._stop_on_owner_loop()
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            self._stop_on_owner_loop(), owner_loop
+        )
+        await asyncio.shield(asyncio.wrap_future(future))

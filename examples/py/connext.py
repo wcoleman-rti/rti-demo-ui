@@ -1,6 +1,5 @@
-"""Basic RTI Connext DDS pub/sub wired in via the §10 polling pattern (see
-docs/architecture.md §10.2). Requires rti.connext, installed
-separately (not an SDK runtime dependency).
+"""Basic RTI Connext DDS pub/sub wired into an asyncio TaskGroup. Requires
+rti.connext, installed separately (not an SDK runtime dependency).
 """
 
 import asyncio
@@ -35,9 +34,7 @@ async def main() -> None:
     reader = dds.DataReader(topic)
 
     async def process_samples() -> None:
-        async for data, info in reader.take_async():
-            if not info.valid:
-                continue
+        async for data in reader.take_data_async():
             scene.update_entity(
                 data.vehicle_id, x=data.x, y=data.y, heading=data.heading
             )
@@ -56,15 +53,14 @@ async def main() -> None:
             await asyncio.sleep(0.1)
 
     try:
-        await asyncio.gather(
-            app.run_async(),
-            process_samples(),
-            publish_samples(),
-        )
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(app.run())
+            tasks.create_task(process_samples())
+            tasks.create_task(publish_samples())
     except asyncio.CancelledError:
         pass
     finally:
-        await app.stop_async()
+        await app.stop()
 
 
 if __name__ == "__main__":

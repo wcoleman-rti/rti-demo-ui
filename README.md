@@ -1,8 +1,8 @@
 # RTI Demo UI
 
 A small GUI SDK for local RTI Connext demos with one shared browser frontend
-and two interchangeable state servers: Python 3.10+ (`ThreadingHTTPServer`,
-standard library only) and C++17 (pinned `cpp-httplib` + `nlohmann/json` via
+and two interchangeable state servers: Python 3.11+ with native
+`asyncio`/`aiohttp`, and C++17 (pinned `cpp-httplib` + `nlohmann/json` via
 CMake `FetchContent`). See [docs/architecture.md](docs/architecture.md)
 for the full design.
 
@@ -16,7 +16,7 @@ frontend build step, or DDS dependency in the SDK itself.
 ```text
 assets/       canonical index.html, runtime.js, theme.css
 cpp/          C++17 SDK core (rti_demo_ui::core)
-python/       Python 3.10+ SDK source (rti_demo_ui)
+python/       Python 3.11+ SDK source (rti_demo_ui)
 examples/     simple, gallery, and guarded Connext examples per language
 tests/        cpp (CTest), py (pytest model/HTTP), browser (Playwright)
 docs/         architecture, API, frontend, lifecycle, and contributor guides
@@ -30,7 +30,7 @@ pip install -e '.[dev]'           # + pytest, playwright, clang-format, pre-comm
 pre-commit install --install-hooks # install and provision checks before commits
 # One-time browser binary download, needed for tests/browser.
 playwright install chromium
-python examples/py/simple.py      # prints the URL to open, then blocks
+python examples/py/simple.py      # runs the asyncio app and prints its URL
 ```
 
 ## C++
@@ -114,17 +114,19 @@ never discover Connext or fetch this utility.
 
 ## Shutdown responsibilities
 
-`DemoUiApp.stop()` is idempotent: it stops accepting new mutations/timers,
-wakes `run()`, cancels and joins SDK-owned timers, and waits for in-flight
-HTTP handlers before returning. Destructors call `stop()`. Applications that
-start their own DDS/worker threads must join those workers themselves after
-`run()` returns and before destroying `DemoUiApp`.
+Python uses `await app.run()` and `await app.stop()`; `stop()` is idempotent,
+waits for aiohttp cleanup, and the app instance is single-use. Python model
+mutations are synchronous during configuration and must run on the owner event
+loop after startup. Foreign threads must schedule work with
+`loop.call_soon_threadsafe`. C++ retains its blocking, thread-safe lifecycle
+and SDK timer API. Applications that start their own DDS/worker threads must
+join those workers themselves before destroying `DemoUiApp`.
 The SDK does not install process-global signal handlers. Python examples catch
-`KeyboardInterrupt`; C++ examples use an example-local controller, so terminal
-Ctrl-C is a normal interactive exit path without a traceback.
+`asyncio.CancelledError`; C++ examples use an example-local controller, so
+terminal Ctrl-C is a normal interactive exit path without a traceback.
 
-See [docs/lifecycle.md](docs/lifecycle.md) for the startup bind guarantee,
-worker ownership, timer shutdown, and platform-specific control behavior.
+See [docs/lifecycle.md](docs/lifecycle.md) for startup, cancellation, worker
+ownership, and platform-specific control behavior.
 
 ## Quality gates
 

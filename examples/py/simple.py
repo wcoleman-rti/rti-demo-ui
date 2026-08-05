@@ -1,13 +1,12 @@
-"""Minimal example: one card, one scene, two entities, one link, and a timer
-moving one entity. See docs/architecture.md §10.1.
-"""
+"""Minimal asyncio example with an application-owned animation task."""
 
+import asyncio
 import math
 
 from rti_demo_ui import DemoUiApp
 
 
-def main() -> None:
+async def main() -> None:
     app = DemoUiApp(title="Simple Demo")
     card = app.add_card("Fleet Telemetry")
     scene = card.add_scene_2d(
@@ -17,26 +16,27 @@ def main() -> None:
     scene.add_entity("vehicle-2", x=50.0, y=50.0, heading=180.0)
     scene.add_link("vehicle-1", "vehicle-2")
 
-    angle = 0.0
+    async def animate() -> None:
+        angle = 0.0
+        while True:
+            angle += 0.05
+            scene.update_entity(
+                "vehicle-1",
+                x=40.0 * math.cos(angle),
+                y=40.0 * math.sin(angle),
+                heading=math.degrees(angle) % 360,
+            )
+            await asyncio.sleep(0.1)
 
-    def tick() -> None:
-        nonlocal angle
-        angle += 0.05
-        scene.update_entity(
-            "vehicle-1",
-            x=40.0 * math.cos(angle),
-            y=40.0 * math.sin(angle),
-            heading=math.degrees(angle) % 360,
-        )
-
-    app.add_timer(100, tick)
     try:
-        app.run()
-    except KeyboardInterrupt:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(app.run())
+            tasks.create_task(animate())
+    except asyncio.CancelledError:
         pass
     finally:
-        app.stop()
+        await app.stop()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

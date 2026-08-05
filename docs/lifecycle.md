@@ -1,40 +1,49 @@
 # Lifecycle
 
-`DemoUiApp` owns the local HTTP server, the component model, and SDK timers.
-Application code owns DDS workers and other application threads.
+Python `DemoUiApp` owns the local aiohttp server and component model.
+Applications own DDS readers/writers and all background tasks. C++ retains its
+blocking, thread-safe server and SDK timer ownership.
 
-## Run and Stop
+## Python Run and Stop
 
-`run()` binds the configured host and port, prints the URL only after a
-successful bind, and blocks in the HTTP loop. `stop()` is idempotent and is the
-supported programmatic shutdown API. It marks the model as stopping, wakes the
-server, cancels and joins SDK timers, and lets `run()` return. Call it from a
-non-signal control path.
+`await app.run()` binds the configured host and port, prints the URL only after
+a successful bind, and waits for cancellation or `await app.stop()`. The
+single-use lifecycle is `NEW -> STARTING -> RUNNING -> STOPPING -> STOPPED`.
+Concurrent or subsequent `run()` calls raise `RuntimeError`; `stop()` is
+idempotent in every state.
 
-Calling `stop()` before or while `run()` starts prevents the server from
-entering its listening loop. A failed bind raises an error containing the host
-and port and never prints a false listening message. Python enables immediate
-address reuse for its private HTTP server subclass.
+Calling `await app.stop()` before `run()` prevents binding. A failed bind
+raises an error and never prints a false listening message. Cancellation runs
+the same aiohttp cleanup path before `CancelledError` is propagated. Stop
+during startup signals shutdown without allowing the server to enter its wait.
+An app stopped from another event loop schedules shutdown on its owner loop.
 
-Application workers must be joined after `run()` returns and before the app is
-destroyed. Workers must not retain component pointers beyond app lifetime.
+Component factory and mutation methods remain synchronous. Configuration before
+startup is allowed; after startup, mutations and snapshots must run on the
+owner event loop and thread. Foreign threads must use
+`loop.call_soon_threadsafe`. Applications use `asyncio.TaskGroup` or retained
+tasks for periodic work; the SDK has no Python timer API.
+
+```python
+async def main() -> None:
+    app = DemoUiApp("Fleet Demo")
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(app.run())
+            tasks.create_task(receive_samples())
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await app.stop()
+```
 
 ## Python Ctrl-C
 
-Runnable Python examples catch `KeyboardInterrupt`, stop application workers,
-and call `app.stop()` in `finally`:
-
-```python
-try:
-    app.run()
-except KeyboardInterrupt:
-    pass
-finally:
-    app.stop()
-```
-
-The Connext example joins its writer and reader threads before final app
-cleanup. The SDK does not install process-global signal handlers.
+`asyncio.run()` cancels the top-level coroutine on Ctrl-C. Runnable Python
+examples catch `asyncio.CancelledError`, let their `TaskGroup` cancel and await
+application work, and call `await app.stop()` in `finally`. They do not catch
+`KeyboardInterrupt` inside the coroutine or create SDK-owned worker threads.
+The SDK does not install process-global signal handlers.
 
 ## C++ Ctrl-C
 

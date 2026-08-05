@@ -6,40 +6,56 @@ Install from the repository root:
 pip install -e .
 ```
 
-The public package is `rti_demo_ui`. A minimal application is:
-
-```python
-from rti_demo_ui import DemoUiApp
-
-app = DemoUiApp("Fleet demo")
-card = app.add_card("Fleet Telemetry")
-scene = card.add_scene_2d(600, 400, (-100.0, 100.0, -100.0, 100.0))
-scene.add_entity("vehicle-1", 0.0, 0.0)
-app.run()
-```
-
-`add_card`, scene mutations, and timers are safe from application threads.
-`stop()` is idempotent and should be called by application cleanup code.
-
-## Async Applications
-
-`run_async()` and `stop_async()` let an asyncio application compose the SDK
-lifecycle with its own coroutines. They run the current threaded HTTP backend
-outside the event loop; they do not make request handling or SDK timers native
-async operations.
+The public package is `rti_demo_ui`. Configure components synchronously, then
+own the server lifecycle with `asyncio`:
 
 ```python
 import asyncio
 
-await asyncio.gather(
-    app.run_async(),
-    receive_dds_samples(),
-    publish_dds_samples(),
-)
+from rti_demo_ui import DemoUiApp
+
+
+async def main() -> None:
+    app = DemoUiApp("Fleet demo")
+    card = app.add_card("Fleet Telemetry")
+    scene = card.add_scene_2d(600, 400, (-100.0, 100.0, -100.0, 100.0))
+    scene.add_entity("vehicle-1", 0.0, 0.0)
+    try:
+        await app.run()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await app.stop()
+
+
+asyncio.run(main())
 ```
 
-Call `await app.stop_async()` from cleanup to let `run_async()` return. If
-`run_async()` is cancelled, it stops the app before propagating cancellation.
+The app instance is single-use. `stop()` is idempotent and waits for aiohttp
+cleanup. Component factory and mutation methods remain synchronous, but after
+startup they must run on the app's owner event loop and thread. A foreign
+thread must schedule its work with `loop.call_soon_threadsafe`.
+
+## Structured Async Applications
+
+Application coroutines own periodic work and DDS integration through a
+`TaskGroup` or explicitly retained tasks:
+
+```python
+async def main() -> None:
+    app = DemoUiApp("Fleet demo")
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(app.run())
+            tasks.create_task(receive_dds_samples())
+            tasks.create_task(publish_dds_samples())
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await app.stop()
+```
+
+The SDK does not provide Python timer APIs or lifecycle compatibility adapters.
 
 ## Custom Frontend
 
@@ -58,8 +74,8 @@ app = DemoUiApp(
 ```
 
 The SDK serves `/sdk/...` assets and reserves `/api/...`; other files come from
-the validated root. See [Custom Frontends](../custom-frontends.md) for the route
-and security contract.
+the validated root. See [Custom Frontends](../custom-frontends.md) for the
+route and security contract.
 
 For complete signatures and validation semantics, use the Python type hints,
 docstrings, and [architecture](../architecture.md) as the source of truth.

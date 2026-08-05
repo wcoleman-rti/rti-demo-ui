@@ -37,15 +37,17 @@ class Card:
         require_positive_int(width, "width", "Scene2DViewport: ")
         require_positive_int(height, "height", "Scene2DViewport: ")
         require_valid_bounds(bounds, "Scene2DViewport: ")
-        with self._model.lock:
-            self._model.ensure_running()
-            scene_id = self._model.next_scene_id()
-            scene = Scene2DViewport(self._model, scene_id, width, height, bounds)
-            self._components.append(scene)
-            self._model.bump_revision_locked()
+        self._model.check_owner()
+        self._model.ensure_running()
+        scene_id = self._model.next_scene_id()
+        scene = Scene2DViewport(self._model, scene_id, width, height, bounds)
+        self._components.append(scene)
+        self._model.bump_revision_locked()
         return scene
 
     def to_dict(self) -> dict:
+        self._model.check_owner()
+        self._model.ensure_running()
         return {
             "id": self.id,
             "title": self.title,
@@ -111,12 +113,12 @@ class Scene2DViewport:
         require_valid_color(color, prefix)
         status = coerce_severity(status)
         freshness = coerce_freshness(freshness)
-        with self._model.lock:
-            self._model.ensure_running()
-            if id in self._entities:
-                raise ValueError(f"{prefix}entity '{id}' already exists")
-            self._entities[id] = _Entity(id, x, y, heading, color, status, freshness)
-            self._model.bump_revision_locked()
+        self._model.check_owner()
+        self._model.ensure_running()
+        if id in self._entities:
+            raise ValueError(f"{prefix}entity '{id}' already exists")
+        self._entities[id] = _Entity(id, x, y, heading, color, status, freshness)
+        self._model.bump_revision_locked()
 
     def update_entity(
         self,
@@ -134,68 +136,66 @@ class Scene2DViewport:
             require_finite(y, "y", prefix)
         if heading is not None:
             require_finite(heading, "heading", prefix)
-        with self._model.lock:
-            self._model.ensure_running()
-            entity = self._entities.get(id)
-            if entity is None:
-                raise ValueError(f"{prefix}entity '{id}' does not exist")
-            if x is not None:
-                entity.x = x
-            if y is not None:
-                entity.y = y
-            if heading is not None:
-                entity.heading = heading
-            if status is not None:
-                entity.status = coerce_severity(status)
-            if freshness is not None:
-                entity.freshness = coerce_freshness(freshness)
-            self._model.bump_revision_locked()
+        self._model.check_owner()
+        self._model.ensure_running()
+        entity = self._entities.get(id)
+        if entity is None:
+            raise ValueError(f"{prefix}entity '{id}' does not exist")
+        if x is not None:
+            entity.x = x
+        if y is not None:
+            entity.y = y
+        if heading is not None:
+            entity.heading = heading
+        if status is not None:
+            entity.status = coerce_severity(status)
+        if freshness is not None:
+            entity.freshness = coerce_freshness(freshness)
+        self._model.bump_revision_locked()
 
     def remove_entity(self, id: str) -> None:
         prefix = self._ERROR_PREFIX
-        with self._model.lock:
-            self._model.ensure_running()
-            if id not in self._entities:
-                raise ValueError(f"{prefix}entity '{id}' does not exist")
-            del self._entities[id]
-            self._links = [
-                link for link in self._links if link[0] != id and link[1] != id
-            ]
-            self._model.bump_revision_locked()
+        self._model.check_owner()
+        self._model.ensure_running()
+        if id not in self._entities:
+            raise ValueError(f"{prefix}entity '{id}' does not exist")
+        del self._entities[id]
+        self._links = [link for link in self._links if link[0] != id and link[1] != id]
+        self._model.bump_revision_locked()
 
     def add_link(
         self, source_id: str, target_id: str, status: Severity = Severity.success
     ) -> None:
         prefix = self._ERROR_PREFIX
         status = coerce_severity(status)
-        with self._model.lock:
-            self._model.ensure_running()
-            if source_id not in self._entities:
-                raise ValueError(f"{prefix}link source '{source_id}' does not exist")
-            if target_id not in self._entities:
-                raise ValueError(f"{prefix}link target '{target_id}' does not exist")
-            for existing_source, existing_target, _ in self._links:
-                if existing_source == source_id and existing_target == target_id:
-                    raise ValueError(
-                        f"{prefix}link ({source_id} -> {target_id}) already exists"
-                    )
-            self._links.append((source_id, target_id, status))
-            self._model.bump_revision_locked()
+        self._model.check_owner()
+        self._model.ensure_running()
+        if source_id not in self._entities:
+            raise ValueError(f"{prefix}link source '{source_id}' does not exist")
+        if target_id not in self._entities:
+            raise ValueError(f"{prefix}link target '{target_id}' does not exist")
+        for existing_source, existing_target, _ in self._links:
+            if existing_source == source_id and existing_target == target_id:
+                raise ValueError(
+                    f"{prefix}link ({source_id} -> {target_id}) already exists"
+                )
+        self._links.append((source_id, target_id, status))
+        self._model.bump_revision_locked()
 
     def remove_link(self, source_id: str, target_id: str) -> None:
         prefix = self._ERROR_PREFIX
-        with self._model.lock:
-            self._model.ensure_running()
-            for index, (existing_source, existing_target, _) in enumerate(self._links):
-                if existing_source == source_id and existing_target == target_id:
-                    del self._links[index]
-                    self._model.bump_revision_locked()
-                    return
-            raise ValueError(
-                f"{prefix}link ({source_id} -> {target_id}) does not exist"
-            )
+        self._model.check_owner()
+        self._model.ensure_running()
+        for index, (existing_source, existing_target, _) in enumerate(self._links):
+            if existing_source == source_id and existing_target == target_id:
+                del self._links[index]
+                self._model.bump_revision_locked()
+                return
+        raise ValueError(f"{prefix}link ({source_id} -> {target_id}) does not exist")
 
     def to_dict(self) -> dict:
+        self._model.check_owner()
+        self._model.ensure_running()
         return {
             "type": "scene2d",
             "id": self.id,

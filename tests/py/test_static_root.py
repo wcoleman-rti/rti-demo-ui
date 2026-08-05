@@ -1,8 +1,8 @@
+import asyncio
 import http.client
 import json
 import shutil
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -36,17 +36,31 @@ def _request(port: int, path: str):
     return response.status, headers, body
 
 
+def _start_app_on_thread(app):
+    loop = asyncio.new_event_loop()
+
+    def run_app():
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(app.run())
+
+    thread = threading.Thread(target=run_app, daemon=True)
+    thread.start()
+    asyncio.run_coroutine_threadsafe(app._wait_until_ready(), loop).result(2)
+    return loop, thread
+
+
 @pytest.fixture
 def custom_app(tmp_path):
     root = _prepare_static_root(tmp_path)
     app = DemoUiApp("Custom fixture", port=19390, host="127.0.0.1", static_root=root)
-    thread = threading.Thread(target=app.run, daemon=True)
-    thread.start()
-    time.sleep(0.2)
-    yield app, root
-    app.stop()
-    thread.join(2)
-    assert not thread.is_alive()
+    loop, thread = _start_app_on_thread(app)
+    try:
+        yield app, root
+    finally:
+        asyncio.run_coroutine_threadsafe(app.stop(), loop).result(2)
+        thread.join(2)
+        assert not thread.is_alive()
+        loop.close()
 
 
 def test_static_root_vectors(custom_app):
