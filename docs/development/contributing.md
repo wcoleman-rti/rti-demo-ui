@@ -35,6 +35,28 @@ Browser tests require the Playwright browser binary:
 PYTHONPATH=python .venv/bin/python -m pytest tests/browser -q
 ```
 
+The scene3d browser coverage additionally verifies the reproducible bundled
+runtime and launches the C++ arm example. Use the pinned Node version from
+`tools/scene3d/package.json` and run the same prerequisites locally:
+
+```bash
+node --version
+(cd tools/scene3d && npm ci --ignore-scripts && npm run build:runtime3d)
+sha256sum --check assets/runtime3d.sha256
+git diff --exit-code -- assets/runtime3d.js assets/runtime3d.sha256
+cmake -S . -B build-browser -DBUILD_TESTING=OFF -DRTI_DEMO_BUILD_EXAMPLES=ON
+cmake --build build-browser --target rti_demo_ui_arm3d --parallel
+export RTI_DEMO_CPP_ARM3D="$(find build-browser -type f \
+	-name rti_demo_ui_arm3d -perm -111 -print -quit)"
+[[ -n "$RTI_DEMO_CPP_ARM3D" ]]
+RTI_DEMO_CPP_ARM3D="$PWD/$RTI_DEMO_CPP_ARM3D" \
+	PYTHONPATH=python .venv/bin/python -m pytest tests/browser -q
+```
+
+This builds Node assets only; the browser test launches the C++ executable and
+does not require a Node development server. The C++ path must be present, so
+the browser suite does not silently skip its cross-language assertions.
+
 The C++ and Python HTTP tests load the shared route vectors from
 `tests/fixtures/static_route_vectors.json`. Add behavior there first when a
 route contract changes, then update both language tests.
