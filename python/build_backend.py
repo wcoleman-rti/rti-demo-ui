@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from shutil import copy2
 
@@ -22,4 +23,5 @@ class editable_wheel(_editable_wheel):
         source_root = Path(__file__).parents[1] / "assets"
         destination = Path(__file__).parent / "rti_demo_ui" / "_assets"
         if not destination.exists() and not destination.is_symlink():
-            destination.symlink_to(source_root, target_is_directory=True)
+            relative_source = os.path.relpath(source_root, destination.parent)
+            destination.symlink_to(relative_source, target_is_directory=True)
