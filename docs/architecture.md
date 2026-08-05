@@ -321,7 +321,9 @@ class DemoUiApp:
     self, interval_ms: int, callback: Callable[[], None]
   ) -> TimerHandle: ...
     def run(self) -> None: ...
+    async def run_async(self) -> None: ...
     def stop(self) -> None: ...
+    async def stop_async(self) -> None: ...
 
 class Card:
   def add_scene_2d(
@@ -452,6 +454,11 @@ Destructors call `stop()` and join SDK-owned threads. Application-owned workers
 must not retain component pointers beyond app lifetime. Do not hold the model
 mutex while serializing JSON, writing sockets, invoking callbacks, or joining
 threads.
+
+Python also provides `run_async()` and `stop_async()` as asyncio-compatible
+wrappers around this threaded lifecycle. They do not change the HTTP backend or
+SDK timers to native async implementations. Cancelling `run_async()` stops the
+app before it propagates cancellation.
 
 ## 9. Build and Packaging
 

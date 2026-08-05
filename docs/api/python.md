@@ -21,6 +21,26 @@ app.run()
 `add_card`, scene mutations, and timers are safe from application threads.
 `stop()` is idempotent and should be called by application cleanup code.
 
+## Async Applications
+
+`run_async()` and `stop_async()` let an asyncio application compose the SDK
+lifecycle with its own coroutines. They run the current threaded HTTP backend
+outside the event loop; they do not make request handling or SDK timers native
+async operations.
+
+```python
+import asyncio
+
+await asyncio.gather(
+    app.run_async(),
+    receive_dds_samples(),
+    publish_dds_samples(),
+)
+```
+
+Call `await app.stop_async()` from cleanup to let `run_async()` return. If
+`run_async()` is cancelled, it stops the app before propagating cancellation.
+
 ## Custom Frontend
 
 Pass a string or `PathLike[str]` root containing `index.html`:

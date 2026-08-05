@@ -5,6 +5,7 @@ See docs/architecture.md §3, §5, §7.2, §8.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -324,6 +325,16 @@ class DemoUiApp:
             with self._lifecycle_lock:
                 self._server = None
 
+    async def run_async(self) -> None:
+        """Run the blocking HTTP server without blocking an event loop."""
+        run_task = asyncio.create_task(asyncio.to_thread(self.run))
+        try:
+            await asyncio.shield(run_task)
+        except asyncio.CancelledError:
+            await asyncio.shield(self.stop_async())
+            await asyncio.shield(run_task)
+            raise
+
     def stop(self) -> None:
         with self._lifecycle_lock:
             if self._stopped:
@@ -335,6 +346,10 @@ class DemoUiApp:
             server.shutdown()
         for handle in self._timers:
             handle.cancel()
+
+    async def stop_async(self) -> None:
+        """Stop the app without blocking an event loop during shutdown."""
+        await asyncio.to_thread(self.stop)
 
     def __del__(self) -> None:
         try:

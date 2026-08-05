@@ -3,10 +3,10 @@ docs/architecture.md §10.2). Requires rti.connext, installed
 separately (not an SDK runtime dependency).
 """
 
+import asyncio
 import math
-import threading
-import time
 
+import rti.asyncio  # noqa: F401 - installs Connext's asyncio integration
 import rti.connextdds as dds
 import rti.types as idl
 
@@ -21,7 +21,7 @@ class VehicleState:
     heading: float = 0.0
 
 
-def main() -> None:
+async def main() -> None:
     app = DemoUiApp(title="Connext Demo")
     card = app.add_card("Fleet Telemetry")
     scene = card.add_scene_2d(
@@ -31,14 +31,20 @@ def main() -> None:
 
     participant = dds.DomainParticipant(domain_id=0)
     topic = dds.Topic(participant, "VehicleStateTopic", VehicleState)
-    writer = dds.DataWriter(participant.implicit_publisher, topic)
-    reader = dds.DataReader(participant.implicit_subscriber, topic)
+    writer = dds.DataWriter(topic)
+    reader = dds.DataReader(topic)
 
-    stop_event = threading.Event()
+    async def process_samples() -> None:
+        async for data, info in reader.take_async():
+            if not info.valid:
+                continue
+            scene.update_entity(
+                data.vehicle_id, x=data.x, y=data.y, heading=data.heading
+            )
 
-    def writer_worker() -> None:
+    async def publish_samples() -> None:
         angle = 0.0
-        while not stop_event.is_set():
+        while True:
             angle += 0.05
             sample = VehicleState(
                 vehicle_id="vehicle-1",
@@ -47,33 +53,19 @@ def main() -> None:
                 heading=math.degrees(angle) % 360,
             )
             writer.write(sample)
-            time.sleep(0.1)
-
-    def reader_worker() -> None:
-        while not stop_event.is_set():
-            for data, info in reader.take():
-                if not info.valid:
-                    continue
-                scene.update_entity(
-                    data.vehicle_id, x=data.x, y=data.y, heading=data.heading
-                )
-            time.sleep(0.05)
-
-    writer_thread = threading.Thread(target=writer_worker, daemon=True)
-    reader_thread = threading.Thread(target=reader_worker, daemon=True)
-    writer_thread.start()
-    reader_thread.start()
+            await asyncio.sleep(0.1)
 
     try:
-        app.run()
-    except KeyboardInterrupt:
+        await asyncio.gather(
+            app.run_async(),
+            process_samples(),
+            publish_samples(),
+        )
+    except asyncio.CancelledError:
         pass
     finally:
-        stop_event.set()
-        writer_thread.join()
-        reader_thread.join()
-        app.stop()
+        await app.stop_async()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

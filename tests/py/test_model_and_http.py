@@ -1,3 +1,4 @@
+import asyncio
 import json
 import socket
 import threading
@@ -175,3 +176,28 @@ def test_immediate_restart_after_stop():
         app.stop()
         thread.join(1)
         assert not thread.is_alive()
+
+
+def test_async_lifecycle_stops_server():
+    async def scenario():
+        app = make_app(19090)
+        run_task = asyncio.create_task(app.run_async())
+        await asyncio.sleep(0.1)
+        await app.stop_async()
+        await asyncio.wait_for(run_task, timeout=1)
+
+    asyncio.run(scenario())
+
+
+def test_async_run_cancellation_stops_server():
+    async def scenario():
+        app = make_app(19091)
+        run_task = asyncio.create_task(app.run_async())
+        await asyncio.sleep(0.1)
+        run_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(run_task, timeout=1)
+
+    asyncio.run(scenario())
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 19091))
