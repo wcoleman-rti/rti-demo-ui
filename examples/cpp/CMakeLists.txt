@@ -9,6 +9,12 @@ target_compile_definitions(rti_demo_ui_gallery PRIVATE
     RTI_DEMO_GALLERY_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/gallery"
 )
 
+add_executable(rti_demo_ui_arm3d arm3d.cpp)
+target_link_libraries(rti_demo_ui_arm3d PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_arm3d PRIVATE
+    RTI_DEMO_ARM3D_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/arm3d"
+)
+
 option(BUILD_CONNEXT_EXAMPLE "Build the guarded Connext DDS example" OFF)
 if(BUILD_CONNEXT_EXAMPLE)
     include(FetchContent)

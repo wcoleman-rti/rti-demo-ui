@@ -11,7 +11,8 @@ animation. The SDK does not serialize markup, DDS objects, or animation frames.
 The supported browser transport is `/sdk/client.js`; `runtime.js` is the
 built-in renderer that consumes it.
 
-The component model includes `DemoUiApp`, `Card`, `Scene2DViewport`, table,
+The component model includes `DemoUiApp`, `Card`, `Scene2DViewport`,
+`Scene3DViewport`, table,
 metric, text, badge, log, and opaque custom components. The SDK is local and
 single-process. Authentication, TLS termination, public deployment, multiple
 browser sessions, push transports, and arbitrary server-side widget handles
@@ -59,6 +60,7 @@ Both backends expose these SDK-owned routes:
 | `GET /` | built-in or static-root `index.html` | `no-cache` |
 | `GET /sdk/index.html` | canonical SDK HTML | `no-cache` |
 | `GET /sdk/runtime.js` | canonical renderer | `no-cache` |
+| `GET /sdk/runtime3d.js` | optional bundled Three.js renderer | `no-cache` |
 | `GET /sdk/client.js` | canonical browser client | `no-cache` |
 | `GET /sdk/theme.css` | canonical theme | `no-cache` |
 | `GET /api/health` | `{"status":"ok"}` | `no-store` |
@@ -123,6 +125,7 @@ objects are created only when requested.
 `Card` provides:
 
 - `add_scene_2d(width, height, bounds)`
+- `add_scene_3d(asset, camera=None, background="#0a0e17", grid=False)`
 - `add_table(columns, rows, empty_state="")`
 - `add_metric(label, value, severity=None)`
 - `add_text(text, severity=None)`
@@ -142,6 +145,16 @@ must not use SDK-reserved types. Custom handles support `set_data` and
 `aging`, or `stale`. Scene bounds, coordinates, headings, widths, heights, and
 intervals are finite/positive as appropriate. Python raises `ValueError` and
 C++ throws `std::invalid_argument` for validation failures.
+
+Scene3D uses a complete JSON data object with `asset`, `nodes`, `camera`,
+`background`, and `grid`. Nodes contain immutable IDs and paths plus position,
+quaternion rotation, positive scale, visibility, and severity. Paths address
+imported glTF nodes using JSON Pointer escaping; the backend validates lexical
+shape while the browser reports unresolved paths. Coordinates are local glTF
+right-handed, Y-up meters. `add_node`, partial `update_node`, `remove_node`,
+atomic `apply_node_batch`, and atomic `set_config` preserve the same revision
+rules as the other components. Removed IDs remain stale for the scene
+lifetime.
 
 ## 7. Commands
 
@@ -198,15 +211,21 @@ Snapshots are immutable by convention and the client does not render markup.
 `runtime.js` is a client consumer. It reconciles cards/components by stable ID,
 keeps presentation-only table sorting local to the browser, and interpolates
 scene positions with `requestAnimationFrame`. `prefers-reduced-motion` applies
-target positions immediately. Unsupported custom components show a visible
-isolated diagnostic.
+target positions immediately. For `scene3d`, it dynamically imports the
+optional `/sdk/runtime3d.js` module only after receiving a scene component.
+That renderer caches GLB parsing by URL, clones per-scene hierarchies and
+materials, owns orbit controls and browser-local selection, and always keeps a
+semantic node list and textual fallback beside the canvas. Unsupported custom
+components show a visible isolated diagnostic.
 
 ## 9. Build and Tests
 
 C++ uses pinned cpp-httplib v0.18.3 and nlohmann/json v3.11.3 through CMake
 `FetchContent`; nlohmann/json is a public link dependency because it appears in
 public C++ APIs. Python requires `aiohttp>=3.10,<4`; development extras include
-pytest, pytest-asyncio, and Playwright.
+pytest, pytest-asyncio, and Playwright. The optional runtime3d artifact is built
+with Node 22.14.0, Three.js 0.173.0, and esbuild 0.25.0 from
+`tools/scene3d/package-lock.json`.
 
 The focused validation gates are:
 

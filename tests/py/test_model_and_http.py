@@ -114,6 +114,7 @@ async def test_http_contract_routes():
             for path, content_type in [
                 ("/", "text/html; charset=utf-8"),
                 ("/sdk/runtime.js", "application/javascript; charset=utf-8"),
+                ("/sdk/runtime3d.js", "application/javascript; charset=utf-8"),
                 ("/sdk/client.js", "application/javascript; charset=utf-8"),
                 ("/sdk/theme.css", "text/css; charset=utf-8"),
             ]:

@@ -134,3 +134,84 @@ body {
     color: var(--sdk-danger);
     font-size: 0.85rem;
 }
+
+.sdk-scene3d-host {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.sdk-scene3d-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.sdk-scene3d-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+    gap: 10px;
+}
+
+.sdk-scene3d-viewport {
+    position: relative;
+    min-width: 0;
+}
+
+.sdk-scene3d-canvas {
+    width: 100%;
+    min-height: 280px;
+    aspect-ratio: 16 / 9;
+    display: block;
+    background: var(--sdk-surface);
+    border: 1px solid var(--sdk-border);
+}
+
+.sdk-scene3d-loading {
+    position: absolute;
+    inset: 1px;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    color: var(--sdk-muted);
+    background: color-mix(in srgb, var(--sdk-surface) 88%, transparent);
+    pointer-events: none;
+}
+
+.sdk-scene3d-loading[hidden] {
+    display: none;
+}
+
+.sdk-scene3d-list {
+    min-height: 120px;
+    border: 1px solid var(--sdk-border);
+    background: var(--sdk-surface);
+    overflow: auto;
+}
+
+.sdk-scene3d-list [role="option"] {
+    padding: 8px;
+    cursor: pointer;
+}
+
+.sdk-scene3d-list [role="option"][aria-selected="true"] {
+    color: var(--sdk-bg);
+    background: var(--sdk-accent);
+}
+
+.sdk-scene3d-list [role="option"]:focus-visible,
+.sdk-scene3d-toolbar button:focus-visible {
+    outline: 3px solid var(--sdk-warning);
+    outline-offset: 2px;
+}
+
+.sdk-scene3d-fallback-text,
+.sdk-scene3d-live {
+    color: var(--sdk-muted);
+}
+
+@media (max-width: 640px) {
+    .sdk-scene3d-body {
+        grid-template-columns: 1fr;
+    }
+}

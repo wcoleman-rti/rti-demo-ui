@@ -47,6 +47,7 @@ int main() {
     Route routes[] = {
         {"/", "text/html; charset=utf-8"},
         {"/sdk/runtime.js", "application/javascript; charset=utf-8"},
+        {"/sdk/runtime3d.js", "application/javascript; charset=utf-8"},
         {"/sdk/client.js", "application/javascript; charset=utf-8"},
         {"/sdk/theme.css", "text/css; charset=utf-8"},
     };
@@ -132,6 +133,15 @@ int main() {
     auto theme_response = client.Get("/sdk/theme.css");
     CHECK(theme_response != nullptr);
     if (theme_response) CHECK(theme_response->body == theme_contents.str());
+
+    std::ifstream runtime3d_file(SOURCE_ROOT "/assets/runtime3d.js",
+                                 std::ios::binary);
+    std::ostringstream runtime3d_contents;
+    runtime3d_contents << runtime3d_file.rdbuf();
+    auto runtime3d_response = client.Get("/sdk/runtime3d.js");
+    CHECK(runtime3d_response != nullptr);
+    if (runtime3d_response)
+        CHECK(runtime3d_response->body == runtime3d_contents.str());
 
     app.stop();
     server_thread.join();

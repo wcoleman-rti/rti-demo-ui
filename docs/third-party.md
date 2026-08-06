@@ -25,6 +25,22 @@ runtime dependencies.
 | clang-format | 18.1.8 | C++ formatting | Apache-2.0 with LLVM Exception | [llvm/llvm-project](https://github.com/llvm/llvm-project) |
 | pre-commit | 4.6.1 | Local quality-check orchestration | MIT | [pre-commit/pre-commit](https://github.com/pre-commit/pre-commit) |
 
+## Optional Scene3D Bundle
+
+The opt-in browser renderer is built from exact npm pins in
+`tools/scene3d/package-lock.json`. The generated `assets/runtime3d.js` is a
+self-contained ES2020 browser module; applications do not contact a CDN or
+run Node.js at runtime.
+
+| Component | Version | Purpose | License | Source |
+| --- | --- | --- | --- | --- |
+| Three.js | 0.173.0 | WebGL scene graph, GLTFLoader, OrbitControls | MIT | [mrdoob/three.js](https://github.com/mrdoob/three.js) |
+| esbuild | 0.25.0 | Reproducible browser bundle build tool | MIT | [evanw/esbuild](https://github.com/evanw/esbuild) |
+
+Update the pins with `npm ci --ignore-scripts`, rebuild the artifact, refresh
+`assets/runtime3d.sha256`, and review the generated diff and upstream license
+notices together.
+
 ## Optional Connext Example Dependencies
 
 These components are required only when building or running the guarded Connext

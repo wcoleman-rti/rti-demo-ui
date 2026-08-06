@@ -8,10 +8,12 @@ for the full design. Direct third-party dependencies and licenses are listed
 in [docs/third-party.md](docs/third-party.md).
 
 Each backend owns the authoritative component model (`DemoUiApp`, `Card`,
-`Scene2DViewport`, generic state components, and custom components) and serves
+`Scene2DViewport`, `Scene3DViewport`, generic state components, and custom
+components) and serves
 an identical v2 JSON snapshot; the browser owns DOM/SVG rendering via the
-supported `/sdk/client.js` transport and shared `runtime.js`. There is no
-Node.js process, frontend build step, or DDS dependency in the SDK itself.
+supported `/sdk/client.js` transport and shared `runtime.js`. Scene3D is an
+opt-in dynamic import of the bundled `/sdk/runtime3d.js`; ordinary pages never
+load Three.js. There is no Node.js process or DDS dependency at runtime.
 
 ## Quick usage
 
@@ -60,10 +62,24 @@ See [examples/py/simple.py](examples/py/simple.py) and
 [examples/cpp/simple.cpp](examples/cpp/simple.cpp) for animation and graceful
 interactive shutdown.
 
+## Arm 3D pilot
+
+The application-owned arm pilot serves a deterministic GLB and updates five
+mock joint targets without DDS or a Node.js development server:
+
+```bash
+PYTHONPATH=python python examples/py/arm3d.py
+./build/cpp/examples/rti_demo_ui_arm3d
+```
+
+Open the printed URL. The model, stable node paths, coordinate conventions,
+fallback behavior, and replacement guidance are documented in
+[examples/web/arm3d/README.md](examples/web/arm3d/README.md).
+
 ## Repository layout
 
 ```text
-assets/       canonical index.html, runtime.js, client.js, theme.css
+assets/       canonical index.html, runtime.js, runtime3d.js, client.js, theme.css
 cpp/          C++17 SDK core (rti_demo_ui::core)
 python/       Python 3.11+ SDK source (rti_demo_ui)
 examples/     simple, gallery, and guarded Connext examples per language
@@ -115,7 +131,8 @@ passes its own `examples/web/gallery` directory as `static_root` and serves at
 ## Custom frontends
 
 Pass an application-owned directory containing `index.html` as `static_root`.
-The SDK keeps `/sdk/index.html`, `/sdk/runtime.js`, `/sdk/client.js`, `/sdk/theme.css`,
+The SDK keeps `/sdk/index.html`, `/sdk/runtime.js`, `/sdk/runtime3d.js`,
+`/sdk/client.js`, `/sdk/theme.css`,
 `/api/health`, and `/api/state` reserved in both modes. Other paths resolve
 under the validated static root; traversal, absolute paths, directories, and
 symlinks escaping the root are rejected. Unknown `/api/` paths return JSON 404;
@@ -138,7 +155,7 @@ the SDK package.
 
 For C++, link `rti_demo_ui::core` from `cpp/` with `add_subdirectory()` and
 pass a deployed frontend directory to the `DemoUiApp` `static_root` argument.
-The C++ library embeds all four SDK assets and never uses
+The C++ library embeds all five SDK assets and never uses
 `cpp-httplib::set_mount_point()`.
 
 ## Optional Connext examples

@@ -35,6 +35,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+      - run: npm ci --ignore-scripts
+        working-directory: tools/scene3d
+      - run: npm run build:runtime3d
+        working-directory: tools/scene3d
+      - run: sha256sum --check assets/runtime3d.sha256
+      - run: git diff --exit-code -- assets/runtime3d.js assets/runtime3d.sha256
+      - run: cmake -S . -B build-browser -DBUILD_TESTING=OFF -DRTI_DEMO_BUILD_EXAMPLES=ON
+      - run: cmake --build build-browser --target rti_demo_ui_arm3d --parallel
+      - run: |
+          ARM3D="$(find "$PWD/build-browser" -type f -name rti_demo_ui_arm3d -perm -111 -print -quit)"
+          test -n "$ARM3D"
+          test -x "$ARM3D"
+          echo "RTI_DEMO_CPP_ARM3D=$ARM3D" >> "$GITHUB_ENV"
       - run: pip install -e . -e '.[dev]'
       - run: playwright install --with-deps chromium
       - run: PYTHONPATH=python pytest tests/browser -v

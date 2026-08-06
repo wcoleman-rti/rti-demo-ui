@@ -42,3 +42,22 @@ hosts.
 
 For complete signatures and validation semantics, use the public headers and
 [architecture](../architecture.md) as the source of truth.
+
+## Scene3D
+
+The C++ API mirrors Python and serializes the same generic scene contract:
+
+```cpp
+auto* scene = app.add_card("Arm")->add_scene_3d("/models/scene.glb");
+scene->add_node("shoulder", "Arm/Shoulder",
+                {0.0, 0.0, 0.0},
+                {0.0, 0.0, 0.564642, 0.825336});
+scene->update_node("shoulder", std::vector<double>{0.1, 0.0, 0.0});
+scene->apply_node_batch(Json::array({
+    Json{{"op", "update"}, {"id", "shoulder"}, {"visible", true}}
+}));
+```
+
+Transforms are glTF right-handed, Y-up meters and local to the addressed
+imported node. Node IDs remain stale after removal. Batch validation is
+copy-then-commit, so failures leave state and revisions unchanged.

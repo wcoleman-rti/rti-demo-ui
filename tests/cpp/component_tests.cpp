@@ -91,11 +91,41 @@ void test_timer_cancel_idempotent() {
     app.stop();
 }
 
+void test_scene3d_contract() {
+    DemoUiApp app("Scene", 19185);
+    Card* card = app.add_card("Arm");
+    Scene3DViewport* scene = card->add_scene_3d("/models/surgical-arm.glb");
+    Json initial = scene->to_json_locked();
+    CHECK(initial["type"] == "scene3d");
+    CHECK(initial["data"]["nodes"].empty());
+    CHECK(initial["data"]["camera"]["mode"] == "orbit");
+    scene->apply_node_batch(Json::array({
+        {{"op", "add"}, {"id", "shoulder"}, {"path", "Arm/Shoulder"},
+         {"rotation", {0.0, 0.0, 0.0, 1.0}}},
+        {{"op", "update"}, {"id", "shoulder"}, {"position", {0.1, 0.0, 0.0}}}}));
+    Json snapshot = scene->to_json_locked();
+    CHECK(snapshot["data"]["nodes"][0]["path"] == "Arm/Shoulder");
+    CHECK(snapshot["data"]["nodes"][0]["rotation"] == Json({0.0, 0.0, 0.0, 1.0}));
+    const auto unchanged = snapshot.dump();
+    scene->apply_node_batch(Json::array({{{"op", "update"},
+                                          {"id", "shoulder"},
+                                          {"position", {0.1, 0.0, 0.0}}}}));
+    CHECK(scene->to_json_locked().dump() == unchanged);
+    scene->remove_node("shoulder");
+    EXPECT_THROWS(scene->add_node("shoulder", "Arm/Shoulder"));
+    EXPECT_THROWS(scene->apply_node_batch(Json::array({
+        {{"op", "add"}, {"id", "a"}, {"path", "Arm/A"},
+         {"rotation", {0.0, 0.0, 0.0, 1.0}}},
+        {{"op", "add"}, {"id", "a"}, {"path", "Arm/B"},
+         {"rotation", {0.0, 0.0, 0.0, 1.0}}}})));
+}
+
 int main() {
     test_revision_increments_once_per_mutation();
     test_failed_mutation_does_not_change_revision();
     test_entity_removal_removes_links();
     test_validation_errors();
+    test_scene3d_contract();
     test_timer_cancel_idempotent();
     if (g_failures == 0) {
         std::printf("All component tests passed\n");

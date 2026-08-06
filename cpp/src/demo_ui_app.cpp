@@ -434,7 +434,9 @@ std::vector<Json> CommandSchema::validate(const Json& value) const {
 
 DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
                      std::filesystem::path static_root)
-    : host_(std::move(host)), port_(port), model_(std::move(title)) {
+    : host_(std::move(host)),
+      port_(port),
+      model_(std::move(title), static_root) {
     if (model_.title_.empty()) {
         throw std::invalid_argument("DemoUiApp: title must not be empty");
     }
@@ -460,6 +462,7 @@ DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
                 "DemoUiApp: static_root must contain a regular index.html");
         }
         static_root_ = canonical_root;
+        model_.set_static_root(canonical_root);
     }
     server_ = std::make_unique<httplib::Server>();
 }
@@ -598,6 +601,11 @@ void DemoUiApp::run() {
     server_->Get("/sdk/runtime.js",
                  [](const httplib::Request&, httplib::Response& res) {
                      send_asset(res, detail::embedded_runtime_js(),
+                                "application/javascript; charset=utf-8");
+                 });
+    server_->Get("/sdk/runtime3d.js",
+                 [](const httplib::Request&, httplib::Response& res) {
+                     send_asset(res, detail::embedded_runtime3d_js(),
                                 "application/javascript; charset=utf-8");
                  });
     server_->Get("/sdk/client.js",

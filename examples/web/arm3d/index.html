@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTI Demo UI - Arm 3D</title>
+<link rel="stylesheet" href="/sdk/theme.css">
+</head>
+<body>
+<main class="sdk-app arm3d-app">
+  <div class="sdk-connection-banner" id="sdk-connection-banner">Connection lost. Retrying...</div>
+  <header>
+    <p class="arm3d-kicker">Application-owned visualization</p>
+    <h1 id="sdk-app-title">Surgical arm</h1>
+    <p>Five mock joint targets, rendered from the SDK scene contract.</p>
+  </header>
+  <section class="arm3d-layout" aria-label="Surgical arm monitor">
+    <div id="arm3d-scene" aria-label="Surgical arm scene"></div>
+    <aside class="arm3d-readout">
+      <h2>Live state</h2>
+      <p><span>Status</span> <strong id="arm3d-status">Connecting</strong></p>
+      <p><span>Target cycle</span> <strong id="arm3d-cycle">0</strong></p>
+      <div id="arm3d-nodes" class="arm3d-node-readout"></div>
+    </aside>
+  </section>
+</main>
+<script type="module" src="./arm3d.js"></script>
+</body>
+</html>

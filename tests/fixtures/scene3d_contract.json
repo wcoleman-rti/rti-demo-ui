@@ -1,0 +1,38 @@
+{
+  "defaults": {
+    "asset": "/models/surgical-arm.glb",
+    "expected_data": {
+      "asset": "/models/surgical-arm.glb",
+      "nodes": [],
+      "camera": {"mode": "orbit", "position": [4.0, 3.0, 5.0], "target": [0.0, 0.0, 0.0], "min_distance": 0.1, "max_distance": 1000.0},
+      "background": "#0a0e17",
+      "grid": false
+    }
+  },
+  "canonical_batch": {
+    "batch": [
+      {"op": "add", "id": "shoulder", "path": "Arm/Shoulder", "rotation": [0.0, 0.0, 0.0, 1.0]},
+      {"op": "update", "id": "shoulder", "position": [0.1, 0.0, 0.0]}
+    ],
+    "expected": {"revision_delta": 1, "node": {"id": "shoulder", "path": "Arm/Shoulder", "position": [0.1, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0], "visible": true, "status": "success"}},
+    "no_op": {"operation": {"op": "update", "id": "shoulder", "position": [0.1, 0.0, 0.0]}, "revision_delta": 0, "serialized_data_unchanged": true}
+  },
+  "valid": [
+    {"name": "escaped path", "path": "Arm/Joint~1A~0B"},
+    {"name": "distinct duplicate names", "paths": ["Arm/Left/Joint", "Arm/Right/Joint"]},
+    {"name": "local transform", "position": [0.1, 0.0, -0.2], "rotation": [0.0, 0.0, 0.564642, 0.825336]}
+  ],
+  "invalid": [
+    {"name": "asset", "code": "invalid_asset", "message": "Scene3DViewport: asset must be an absolute same-origin .glb path under static_root", "asset": "https://example.com/model.glb", "revision_unchanged": true},
+    {"name": "transform cardinality", "code": "invalid_transform", "message": "Scene3DViewport: transform arrays must have exactly 3, 4, and 3 finite values", "revision_unchanged": true},
+    {"name": "rotation", "code": "invalid_rotation", "message": "Scene3DViewport: rotation must be a unit quaternion in [x, y, z, w] order", "revision_unchanged": true},
+    {"name": "scale", "code": "invalid_scale", "message": "Scene3DViewport: scale values must be finite and greater than zero", "revision_unchanged": true},
+    {"name": "node id", "code": "invalid_node_id", "message": "Scene3DViewport: node ID must be non-empty", "revision_unchanged": true},
+    {"name": "duplicate node id", "code": "duplicate_node_id", "message": "Scene3DViewport: node ID is already in use", "revision_unchanged": true},
+    {"name": "node path", "code": "invalid_node_path", "message": "Scene3DViewport: node path is invalid", "revision_unchanged": true},
+    {"name": "camera", "code": "invalid_camera", "message": "Scene3DViewport: camera configuration is invalid", "revision_unchanged": true},
+    {"name": "duplicate operation", "code": "duplicate_operation", "message": "Scene3DViewport: batch contains a duplicate operation", "revision_unchanged": true},
+    {"name": "stale node id", "code": "stale_node_id", "message": "Scene3DViewport: node ID is stale", "revision_unchanged": true}
+  ],
+  "browser_node_resolution": "scene3d_node_resolution.json"
+}

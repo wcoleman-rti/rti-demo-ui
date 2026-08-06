@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import re
 from typing import Dict, List, Optional
 
 from .types import (
@@ -69,6 +71,25 @@ class Card:
             width,
             height,
             bounds,
+        )
+        return self._add_component(scene)
+
+    def add_scene_3d(
+        self,
+        asset: str,
+        camera: Optional[dict] = None,
+        background: str = "#0a0e17",
+        grid: bool = False,
+    ) -> "Scene3DViewport":
+        self._model.check_owner()
+        self._model.ensure_running()
+        scene = Scene3DViewport(
+            self._model,
+            self._model.next_component_id("scene3d"),
+            asset,
+            camera,
+            background,
+            grid,
         )
         return self._add_component(scene)
 
@@ -305,6 +326,326 @@ class Scene2DViewport(_Component):
                 ],
             }
         )
+
+
+class Scene3DViewport(_Component):
+    """GLB scene configuration and application-owned local node targets."""
+
+    _ERROR_PREFIX = "Scene3DViewport: "
+    _PATH_ESCAPE = re.compile(r"^(?:[^~/]|~[01])+$")
+    _MAX_BATCH_SIZE = 1000
+
+    def __init__(self, model, scene_id, asset, camera, background, grid):
+        super().__init__(model, scene_id, "scene3d")
+        self._config = self._make_config(
+            asset, camera, background, grid, model.static_root
+        )
+        self._nodes = {}
+        self._used_ids = set()
+
+    @classmethod
+    def _invalid_asset(cls):
+        raise ValueError(
+            cls._ERROR_PREFIX
+            + "asset must be an absolute same-origin .glb path under static_root"
+        )
+
+    @classmethod
+    def _validate_asset(cls, asset, static_root):
+        if (
+            not isinstance(asset, str)
+            or not asset.startswith("/")
+            or asset.startswith("//")
+            or asset.startswith("/sdk/")
+            or not asset.endswith(".glb")
+            or "?" in asset
+            or "#" in asset
+            or "\x00" in asset
+            or "://" in asset
+            or any(segment == ".." for segment in asset.split("/"))
+        ):
+            cls._invalid_asset()
+        if static_root is not None:
+            candidate = (static_root / asset[1:]).resolve(strict=False)
+            if (
+                candidate != static_root
+                and static_root not in candidate.parents
+                or not candidate.is_file()
+            ):
+                cls._invalid_asset()
+
+    @classmethod
+    def _vector(cls, value, length, kind):
+        valid = (
+            isinstance(value, (list, tuple))
+            and len(value) == length
+            and all(
+                isinstance(item, (int, float))
+                and not isinstance(item, bool)
+                and math.isfinite(item)
+                for item in value
+            )
+        )
+        if not valid:
+            if kind == "rotation":
+                raise ValueError(
+                    cls._ERROR_PREFIX
+                    + "rotation must be a unit quaternion in [x, y, z, w] order"
+                )
+            if kind == "scale":
+                raise ValueError(
+                    cls._ERROR_PREFIX
+                    + "scale values must be finite and greater than zero"
+                )
+            raise ValueError(
+                cls._ERROR_PREFIX
+                + "transform arrays must have exactly 3, 4, and 3 finite values"
+            )
+        result = [float(item) for item in value]
+        if kind == "rotation" and abs(sum(item * item for item in result) - 1.0) > 1e-6:
+            raise ValueError(
+                cls._ERROR_PREFIX
+                + "rotation must be a unit quaternion in [x, y, z, w] order"
+            )
+        if kind == "scale" and any(item <= 0 for item in result):
+            raise ValueError(
+                cls._ERROR_PREFIX + "scale values must be finite and greater than zero"
+            )
+        return result
+
+    @classmethod
+    def _camera(cls, camera):
+        result = {
+            "mode": "orbit",
+            "position": [4.0, 3.0, 5.0],
+            "target": [0.0, 0.0, 0.0],
+            "min_distance": 0.1,
+            "max_distance": 1000.0,
+        }
+        if camera is not None:
+            if not isinstance(camera, dict):
+                raise ValueError(cls._ERROR_PREFIX + "camera configuration is invalid")
+            result.update(copy_json_value(camera, cls._ERROR_PREFIX))
+        try:
+            if result["mode"] != "orbit":
+                raise ValueError
+            position = cls._vector(result["position"], 3, "position")
+            target = cls._vector(result["target"], 3, "target")
+            minimum = result["min_distance"]
+            maximum = result["max_distance"]
+            if (
+                not isinstance(minimum, (int, float))
+                or isinstance(minimum, bool)
+                or not isinstance(maximum, (int, float))
+                or isinstance(maximum, bool)
+                or not math.isfinite(minimum)
+                or not math.isfinite(maximum)
+                or minimum <= 0
+                or minimum >= maximum
+                or position == target
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            raise ValueError(cls._ERROR_PREFIX + "camera configuration is invalid")
+        return {
+            "mode": "orbit",
+            "position": position,
+            "target": target,
+            "min_distance": float(minimum),
+            "max_distance": float(maximum),
+        }
+
+    @classmethod
+    def _make_config(cls, asset, camera, background, grid, static_root):
+        cls._validate_asset(asset, static_root)
+        if not isinstance(background, str) or not re.fullmatch(
+            r"#[0-9A-Fa-f]{6}", background
+        ):
+            raise ValueError(cls._ERROR_PREFIX + "camera configuration is invalid")
+        if not isinstance(grid, bool):
+            raise ValueError(cls._ERROR_PREFIX + "camera configuration is invalid")
+        return {
+            "asset": asset,
+            "nodes": [],
+            "camera": cls._camera(camera),
+            "background": background,
+            "grid": grid,
+        }
+
+    @classmethod
+    def _validate_path(cls, path):
+        if (
+            not isinstance(path, str)
+            or not path
+            or any(
+                not segment or not cls._PATH_ESCAPE.fullmatch(segment)
+                for segment in path.split("/")
+            )
+        ):
+            raise ValueError(cls._ERROR_PREFIX + "node path is invalid")
+
+    @classmethod
+    def _node(cls, operation, current=None):
+        node_id = operation.get("id") if isinstance(operation, dict) else None
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError(cls._ERROR_PREFIX + "node ID must be non-empty")
+        result = dict(
+            current
+            or {
+                "id": node_id,
+                "path": operation.get("path"),
+                "position": [0.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+                "scale": [1.0, 1.0, 1.0],
+                "visible": True,
+                "status": Severity.success.value,
+            }
+        )
+        if "path" in operation:
+            cls._validate_path(operation["path"])
+            result["path"] = operation["path"]
+        elif current is None:
+            raise ValueError(cls._ERROR_PREFIX + "node path is invalid")
+        for field, length, kind in (
+            ("position", 3, "position"),
+            ("rotation", 4, "rotation"),
+            ("scale", 3, "scale"),
+        ):
+            if field in operation:
+                result[field] = cls._vector(operation[field], length, kind)
+        if "visible" in operation:
+            if not isinstance(operation["visible"], bool):
+                raise ValueError(
+                    cls._ERROR_PREFIX
+                    + "transform arrays must have exactly 3, 4, and 3 finite values"
+                )
+            result["visible"] = operation["visible"]
+        if "status" in operation:
+            result["status"] = coerce_severity(operation["status"]).value
+        return result
+
+    def _apply(self, operations):
+        if (
+            not isinstance(operations, list)
+            or not operations
+            or len(operations) > self._MAX_BATCH_SIZE
+        ):
+            raise ValueError(
+                self._ERROR_PREFIX + "batch contains a duplicate operation"
+            )
+        candidate = {key: dict(value) for key, value in self._nodes.items()}
+        seen = set()
+        for operation in operations:
+            if not isinstance(operation, dict):
+                raise ValueError(
+                    self._ERROR_PREFIX + "batch contains a duplicate operation"
+                )
+            node_id = operation.get("id")
+            operation_type = operation.get("op")
+            operation_key = (operation_type, node_id)
+            if operation_key in seen:
+                raise ValueError(
+                    self._ERROR_PREFIX + "batch contains a duplicate operation"
+                )
+            seen.add(operation_key)
+            if operation_type == "add":
+                if node_id in self._used_ids:
+                    message = (
+                        "node ID is stale"
+                        if node_id not in self._nodes
+                        else "node ID is already in use"
+                    )
+                    raise ValueError(self._ERROR_PREFIX + message)
+                if node_id in candidate:
+                    raise ValueError(self._ERROR_PREFIX + "node ID is already in use")
+                candidate[node_id] = self._node(operation)
+            elif operation_type == "update":
+                if node_id not in candidate:
+                    raise ValueError(self._ERROR_PREFIX + "node ID is stale")
+                candidate[node_id] = self._node(operation, candidate[node_id])
+            elif operation_type == "remove":
+                if node_id not in candidate:
+                    raise ValueError(self._ERROR_PREFIX + "node ID is stale")
+                del candidate[node_id]
+            else:
+                raise ValueError(
+                    self._ERROR_PREFIX + "batch contains a duplicate operation"
+                )
+        changed = list(candidate.values()) != list(self._nodes.values())
+        if changed:
+            self._nodes = candidate
+            self._used_ids.update(operation.get("id") for operation in operations)
+            self._mutated()
+
+    def add_node(
+        self,
+        id,
+        path,
+        position=(0, 0, 0),
+        rotation=(0, 0, 0, 1),
+        scale=(1, 1, 1),
+        visible=True,
+        status=Severity.success,
+    ):
+        self._model.check_owner()
+        self._model.ensure_running()
+        self._apply(
+            [
+                {
+                    "op": "add",
+                    "id": id,
+                    "path": path,
+                    "position": position,
+                    "rotation": rotation,
+                    "scale": scale,
+                    "visible": visible,
+                    "status": status,
+                }
+            ]
+        )
+
+    def update_node(
+        self, id, position=None, rotation=None, scale=None, visible=None, status=None
+    ):
+        self._model.check_owner()
+        self._model.ensure_running()
+        operation = {"op": "update", "id": id}
+        for name, value in (
+            ("position", position),
+            ("rotation", rotation),
+            ("scale", scale),
+            ("visible", visible),
+            ("status", status),
+        ):
+            if value is not None:
+                operation[name] = value
+        self._apply([operation])
+
+    def remove_node(self, id):
+        self._model.check_owner()
+        self._model.ensure_running()
+        self._apply([{"op": "remove", "id": id}])
+
+    def apply_node_batch(self, batch):
+        self._model.check_owner()
+        self._model.ensure_running()
+        self._apply(batch)
+
+    def set_config(self, asset, camera=None, background="#0a0e17", grid=False):
+        self._model.check_owner()
+        self._model.ensure_running()
+        replacement = self._make_config(
+            asset, camera, background, grid, self._model.static_root
+        )
+        replacement["nodes"] = [dict(node) for node in self._nodes.values()]
+        if replacement != self._config:
+            self._config = replacement
+            self._mutated()
+
+    def to_dict(self):
+        data = dict(self._config)
+        data["nodes"] = [dict(node) for node in self._nodes.values()]
+        return self._envelope(data)
 
 
 def _severity(value):

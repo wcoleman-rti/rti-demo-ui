@@ -1,0 +1,5 @@
+{
+  "asset": "/models/scene3d-fixture.glb",
+  "valid_paths": ["Arm/Base", "Arm/Shoulder", "Arm/Elbow", "Arm/Wrist", "Arm/Tool"],
+  "unresolved_paths": ["Arm/Missing", "Arm/Base/Extra"]
+}
