@@ -7,4 +7,6 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+.cache/
+tools/scene3d/node_modules/
 python/rti_demo_ui/_assets

@@ -1,6 +1,9 @@
 #include "rti_demo_ui/components.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <regex>
 #include <set>
 #include <sstream>
 
@@ -218,6 +221,360 @@ Json Scene2DViewport::to_json_locked() const {
     return component_json(id_, type_, revision_, std::move(data));
 }
 
+Scene3DViewport::Scene3DViewport(detail::Model& model, std::string id,
+                                 std::string asset, Json camera,
+                                 std::string background, bool grid)
+    : Component(model, std::move(id), "scene3d"),
+      asset_(std::move(asset)),
+      camera_(camera_config(std::move(camera))),
+      background_(std::move(background)),
+      grid_(grid) {
+    validate_asset(asset_, model_.static_root());
+    if (!std::regex_match(background_, std::regex("^#[0-9A-Fa-f]{6}$")))
+        throw std::invalid_argument(
+            "Scene3DViewport: camera configuration is invalid");
+}
+
+void Scene3DViewport::validate_asset(const std::string& asset,
+                                     const std::filesystem::path& static_root) {
+    const bool lexical = asset.size() > 4 && asset.front() == '/' &&
+                         asset.rfind("//", 0) != 0 &&
+                         asset.rfind("/sdk/", 0) != 0 &&
+                         asset.compare(asset.size() - 4, 4, ".glb") == 0 &&
+                         asset.find("?") == std::string::npos &&
+                         asset.find("#") == std::string::npos &&
+                         asset.find('\0') == std::string::npos &&
+                         asset.find("://") == std::string::npos;
+    if (!lexical) {
+        throw std::invalid_argument(
+            "Scene3DViewport: asset must be an absolute same-origin .glb path "
+            "under static_root");
+    }
+    std::stringstream stream(asset.substr(1));
+    std::string segment;
+    while (std::getline(stream, segment, '/')) {
+        if (segment == "..") {
+            throw std::invalid_argument(
+                "Scene3DViewport: asset must be an absolute same-origin .glb "
+                "path under static_root");
+        }
+    }
+    if (!static_root.empty()) {
+        std::error_code error;
+        const auto candidate = std::filesystem::weakly_canonical(
+            static_root / asset.substr(1), error);
+        const auto relative =
+            std::filesystem::relative(candidate, static_root, error);
+        if (error || relative.is_absolute() ||
+            !std::filesystem::is_regular_file(candidate, error) || error) {
+            throw std::invalid_argument(
+                "Scene3DViewport: asset must be an absolute same-origin .glb "
+                "path under static_root");
+        }
+        for (const auto& part : relative)
+            if (part == "..") {
+                throw std::invalid_argument(
+                    "Scene3DViewport: asset must be an absolute same-origin "
+                    ".glb path under static_root");
+            }
+    }
+}
+
+std::vector<double> Scene3DViewport::validate_vector(const Json& value,
+                                                     size_t size,
+                                                     const char* kind) {
+    const std::string prefix = "Scene3DViewport: ";
+    if (!value.is_array() || value.size() != size) {
+        if (std::string(kind) == "rotation")
+            throw std::invalid_argument(
+                prefix +
+                "rotation must be a unit quaternion in [x, y, z, w] order");
+        if (std::string(kind) == "scale")
+            throw std::invalid_argument(
+                prefix + "scale values must be finite and greater than zero");
+        throw std::invalid_argument(
+            prefix +
+            "transform arrays must have exactly 3, 4, and 3 finite values");
+    }
+    std::vector<double> result;
+    for (const auto& item : value) {
+        if (!item.is_number() || !std::isfinite(item.get<double>())) {
+            if (std::string(kind) == "rotation")
+                throw std::invalid_argument(
+                    prefix +
+                    "rotation must be a unit quaternion in [x, y, z, w] order");
+            if (std::string(kind) == "scale")
+                throw std::invalid_argument(
+                    prefix +
+                    "scale values must be finite and greater than zero");
+            throw std::invalid_argument(
+                prefix +
+                "transform arrays must have exactly 3, 4, and 3 finite values");
+        }
+        result.push_back(item.get<double>());
+    }
+    if (std::string(kind) == "rotation") {
+        double norm = 0.0;
+        for (double item : result) norm += item * item;
+        if (std::abs(norm - 1.0) > 1e-6)
+            throw std::invalid_argument(
+                prefix +
+                "rotation must be a unit quaternion in [x, y, z, w] order");
+    }
+    if (std::string(kind) == "scale" &&
+        std::any_of(result.begin(), result.end(),
+                    [](double item) { return item <= 0; }))
+        throw std::invalid_argument(
+            prefix + "scale values must be finite and greater than zero");
+    return result;
+}
+
+void Scene3DViewport::validate_path(const Json& value) {
+    if (!value.is_string() || value.get<std::string>().empty())
+        throw std::invalid_argument("Scene3DViewport: node path is invalid");
+    std::stringstream stream(value.get<std::string>());
+    std::string segment;
+    while (std::getline(stream, segment, '/')) {
+        if (segment.empty() || segment.find('~') != std::string::npos) {
+            for (size_t index = 0; index < segment.size(); ++index)
+                if (segment[index] == '~' &&
+                    (index + 1 >= segment.size() ||
+                     (segment[index + 1] != '0' && segment[index + 1] != '1')))
+                    throw std::invalid_argument(
+                        "Scene3DViewport: node path is invalid");
+        }
+    }
+}
+
+Json Scene3DViewport::camera_config(Json camera) {
+    Json result = {{"mode", "orbit"},
+                   {"position", {4.0, 3.0, 5.0}},
+                   {"target", {0.0, 0.0, 0.0}},
+                   {"min_distance", 0.1},
+                   {"max_distance", 1000.0}};
+    if (!camera.is_null()) {
+        if (!camera.is_object())
+            throw std::invalid_argument(
+                "Scene3DViewport: camera configuration is invalid");
+        for (const auto& item : camera.items())
+            result[item.key()] = item.value();
+    }
+    try {
+        if (result["mode"] != "orbit") throw std::invalid_argument("invalid");
+        const auto position =
+            validate_vector(result["position"], 3, "position");
+        const auto target = validate_vector(result["target"], 3, "target");
+        if (position == target || !result["min_distance"].is_number() ||
+            !result["max_distance"].is_number() ||
+            !std::isfinite(result["min_distance"].get<double>()) ||
+            !std::isfinite(result["max_distance"].get<double>()) ||
+            result["min_distance"].get<double>() <= 0 ||
+            result["min_distance"].get<double>() >=
+                result["max_distance"].get<double>())
+            throw std::invalid_argument("invalid");
+        result["position"] = position;
+        result["target"] = target;
+        result["min_distance"] = result["min_distance"].get<double>();
+        result["max_distance"] = result["max_distance"].get<double>();
+    } catch (...) {
+        throw std::invalid_argument(
+            "Scene3DViewport: camera configuration is invalid");
+    }
+    return result;
+}
+
+Scene3DViewport::Node Scene3DViewport::node_from_operation(
+    const Json& operation, const Node* current) {
+    if (!operation.is_object() || !operation.value("id", Json()).is_string() ||
+        operation["id"].get<std::string>().empty())
+        throw std::invalid_argument(
+            "Scene3DViewport: node ID must be non-empty");
+    Node result =
+        current ? *current : Node{operation["id"],  "",
+                                  {0.0, 0.0, 0.0},  {0.0, 0.0, 0.0, 1.0},
+                                  {1.0, 1.0, 1.0},  true,
+                                  Severity::success};
+    if (operation.contains("path")) {
+        validate_path(operation["path"]);
+        if (current && operation["path"].get<std::string>() != result.path)
+            throw std::invalid_argument(
+                "Scene3DViewport: node path is invalid");
+        result.path = operation["path"].get<std::string>();
+    } else if (!current) {
+        throw std::invalid_argument("Scene3DViewport: node path is invalid");
+    }
+    if (operation.contains("position"))
+        result.position = validate_vector(operation["position"], 3, "position");
+    if (operation.contains("rotation"))
+        result.rotation = validate_vector(operation["rotation"], 4, "rotation");
+    if (operation.contains("scale"))
+        result.scale = validate_vector(operation["scale"], 3, "scale");
+    if (operation.contains("visible")) {
+        if (!operation["visible"].is_boolean())
+            throw std::invalid_argument(
+                "Scene3DViewport: transform arrays must have exactly 3, 4, and "
+                "3 finite values");
+        result.visible = operation["visible"].get<bool>();
+    }
+    if (operation.contains("status")) {
+        const auto status = operation["status"].get<std::string>();
+        if (status == "success")
+            result.status = Severity::success;
+        else if (status == "warning")
+            result.status = Severity::warning;
+        else if (status == "danger")
+            result.status = Severity::danger;
+        else
+            throw std::invalid_argument("Scene3DViewport: invalid status");
+    }
+    return result;
+}
+
+Json Scene3DViewport::nodes_json(const std::vector<Node>& nodes) {
+    Json result = Json::array();
+    for (const auto& node : nodes)
+        result.push_back({{"id", node.id},
+                          {"path", node.path},
+                          {"position", node.position},
+                          {"rotation", node.rotation},
+                          {"scale", node.scale},
+                          {"visible", node.visible},
+                          {"status", to_string(node.status)}});
+    return result;
+}
+
+Scene3DViewport::Node* Scene3DViewport::find_node(std::vector<Node>& nodes,
+                                                  const std::string& id) {
+    const auto found =
+        std::find_if(nodes.begin(), nodes.end(),
+                     [&](const Node& node) { return node.id == id; });
+    return found == nodes.end() ? nullptr : &*found;
+}
+
+void Scene3DViewport::add_node(const std::string& id, const std::string& path,
+                               std::vector<double> position,
+                               std::vector<double> rotation,
+                               std::vector<double> scale, bool visible,
+                               Severity status) {
+    apply_node_batch(Json::array({{{"op", "add"},
+                                   {"id", id},
+                                   {"path", path},
+                                   {"position", position},
+                                   {"rotation", rotation},
+                                   {"scale", scale},
+                                   {"visible", visible},
+                                   {"status", to_string(status)}}}));
+}
+
+void Scene3DViewport::update_node(const std::string& id,
+                                  std::optional<std::vector<double>> position,
+                                  std::optional<std::vector<double>> rotation,
+                                  std::optional<std::vector<double>> scale,
+                                  std::optional<bool> visible,
+                                  std::optional<Severity> status) {
+    Json operation = {{"op", "update"}, {"id", id}};
+    if (position) operation["position"] = *position;
+    if (rotation) operation["rotation"] = *rotation;
+    if (scale) operation["scale"] = *scale;
+    if (visible) operation["visible"] = *visible;
+    if (status) operation["status"] = to_string(*status);
+    apply_node_batch(Json::array({operation}));
+}
+
+void Scene3DViewport::remove_node(const std::string& id) {
+    apply_node_batch(Json::array({{{"op", "remove"}, {"id", id}}}));
+}
+
+void Scene3DViewport::apply_node_batch(const Json& operations) {
+    if (!operations.is_array())
+        throw std::invalid_argument(
+            "Scene3DViewport: batch contains a duplicate operation");
+    apply_node_batch(operations.get<std::vector<Json>>());
+}
+
+void Scene3DViewport::apply_node_batch(const std::vector<Json>& operations) {
+    if (operations.empty() || operations.size() > 1000)
+        throw std::invalid_argument(
+            "Scene3DViewport: batch contains a duplicate operation");
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    auto candidate = nodes_;
+    auto used = used_ids_;
+    std::set<std::string> operation_keys;
+    for (const auto& operation : operations) {
+        if (!operation.is_object() ||
+            !operation.value("id", Json()).is_string())
+            throw std::invalid_argument(
+                "Scene3DViewport: node ID must be non-empty");
+        const std::string id = operation["id"].get<std::string>();
+        const std::string op = operation.value("op", "");
+        if (!operation_keys.insert(op + "\n" + id).second)
+            throw std::invalid_argument(
+                "Scene3DViewport: batch contains a duplicate operation");
+        if (op == "add") {
+            if (find_node(candidate, id))
+                throw std::invalid_argument(
+                    "Scene3DViewport: node ID is already in use");
+            if (used.count(id))
+                throw std::invalid_argument(
+                    "Scene3DViewport: node ID is stale");
+            candidate.push_back(node_from_operation(operation));
+            used.insert(id);
+        } else if (op == "update") {
+            Node* node = find_node(candidate, id);
+            if (!node)
+                throw std::invalid_argument(
+                    "Scene3DViewport: node ID is stale");
+            *node = node_from_operation(operation, node);
+        } else if (op == "remove") {
+            const auto found =
+                std::find_if(candidate.begin(), candidate.end(),
+                             [&](const Node& node) { return node.id == id; });
+            if (found == candidate.end())
+                throw std::invalid_argument(
+                    "Scene3DViewport: node ID is stale");
+            candidate.erase(found);
+            used.insert(id);
+        } else {
+            throw std::invalid_argument(
+                "Scene3DViewport: batch contains a duplicate operation");
+        }
+    }
+    if (nodes_json(candidate) != nodes_json(nodes_)) {
+        nodes_ = std::move(candidate);
+        used_ids_ = std::move(used);
+        mutated_locked();
+    }
+}
+
+void Scene3DViewport::set_config(const std::string& asset, Json camera,
+                                 std::string background, bool grid) {
+    validate_asset(asset, model_.static_root());
+    const Json replacement_camera = camera_config(std::move(camera));
+    if (!std::regex_match(background, std::regex("^#[0-9A-Fa-f]{6}$")))
+        throw std::invalid_argument(
+            "Scene3DViewport: camera configuration is invalid");
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (asset != asset_ || replacement_camera != camera_ ||
+        background != background_ || grid != grid_) {
+        asset_ = asset;
+        camera_ = replacement_camera;
+        background_ = std::move(background);
+        grid_ = grid;
+        mutated_locked();
+    }
+}
+
+Json Scene3DViewport::to_json_locked() const {
+    Json data = {{"asset", asset_},
+                 {"nodes", nodes_json(nodes_)},
+                 {"camera", camera_},
+                 {"background", background_},
+                 {"grid", grid_}};
+    return component_json(id_, type_, revision_, std::move(data));
+}
+
 Table::Table(detail::Model& model, std::string id, Json columns, Json rows,
              std::string empty_state)
     : Component(model, std::move(id), "table"),
@@ -402,6 +759,18 @@ Scene2DViewport* Card::add_scene_2d(int width, int height, GridBounds bounds) {
     model_.ensure_running();
     auto component = std::make_unique<Scene2DViewport>(
         model_, model_.next_component_id("scene"), width, height, bounds);
+    auto* result = component.get();
+    components_.push_back(std::move(component));
+    result->added_locked();
+    return result;
+}
+Scene3DViewport* Card::add_scene_3d(const std::string& asset, Json camera,
+                                    std::string background, bool grid) {
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    auto component = std::make_unique<Scene3DViewport>(
+        model_, model_.next_component_id("scene3d"), asset, std::move(camera),
+        std::move(background), grid);
     auto* result = component.get();
     components_.push_back(std::move(component));
     result->added_locked();

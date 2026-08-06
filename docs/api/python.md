@@ -90,3 +90,29 @@ described by their type hints. Register opt-in actions with
 `register_command(name, schema, handler, confirmation=None)`. Command schemas
 use the shared restricted subset, handlers receive validated objects, and
 responses are JSON envelopes.
+
+## Scene3D
+
+`add_scene_3d` creates the generic scene contract and validates the asset as an
+absolute same-origin `.glb` under `static_root`:
+
+```python
+from rti_demo_ui import Severity
+
+scene = app.add_card("Arm").add_scene_3d("/models/scene.glb")
+scene.add_node(
+    "shoulder", "Arm/Shoulder",
+    rotation=(0.0, 0.0, 0.564642, 0.825336),
+    status=Severity.success,
+)
+scene.update_node("shoulder", position=(0.1, 0.0, 0.0))
+scene.apply_node_batch([
+    {"op": "update", "id": "shoulder", "visible": True},
+])
+```
+
+Nodes use glTF right-handed, Y-up meter coordinates and local transforms. A
+node ID is unique for the scene lifetime, including after removal. Mutations
+are atomic; changed operations bump the application and component revisions
+once, while valid no-ops preserve them. `set_config` replaces the complete
+asset/camera/background/grid configuration atomically.

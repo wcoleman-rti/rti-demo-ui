@@ -32,6 +32,7 @@ _ASSET_ROUTES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/sdk/index.html": ("index.html", "text/html; charset=utf-8"),
     "/sdk/runtime.js": ("runtime.js", "application/javascript; charset=utf-8"),
+    "/sdk/runtime3d.js": ("runtime3d.js", "application/javascript; charset=utf-8"),
     "/sdk/client.js": ("client.js", "application/javascript; charset=utf-8"),
     "/sdk/theme.css": ("theme.css", "text/css; charset=utf-8"),
 }
@@ -122,8 +123,9 @@ def _static_not_found_response() -> web.Response:
 class _Model:
     """Internal model state shared by DemoUiApp, Card, and Scene2DViewport."""
 
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, static_root: Optional[Path] = None) -> None:
         self.title = title
+        self.static_root = static_root
         self.revision = 0
         self.cards = []
         self._running = True
@@ -239,7 +241,7 @@ class DemoUiApp:
         if not (0 <= port <= 65535):
             raise ValueError("DemoUiApp: port must be between 0 and 65535")
         self._static_root = self._canonical_static_root(static_root)
-        self._model = _Model(title)
+        self._model = _Model(title, self._static_root)
         self._assets = _load_assets()
         self._host = host
         self._port = port

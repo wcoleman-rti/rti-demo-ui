@@ -8,6 +8,7 @@ from .components import (
     Log,
     Metric,
     Scene2DViewport,
+    Scene3DViewport,
     Table,
     Text,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "DemoUiApp",
     "Card",
     "Scene2DViewport",
+    "Scene3DViewport",
     "Table",
     "Metric",
     "Text",

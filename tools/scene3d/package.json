@@ -1,0 +1,8 @@
+{
+  "name": "rti-demo-ui-scene3d-build",
+  "private": true,
+  "engines": {"node": "22.14.0"},
+  "scripts": {"build:runtime3d": "node scripts/build-runtime3d.mjs"},
+  "dependencies": {"three": "0.173.0"},
+  "devDependencies": {"esbuild": "0.25.0"}
+}

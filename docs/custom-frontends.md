@@ -42,6 +42,7 @@ SDK routes are reserved in every mode:
 | `/` | SDK `index.html` | `static_root/index.html` |
 | `/sdk/index.html` | SDK HTML | SDK HTML |
 | `/sdk/runtime.js` | SDK runtime | SDK runtime |
+| `/sdk/runtime3d.js` | optional bundled Three.js renderer | optional bundled Three.js renderer |
 | `/sdk/client.js` | supported browser transport | supported browser transport |
 | `/sdk/theme.css` | SDK theme | SDK theme |
 | `/api/health` | health JSON | health JSON |
@@ -72,7 +73,28 @@ Stable custom properties include `--sdk-bg`, `--sdk-surface`, `--sdk-card-bg`,
 `--sdk-text`, `--sdk-muted`, `--sdk-border`, `--sdk-accent`,
 `--sdk-success`, `--sdk-warning`, and `--sdk-danger`. Stable component classes
 include `sdk-app`, `sdk-card`, `sdk-card-title`, `sdk-metric`, `sdk-table`,
-`sdk-button`, `sdk-slider`, `sdk-connection-banner`, and `sdk-scene2d`.
+`sdk-button`, `sdk-slider`, `sdk-connection-banner`, `sdk-scene2d`, and the
+Scene3D host/listbox classes.
+
+## Scene3D
+
+Applications opt into the generic `scene3d` component with
+`/sdk/runtime3d.js`. The component carries one same-origin absolute `.glb`
+asset under the application static root, complete local transforms, stable
+slash-delimited node paths, and orbit camera configuration. The browser owns
+camera interaction, interpolation, and local selection; the application owns
+model preparation, node naming, domain-to-transform conversion, and commands.
+
+The renderer is optional and loaded only after a `scene3d` snapshot arrives. It
+provides an independent hierarchy per scene, cached asset loading, camera
+reset/zoom controls, a synchronized semantic listbox, pointer and keyboard
+selection, and a textual node/status fallback when WebGL or model loading is
+unavailable. Selection emits `scene3dselect` on the scene host with
+`{componentId, nodeId, selected}`; the SDK does not infer commands from it.
+
+GLTF JSON, external buffers/textures, remote/data URLs, query strings, and
+`/sdk/` assets are rejected. Keep application model files beside the frontend
+and pass that directory as `static_root`.
 
 ## Gallery Example
 

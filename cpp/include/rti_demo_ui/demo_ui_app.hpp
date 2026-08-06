@@ -28,9 +28,14 @@ namespace detail {
 // Internal model state shared by DemoUiApp, Card, and Scene2DViewport.
 class Model {
    public:
-    explicit Model(std::string title) : title_(std::move(title)) {}
+    explicit Model(std::string title, std::filesystem::path static_root = {})
+        : title_(std::move(title)), static_root_(std::move(static_root)) {}
 
     std::mutex& lock() { return mutex_; }
+    const std::filesystem::path& static_root() const { return static_root_; }
+    void set_static_root(std::filesystem::path root) {
+        static_root_ = std::move(root);
+    }
 
     void ensure_running() const {
         if (!running_) {
@@ -58,6 +63,7 @@ class Model {
     std::string snapshot_json_locked() const;
 
     std::string title_;
+    std::filesystem::path static_root_;
     long revision_ = 0;
     std::vector<std::unique_ptr<Card>> cards_;
     Json data_ = Json::object();

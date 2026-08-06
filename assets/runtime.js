@@ -13,6 +13,9 @@ import { createClient } from './client.js';
         : false;
 
     var sceneStates = Object.create(null); // scene id -> { entities: Map, links, boundsEl, config }
+    var scene3dStates = Object.create(null);
+    var scene3dModulePromise = null;
+    var scene3dModule = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -77,6 +80,8 @@ import { createClient } from './client.js';
             seenIds[component.id] = true;
             if (component.type === 'scene2d') {
                 reconcileScene2d(container, component);
+            } else if (component.type === 'scene3d') {
+                reconcileScene3d(container, component);
             } else if (component.type === 'table') {
                 renderTable(container, component);
             } else if (component.type === 'metric' || component.type === 'text' || component.type === 'badge' || component.type === 'log') {
@@ -87,9 +92,64 @@ import { createClient } from './client.js';
         });
         Array.prototype.slice.call(container.children).forEach(function (child) {
             if (!seenIds[child.dataset.componentId]) {
+                if (scene3dStates[child.dataset.componentId]) {
+                    if (scene3dModule) scene3dModule.disposeScene3d(child.dataset.componentId);
+                    delete scene3dStates[child.dataset.componentId];
+                }
                 container.removeChild(child);
                 delete sceneStates[child.dataset.componentId];
             }
+        });
+    }
+
+    function scene3dFallback(el, message, retry) {
+        el.className = 'sdk-generic-component sdk-scene3d-fallback';
+        el.textContent = '';
+        var text = document.createElement('p');
+        text.textContent = message;
+        el.appendChild(text);
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sdk-button';
+        button.textContent = 'Retry 3D renderer';
+        button.addEventListener('click', retry);
+        el.appendChild(button);
+    }
+
+    function reconcileScene3d(container, component) {
+        var el = document.getElementById(component.id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = component.id;
+            el.dataset.componentId = component.id;
+            el.className = 'sdk-scene3d-loading';
+            el.textContent = 'Loading 3D renderer…';
+            container.appendChild(el);
+            scene3dStates[component.id] = { generation: 0 };
+        }
+        var state = scene3dStates[component.id];
+        var generation = ++state.generation;
+        if (!scene3dModulePromise) {
+            scene3dModulePromise = import('/sdk/runtime3d.js').then(function (module) {
+                scene3dModule = module;
+                return module;
+            });
+        }
+        scene3dModulePromise.then(function (module) {
+            if (!scene3dStates[component.id] || scene3dStates[component.id].generation !== generation) return;
+            return module.reconcileScene3d(component, el, {
+                reducedMotion: reducedMotion,
+                snapshotIntervalMs: 200,
+                onSelection: function (selection) { return selection; },
+                onLoadState: function (stateName) { el.dataset.loadState = stateName; }
+            });
+        }).catch(function (error) {
+            if (!scene3dStates[component.id] || scene3dStates[component.id].generation !== generation) return;
+            scene3dFallback(el, '3D renderer unavailable: ' + (error && error.message ? error.message : 'optional module failed to load'), function () {
+                scene3dModulePromise = null;
+                scene3dModule = null;
+                reconcileScene3d(container, component);
+            });
         });
     }
 
