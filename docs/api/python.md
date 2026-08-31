@@ -10,13 +10,21 @@
   use or inability to use the software.
 -->
 
-# Python API
+# Python Guide
 
-Install from the repository root:
+## Quick Start
+
+From the repository root:
 
 ```bash
-pip install -e .
+python -m pip install -e .
+python examples/py/simple.py
 ```
+
+Open the URL printed after the server binds. The example owns a small animation
+task and exits cleanly on Ctrl-C.
+
+## Application Setup
 
 The public package is `rti_demo_ui`. Configure components synchronously, then
 own the server lifecycle with `asyncio`:
@@ -53,7 +61,8 @@ thread must schedule its work with `loop.call_soon_threadsafe`.
 ## Structured Async Applications
 
 Application coroutines own periodic work and DDS integration through a
-`TaskGroup` or explicitly retained tasks:
+`TaskGroup` or explicitly retained tasks. For example, with the
+application-specific DDS coroutines omitted:
 
 ```python
 async def main() -> None:
@@ -152,7 +161,9 @@ SSE or omits the option to retain polling. See
 [Custom Frontends](../custom-frontends.md#browser-transport).
 
 For complete signatures and validation semantics, use the Python type hints,
-docstrings, and [architecture](../architecture.md) as the source of truth.
+docstrings, and generated [Python API reference](../reference/python.rst).
+Durable cross-language contracts are described in
+[architecture](../architecture.md).
 
 `DemoUiApp.set_data(value)` and `update_data(path, value, create_missing=False)`
 manage application-owned JSON state. `Card` also provides `add_table`,
@@ -165,8 +176,9 @@ responses are JSON envelopes.
 
 ## Scene3D
 
-`add_scene_3d` creates the generic scene contract and validates the asset as an
-absolute same-origin `.glb` under `static_root`:
+For an app whose `static_root` contains `models/scene.glb`, `add_scene_3d`
+creates the generic scene contract and validates the asset as an absolute
+same-origin `.glb` beneath that root:
 
 ```python
 from rti_demo_ui import Severity
@@ -188,3 +200,11 @@ node ID is unique for the scene lifetime, including after removal. Mutations
 are atomic; changed operations bump the application and component revisions
 once, while valid no-ops preserve them. `set_config` replaces the complete
 asset/camera/background/grid configuration atomically.
+
+## Python and C++ Differences
+
+Python application work belongs in retained asyncio tasks; the Python API does
+not provide a timer handle. Python command handlers may be synchronous or
+asynchronous and run on the app's owner event loop. In C++, model operations
+are thread-safe, `run()` blocks the calling thread, `add_timer()` owns a worker
+thread, and command handlers run synchronously on HTTP worker threads.
