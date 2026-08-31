@@ -594,6 +594,12 @@ runtime gates; semantic browser accessibility coverage passed, and the manual
 checklist requires direct accessibility and hardware-renderer inspection again
 for each tagged release candidate.
 
+Hosted run `33443952099` passed all jobs for the Phase 3 commit. The Ubuntu
+22.04 native job built the downstream CMake consumer, built and installed the
+release wheels into a clean environment, ran both installed-artifact native
+smokes, and repeated the production/spike conformance gates under
+Xvfb/D-Bus/Mesa.
+
 Phase 3 verification commands:
 
 ```bash
