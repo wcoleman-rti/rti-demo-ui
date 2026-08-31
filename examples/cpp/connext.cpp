@@ -5,7 +5,7 @@
 #include <cmath>
 #include <dds/dds.hpp>
 #include <rti/rti.hpp>
-#include <rti_demo_ui/gui_sdk.hpp>
+#include <rti_demo_ui/rti_demo_ui.hpp>
 #include <thread>
 
 #include "VehicleState.hpp"

@@ -2,8 +2,9 @@
 
 ## 1. Objective
 
-RTI Demo UI is a small local GUI SDK with interchangeable Python and C++
-state servers and one shared browser frontend. Python uses Python 3.11+,
+RTI Demo UI is a small local UI SDK designed for RTI Connext DDS demos without
+linking to or depending on Connext itself. It has interchangeable Python and
+C++ state servers and one shared browser frontend. Python uses Python 3.11+,
 asyncio, and aiohttp. C++ uses C++17, cpp-httplib, and nlohmann/json.
 
 The server owns authoritative semantic state. The browser owns DOM, SVG, and

@@ -11,7 +11,7 @@ target_link_libraries(my_demo PRIVATE rti_demo_ui::core)
 A minimal application is:
 
 ```cpp
-#include <rti_demo_ui/gui_sdk.hpp>
+#include <rti_demo_ui/rti_demo_ui.hpp>
 
 int main() {
     rti::demo::ui::DemoUiApp app("Fleet demo");

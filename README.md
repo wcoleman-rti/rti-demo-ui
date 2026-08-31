@@ -1,7 +1,8 @@
 # RTI Demo UI
 
-A small GUI SDK for local RTI Connext demos with one shared browser frontend
-and two interchangeable state servers: Python 3.11+ with native
+A small UI SDK designed for local RTI Connext DDS demos, without linking to or
+depending on Connext itself. It has one shared browser frontend and two
+interchangeable state servers: Python 3.11+ with native
 `asyncio`/`aiohttp`, and C++17 (pinned `cpp-httplib` + `nlohmann/json` via
 CMake `FetchContent`). See [docs/architecture.md](docs/architecture.md)
 for the full design. Direct third-party dependencies and licenses are listed
@@ -44,7 +45,7 @@ asyncio.run(main())
 C++:
 
 ```cpp
-#include <rti_demo_ui/gui_sdk.hpp>
+#include <rti_demo_ui/rti_demo_ui.hpp>
 
 int main() {
   using namespace rti::demo::ui;

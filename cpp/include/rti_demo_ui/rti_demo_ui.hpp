@@ -1,4 +1,4 @@
-// Single master header include for the RTI Demo UI C++ backend.
+// Single umbrella header for the RTI Demo UI C++ API.
 #pragma once
 
 #include "rti_demo_ui/components.hpp"

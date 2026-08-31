@@ -1,7 +1,7 @@
 // Gallery example: serves an application-owned static root.
 #include <filesystem>
 #include <iostream>
-#include <rti_demo_ui/gui_sdk.hpp>
+#include <rti_demo_ui/rti_demo_ui.hpp>
 
 #include "console_control.hpp"
 

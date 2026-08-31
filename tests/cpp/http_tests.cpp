@@ -1,7 +1,7 @@
 // HTTP contract tests against the C++ backend. See
 // docs/architecture.md §11.2.
 #include <httplib.h>
-#include <rti_demo_ui/gui_sdk.hpp>
+#include <rti_demo_ui/rti_demo_ui.hpp>
 
 #include <chrono>
 #include <cstdio>

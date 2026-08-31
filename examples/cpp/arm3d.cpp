@@ -1,7 +1,7 @@
 // Application-owned arm3d pilot with deterministic mock joint targets.
 #include <cmath>
 #include <filesystem>
-#include <rti_demo_ui/gui_sdk.hpp>
+#include <rti_demo_ui/rti_demo_ui.hpp>
 
 #include "console_control.hpp"
 
