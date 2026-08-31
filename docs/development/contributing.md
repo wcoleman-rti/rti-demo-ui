@@ -68,6 +68,11 @@ route contract changes, then update both language tests.
 contributor workflow. Decision-bearing implementation plans belong in
 `docs/development/implementation-plans/`; temporary notes do not.
 
+Start product-facing implementation and planning sessions with
+`docs/development/product-use-cases.md`. It records the representative demo
+workflows, graphical vocabulary, capability status, product boundaries, and
+agent-session checklist that should drive feature scope and acceptance tests.
+
 Keep public names, route tables, package commands, and examples synchronized.
 Do not add compatibility aliases for removed public APIs. Run pre-commit after
 editing Markdown, CMake, examples, or source files.
