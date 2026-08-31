@@ -43,6 +43,32 @@ hosts.
 For complete signatures and validation semantics, use the public headers and
 [architecture](../architecture.md) as the source of truth.
 
+## Themes and Layouts
+
+The scoped `Theme`, `Layout`, and `CardArea` enums serialize to the same values
+as Python. `Layout::automatic` serializes as `"auto"`:
+
+```cpp
+using namespace rti::demo::ui;
+
+DemoUiApp app("Operations", 0, "127.0.0.1", {},
+              Theme::light, Layout::sidebar_main);
+auto* controls = app.add_card("Controls", CardArea::sidebar);
+auto* telemetry = app.add_card("Telemetry", CardArea::main, 2);
+
+app.set_theme(Theme::dark);
+app.set_layout(Layout::grid_2);
+controls->set_area(CardArea::main);
+telemetry->set_span(3);
+```
+
+The new constructor arguments are appended after `static_root`, preserving
+existing positional calls. Defaults are `Theme::dark`, `Layout::automatic`,
+`CardArea::main`, and span `1`. Spans accept only `1`, `2`, or `3`. At most one
+sidebar card is permitted, and `sidebar-main` requires exactly one before
+`run()` or when selected at runtime. Changed setters increment the application
+revision exactly once; no-ops and rejected values do not.
+
 ## Scene3D
 
 The C++ API mirrors Python and serializes the same generic scene contract:

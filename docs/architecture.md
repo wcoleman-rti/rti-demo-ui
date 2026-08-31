@@ -90,11 +90,15 @@ endpoint.
   "schema_version": 2,
   "revision": 42,
   "title": "Fleet Demo",
+  "theme": "light",
+  "layout": "sidebar-main",
   "data": {"fleet": {"connected": true}},
   "cards": [
     {
       "id": "card-1",
       "title": "Operations",
+      "area": "sidebar",
+      "span": 1,
       "components": [
         {
           "id": "table-1",
@@ -121,7 +125,37 @@ Application state uses `set_data(value)` and `update_data(path, value,
 create_missing=False)`. Paths contain non-empty string segments. Intermediate
 objects are created only when requested.
 
-## 6. Components and Validation
+## 6. Presentation
+
+Presentation metadata is authoritative additive schema-v2 state. `theme` is
+`dark` or `light`, and `layout` is `auto`, `grid-2`, `grid-3`, or
+`sidebar-main`. Cards serialize `area` as `main` or `sidebar` and `span` as the
+integer `1`, `2`, or `3`. The compatibility defaults for missing or malformed
+fields are `dark`, `auto`, `main`, and `1`. The built-in renderer reports each
+malformed field independently and never derives CSS classes or unrestricted
+styles from snapshot strings.
+
+`auto` uses responsive 280 px target columns. The fixed grid presets use two or
+three equal columns. `sidebar-main` uses one bounded 320 px sidebar and one
+flexible main track. Every layout collapses to source-ordered single-column
+cards at 720 px or less. CSS caps spans to available columns and keeps card
+contents from forcing page overflow. DOM order always follows snapshot order;
+presentation changes move existing cards rather than recreate card or component
+nodes.
+
+At most one card may have `area=sidebar`. Entering `sidebar-main` at runtime
+requires exactly one sidebar at the mutation commit point. Constructing an app
+with `sidebar-main` permits cards to be configured before `run()`, which then
+requires exactly one sidebar. Failed changes and valid no-ops do not increment
+the revision.
+
+The canonical `/sdk/theme.css` defines stable semantic background, surface,
+card, text, muted, border, accent/hover, success, warning, and danger tokens for
+both palettes. Theme selection uses `data-sdk-theme` on the document element,
+preserving application-owned classes. The built-in grid uses `data-sdk-layout`
+on `#sdk-cards` and bounded `data-sdk-area` and `data-sdk-span` card attributes.
+
+## 7. Components and Validation
 
 `Card` provides:
 
@@ -157,7 +191,7 @@ atomic `apply_node_batch`, and atomic `set_config` preserve the same revision
 rules as the other components. Removed IDs remain stale for the scene
 lifetime.
 
-## 7. Commands
+## 8. Commands
 
 Commands are opt-in. Registration is immutable once `run()` begins. Names match
 `^[a-z][a-z0-9-]{0,62}$`. The supported schema subset is exactly `type`,
@@ -200,7 +234,7 @@ At most one invocation of each command name runs at once; different names may
 overlap. Python handlers run on the owner event loop. C++ handlers run outside
 the model mutex and must marshal thread-affine work themselves.
 
-## 8. Browser Client
+## 9. Browser Client
 
 `/sdk/client.js` exports `createClient(options)`. The client owns one-in-flight
 full-state polling, v2 validation, revision short-circuiting, retry backoff,
@@ -219,7 +253,7 @@ materials, owns orbit controls and browser-local selection, and always keeps a
 semantic node list and textual fallback beside the canvas. Unsupported custom
 components show a visible isolated diagnostic.
 
-## 9. Build and Tests
+## 10. Build and Tests
 
 C++ uses pinned cpp-httplib v0.18.3 and nlohmann/json v3.11.3 through CMake
 `FetchContent`; nlohmann/json is a public link dependency because it appears in

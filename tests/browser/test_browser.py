@@ -11,6 +11,7 @@ import re
 import signal
 import subprocess
 import threading
+from itertools import product
 from pathlib import Path
 from shutil import copy2
 from urllib.request import urlopen
@@ -56,13 +57,29 @@ def running_app():
         loop.close()
 
 
-@pytest.fixture
-def running_gallery_app():
+@pytest.fixture(
+    params=list(
+        product(
+            ("dark", "light"),
+            ("auto", "grid-2", "grid-3", "sidebar-main"),
+        )
+    ),
+    ids=lambda value: "-".join(value),
+)
+def running_gallery_app(request):
+    theme, layout = request.param
     static_root = Path(__file__).parents[2] / "examples" / "web" / "gallery"
-    app = DemoUiApp(title="Gallery", static_root=static_root)
+    app = DemoUiApp(
+        title="Gallery",
+        static_root=static_root,
+        theme=theme,
+        layout=layout,
+    )
+    app.add_card("Presentation", area="sidebar").add_text(f"{theme} / {layout}")
+    app.add_card("Telemetry", span=2).add_metric("Connected assets", 12)
     loop, thread = _start_app_on_thread(app)
     try:
-        yield app, app.ready_info.url
+        yield app, app.ready_info.url, theme, layout
     finally:
         asyncio.run_coroutine_threadsafe(app.stop(), loop).result(2)
         thread.join(2)
@@ -426,12 +443,17 @@ def test_scene_renders_without_console_errors(running_app):
 
 
 def test_gallery_page_controls(running_gallery_app):
-    app, base_url = running_gallery_app
+    app, base_url, theme, layout = running_gallery_app
     del app
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page()
         page.goto(base_url + "/")
+        page.wait_for_selector("#card-2")
+        assert page.locator("html").get_attribute("data-sdk-theme") == theme
+        assert page.locator("#sdk-cards").get_attribute("data-sdk-layout") == layout
+        assert page.locator("#card-1").get_attribute("data-sdk-area") == "sidebar"
+        assert page.locator("#card-2").get_attribute("data-sdk-span") == "2"
         assert page.locator("#gallery-button").is_visible()
         page.click("#gallery-button")
         assert page.inner_text("#gallery-metric") == "43"
