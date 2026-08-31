@@ -97,6 +97,35 @@ await check('theme_asset', () => new Promise((resolve, reject) => {
     document.head.append(stylesheet);
 }));
 
+await check('persistent_storage', async () => {
+    const parameters = new URLSearchParams(location.search);
+    const key = parameters.get('storage_key');
+    const expected = parameters.get('storage_expected');
+    const write = parameters.get('storage_write');
+    if (!key || expected === null || write === null) {
+        throw new Error('storage_key, storage_expected, and storage_write are required');
+    }
+    const cookieName = `${key}-cookie`;
+    const readCookie = () => {
+        const prefix = `${cookieName}=`;
+        const entry = document.cookie
+            .split(';')
+            .map((value) => value.trim())
+            .find((value) => value.startsWith(prefix));
+        return entry ? decodeURIComponent(entry.slice(prefix.length)) : null;
+    };
+    const actual = readCookie();
+    const normalizedActual = actual ?? '__absent__';
+    if (normalizedActual !== expected) {
+        throw new Error(`expected=${expected} actual=${normalizedActual}`);
+    }
+    document.cookie = `${cookieName}=${encodeURIComponent(write)}; Path=/; SameSite=Strict; Max-Age=31536000`;
+    if (readCookie() !== write) {
+        throw new Error('written value was not readable');
+    }
+    return `cookie expected=${expected} wrote=${write} origin=${location.origin}`;
+});
+
 await check('canvas', async () => {
     const canvas = document.querySelector('#canvas-probe');
     const context = canvas.getContext('2d');
@@ -122,7 +151,11 @@ await check('webgl', async () => {
     if (Array.from(pixel).join(',') !== '255,0,0,255') {
         throw new Error(`pixel=${Array.from(pixel).join(',')}`);
     }
-    return `pixel=${Array.from(pixel).join(',')}`;
+    const rendererInfo = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = rendererInfo
+        ? gl.getParameter(rendererInfo.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER);
+    return `pixel=${Array.from(pixel).join(',')} renderer=${renderer}`;
 });
 
 await check('keyboard_focus', async () => {
@@ -137,23 +170,35 @@ await check('resize_observation', async () => {
     return `viewport=${window.innerWidth}x${window.innerHeight}`;
 });
 
+await check('navigation_policy', () => new Promise((resolve, reject) => {
+    const original = location.href;
+    location.assign('https://example.invalid/rti-demo-ui-native-navigation-probe');
+    setTimeout(() => {
+        if (location.href !== original) {
+            reject(new Error(`external navigation was not blocked: ${location.href}`));
+            return;
+        }
+        resolve(`blocked external navigation from ${location.origin}`);
+    }, 750);
+}));
+
 const capabilityResponse = await fetch('/api/command-capability', { cache: 'no-store' });
 const capabilityBody = await capabilityResponse.json();
 results.command_origin = {
     passed: false,
-    evidence: `report pending origin=${location.origin}`
+    evidence: `origin probe pending origin=${location.origin}`
 };
 try {
     if (!capabilityResponse.ok || !capabilityBody.capability) {
         throw new Error(`capability status=${capabilityResponse.status}`);
     }
-    const response = await fetch('/api/commands/spike-report', {
+    const response = await fetch('/api/commands/spike-origin', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-RTI-Demo-Command-Capability': capabilityBody.capability
         },
-        body: JSON.stringify({ results })
+        body: JSON.stringify({ origin: location.origin })
     });
     if (!response.ok) throw new Error(`command status=${response.status}`);
     results.command_origin = {
@@ -174,6 +219,6 @@ const finalReport = await fetch('/api/commands/spike-report', {
 });
 
 document.querySelector('#results').textContent = JSON.stringify(results, null, 2);
-document.title = results.command_origin?.passed && finalReport.ok
+document.title = Object.values(results).every((result) => result.passed) && finalReport.ok
     ? 'CONFORMANCE_REPORTED'
     : 'CONFORMANCE_REPORT_FAILED';

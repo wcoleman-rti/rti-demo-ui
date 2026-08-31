@@ -25,6 +25,9 @@ if(NATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST)
     FetchContent_MakeAvailable(webview)
 
     add_executable(native_webview_cpp_host cpp_host.cpp)
+    set_target_properties(
+        native_webview_cpp_host PROPERTIES NO_SYSTEM_FROM_IMPORTED ON
+    )
     target_link_libraries(
         native_webview_cpp_host PRIVATE rti_demo_ui::core webview::core
     )

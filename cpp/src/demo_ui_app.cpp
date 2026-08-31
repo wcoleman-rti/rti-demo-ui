@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <optional>
 #include <random>
@@ -1313,27 +1314,43 @@ void DemoUiApp::run() {
     const ReadyInfo info{
         host_, bound_port,
         "http://" + display_host + ":" + std::to_string(bound_port)};
-    sse_manager_->start();
-    if (stopped_) {
-        sse_manager_->stop();
-        server_->stop();
-        return;
+    auto listener = std::async(
+        std::launch::async, [this]() { return server_->listen_after_bind(); });
+    server_->wait_until_ready();
+    if (!server_->is_running()) {
+        listener.get();
+        if (stopped_) return;
+        throw std::runtime_error("DemoUiApp: failed to listen on " + host_ +
+                                 ":" + std::to_string(bound_port));
     }
+    sse_manager_->start();
+    bool publish_readiness = false;
     {
         std::lock_guard<std::mutex> guard(readiness_mutex_);
-        ready_info_ = info;
+        if (!stopped_) {
+            ready_info_ = info;
+            publish_readiness = true;
+        }
+    }
+    if (!publish_readiness) {
+        sse_manager_->stop();
+        server_->stop();
+        listener.get();
+        return;
     }
     readiness_cv_.notify_all();
     std::cout << "RTI Demo UI listening on " << info.url << "/" << std::endl;
-    if (!server_->listen_after_bind()) {
+    if (!listener.get() && !stopped_) {
         throw std::runtime_error("DemoUiApp: failed to listen on " + host_ +
                                  ":" + std::to_string(bound_port));
     }
 }
 
 void DemoUiApp::stop() noexcept {
-    if (stopped_) return;
-    stopped_ = true;
+    {
+        std::lock_guard<std::mutex> guard(readiness_mutex_);
+        if (stopped_.exchange(true)) return;
+    }
     readiness_cv_.notify_all();
     model_.stop();
     sse_manager_->stop();

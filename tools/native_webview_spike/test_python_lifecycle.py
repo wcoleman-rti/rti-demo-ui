@@ -36,7 +36,7 @@ class PythonOwnerLoopSpike(unittest.TestCase):
     def test_conformance_report_shape_is_strict(self):
         valid = {
             "results": {
-                name: {"passed": name != "sse", "evidence": f"{name} evidence"}
+                name: {"passed": True, "evidence": f"{name} evidence"}
                 for name in EXPECTED_CHECKS
             }
         }

@@ -13,10 +13,12 @@
         "runtime3d_import",
         "module_worker",
         "theme_asset",
+        "persistent_storage",
         "canvas",
         "webgl",
         "keyboard_focus",
         "resize_observation",
+        "navigation_policy",
         "command_origin"
       ],
       "properties": {
@@ -26,10 +28,12 @@
         "runtime3d_import": { "$ref": "#/$defs/check" },
         "module_worker": { "$ref": "#/$defs/check" },
         "theme_asset": { "$ref": "#/$defs/check" },
+        "persistent_storage": { "$ref": "#/$defs/check" },
         "canvas": { "$ref": "#/$defs/check" },
         "webgl": { "$ref": "#/$defs/check" },
         "keyboard_focus": { "$ref": "#/$defs/check" },
         "resize_observation": { "$ref": "#/$defs/check" },
+        "navigation_policy": { "$ref": "#/$defs/check" },
         "command_origin": { "$ref": "#/$defs/check" }
       },
       "additionalProperties": false

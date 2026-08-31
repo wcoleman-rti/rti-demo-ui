@@ -338,9 +338,11 @@ and use the reported port instead of hard-coded ports wherever practical.
    `site._server.sockets`, validate exactly one bound socket, and store its
    `getsockname()` port in immutable `ReadyInfo` before setting readiness. In
    C++, keep `bind_to_port()` for explicit ports and use
-   `bind_to_any_port(host_)` for port `0`; store its returned port in
-   `ReadyInfo` before `listen_after_bind()`. Print and expose the canonical URL
-   from `ReadyInfo`, not the requested port.
+   `bind_to_any_port(host_)` for port `0`; start `listen_after_bind()` on a
+   managed execution context, wait for httplib's running state, and then store
+   its returned port in `ReadyInfo`. Print and expose the canonical URL from
+   `ReadyInfo`, not the requested port. This ordering was corrected after the
+   native-webview spike reproduced an immediate readiness/stop race.
 2. Replace private Python test readiness access and fixed-port fixtures with
    the public readiness API in `tests/py/test_model_and_http.py`,
    `tests/py/test_static_root.py`, and `tests/browser/test_browser.py`; update

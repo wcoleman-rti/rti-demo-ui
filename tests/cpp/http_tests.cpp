@@ -21,7 +21,27 @@ static int g_failures = 0;
         }                                                                    \
     } while (0)
 
+void test_ready_info_is_listening() {
+    for (int iteration = 0; iteration < 50; ++iteration) {
+        DemoUiApp app("Readiness");
+        std::thread server_thread([&app]() { app.run(); });
+        app.wait_until_ready();
+        const auto info = app.ready_info();
+        CHECK(info.has_value());
+        if (info) {
+            httplib::Client client(info->host, info->port);
+            client.set_connection_timeout(0, 100000);
+            const auto health = client.Get("/api/health");
+            CHECK(health != nullptr && health->status == 200);
+        }
+        app.stop();
+        server_thread.join();
+    }
+}
+
 int main() {
+    test_ready_info_is_listening();
+
     DemoUiApp app("Test App");
     app.register_command(
         "echo",

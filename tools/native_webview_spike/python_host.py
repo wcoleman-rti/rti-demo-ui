@@ -8,13 +8,12 @@ import asyncio
 import json
 import os
 import queue
-import shutil
 import signal
 import socket
-import tempfile
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
 from rti_demo_ui import DemoUiApp
 
@@ -24,6 +23,8 @@ EXPECTED_CHECKS = {
     "dynamic_import",
     "keyboard_focus",
     "module_worker",
+    "navigation_policy",
+    "persistent_storage",
     "resize_observation",
     "runtime3d_import",
     "snapshot",
@@ -51,8 +52,14 @@ def validate_report(payload: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--signal-after", type=float)
+    parser.add_argument("--storage-expected", default="__absent__")
+    parser.add_argument("--storage-key", default="rti-demo-ui-native-spike")
+    parser.add_argument("--storage-path", type=Path, required=True)
+    parser.add_argument("--storage-write", default="phase-zero")
     parser.add_argument("--timeout", type=float, default=15.0)
+    parser.add_argument("--wait-for-close", action="store_true")
     args = parser.parse_args()
 
     import webview
@@ -64,7 +71,7 @@ def main() -> int:
     ready_queue: queue.Queue[tuple[asyncio.AbstractEventLoop, str]] = queue.Queue()
     report: dict = {}
     owner_thread_id = None
-    app = DemoUiApp("Native webview spike", static_root=root)
+    app = DemoUiApp("Native webview spike", args.port, static_root=root)
 
     def record_report(payload: dict) -> dict:
         validate_report(payload)
@@ -73,6 +80,9 @@ def main() -> int:
         return {"recorded": True}
 
     app.register_command("spike-report", {"type": "object"}, record_report)
+    app.register_command(
+        "spike-origin", {"type": "object"}, lambda payload: {"origin": payload["origin"]}
+    )
 
     async def owner_main() -> None:
         nonlocal owner_thread_id
@@ -98,16 +108,68 @@ def main() -> int:
     server_thread.start()
     owner_loop, url = ready_queue.get(timeout=args.timeout)
     port = int(url.rsplit(":", 1)[1])
-    profile = tempfile.mkdtemp(prefix="rti-demo-ui-native-spike-")
+    profile = args.storage_path.resolve()
+    profile.mkdir(parents=True, exist_ok=True)
+    query = urlencode(
+        {
+            "storage_expected": args.storage_expected,
+            "storage_key": args.storage_key,
+            "storage_write": args.storage_write,
+        }
+    )
     window = webview.create_window(
-        "Native webview spike", f"{url}/", width=1280, height=800, resizable=True
+        "Native webview spike",
+        f"{url}/?{query}",
+        width=1280,
+        height=800,
+        resizable=True,
     )
     window.events.closed += lambda: close_event.set()
+
+    def install_navigation_policy() -> None:
+        def find_webview(widget):
+            if widget.__gtype__.name == "WebKitWebView":
+                return widget
+            get_children = getattr(widget, "get_children", None)
+            if get_children:
+                for child in get_children():
+                    found = find_webview(child)
+                    if found is not None:
+                        return found
+            return None
+
+        browser = find_webview(window.native)
+        if browser is None:
+            raise RuntimeError("WebKitWebView native child was not found")
+
+        def block_external_navigation(_browser, decision, _decision_type):
+            get_action = getattr(decision, "get_navigation_action", None)
+            if get_action is None:
+                return False
+            uri = get_action().get_request().get_uri()
+            if uri == url or uri.startswith(f"{url}/"):
+                return False
+            decision.ignore()
+            return True
+
+        browser.connect("decide-policy", block_external_navigation)
+
+    window.events.before_show += install_navigation_policy
 
     previous_sigint = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, lambda _signum, _frame: signal_event.set())
 
     def close_when_done() -> None:
+        if args.wait_for_close:
+            while (
+                not close_event.wait(0.05)
+                and not signal_event.is_set()
+                and not server_error
+            ):
+                pass
+            if signal_event.is_set() or server_error:
+                window.destroy()
+            return
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             close_requested = (
@@ -132,14 +194,15 @@ def main() -> int:
         signal_timer.start()
 
     try:
-        webview.start(gui="gtk", debug=False, private_mode=True, storage_path=profile)
+        webview.start(
+            gui="gtk", debug=False, private_mode=False, storage_path=str(profile)
+        )
     finally:
         signal.signal(signal.SIGINT, previous_sigint)
         stop_future = asyncio.run_coroutine_threadsafe(app.stop(), owner_loop)
         stop_future.result(timeout=args.timeout)
         server_thread.join(timeout=args.timeout)
         closer.join(timeout=args.timeout)
-        shutil.rmtree(profile)
 
     with socket.socket() as probe:
         probe.settimeout(0.5)
@@ -153,7 +216,8 @@ def main() -> int:
         "owner_thread": owner_thread_id,
         "owner_loop_off_main_thread": owner_thread_id != threading.main_thread().ident,
         "port_released": port_released,
-        "profile_removed": not Path(profile).exists(),
+        "profile_path": str(profile),
+        "profile_persisted": profile.is_dir(),
         "renderer": webview.renderer,
         "report": report,
         "server_error": repr(server_error[0]) if server_error else None,
@@ -161,13 +225,19 @@ def main() -> int:
         "signal_observed": signal_event.is_set(),
     }
     print(json.dumps(trace, sort_keys=True))
+    report_passed = bool(report) and all(
+        result["passed"] for result in report["results"].values()
+    )
     return (
         0
         if trace["close_observed"]
         and trace["server_joined"]
         and trace["port_released"]
-        and trace["profile_removed"]
-        and (args.signal_after is not None or trace["command_report_received"])
+        and trace["profile_persisted"]
+        and (
+            args.signal_after is not None
+            or (trace["command_report_received"] and report_passed)
+        )
         else 1
     )
 

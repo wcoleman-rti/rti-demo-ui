@@ -54,3 +54,130 @@ jobs:
       - run: pip install -e . -e '.[dev]'
       - run: playwright install --with-deps chromium
       - run: PYTHONPATH=python pytest tests/browser -v
+
+  native-webview-spike:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install native engine prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            dbus-x11 \
+            gir1.2-gtk-3.0 \
+            gir1.2-webkit2-4.1 \
+            libcairo2-dev \
+            libgirepository1.0-dev \
+            libgl1-mesa-dri \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config \
+            xvfb
+      - name: Install Python spike dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -e . \
+            -r tools/native_webview_spike/requirements.txt
+      - name: Build C++ native host
+        run: |
+          cmake -S tools/native_webview_spike \
+            -B build/native-webview-spike-real \
+            -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
+            -DWEBVIEW_WEBKITGTK_API=4.1
+          cmake --build build/native-webview-spike-real \
+            --target native_webview_cpp_host \
+            --parallel
+      - name: Run native lifecycle tests
+        run: |
+          PYTHONPATH=tools/native_webview_spike \
+            python -m unittest -v \
+            tools/native_webview_spike/test_python_lifecycle.py \
+            tools/native_webview_spike/test_python_runner_prototype.py
+          cmake -S tools/native_webview_spike \
+            -B build/native-webview-spike-fake \
+            -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=OFF
+          cmake --build build/native-webview-spike-fake \
+            --target native_webview_cpp_lifecycle \
+            --parallel
+          timeout 10s \
+            ./build/native-webview-spike-fake/native_webview_cpp_lifecycle \
+            --immediate-stop
+      - name: Run real native engine conformance
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" \
+            bash -euo pipefail <<'SCRIPT'
+          work="$RUNNER_TEMP/native-webview-spike"
+          cpp_host="./build/native-webview-spike-real/native_webview_cpp_host"
+          rm -rf "$work"
+          mkdir -p "$work"
+
+          timeout 40s python tools/native_webview_spike/python_host.py \
+            --timeout 20 \
+            --storage-path "$work/python-a" \
+            --storage-key ci-python \
+            --storage-expected __absent__ \
+            --storage-write first \
+            | tee "$work/python-a1.log"
+          timeout 40s python tools/native_webview_spike/python_host.py \
+            --timeout 20 \
+            --storage-path "$work/python-a" \
+            --storage-key ci-python \
+            --storage-expected first \
+            --storage-write second \
+            | tee "$work/python-a2.log"
+          timeout 40s python tools/native_webview_spike/python_host.py \
+            --timeout 20 \
+            --storage-path "$work/python-b" \
+            --storage-key ci-python \
+            --storage-expected __absent__ \
+            --storage-write isolated \
+            | tee "$work/python-b1.log"
+          timeout 40s python tools/native_webview_spike/python_host.py \
+            --timeout 20 \
+            --signal-after 4 \
+            --storage-path "$work/python-signal" \
+            --storage-key ci-python-signal \
+            --storage-expected __absent__ \
+            --storage-write signal \
+            | tee "$work/python-signal.log"
+
+          timeout 40s "$cpp_host" \
+            --storage-path "$work/cpp-a" \
+            --storage-key ci-cpp \
+            --storage-expected __absent__ \
+            --storage-write first \
+            | tee "$work/cpp-a1.log"
+          timeout 40s "$cpp_host" \
+            --storage-path "$work/cpp-a" \
+            --storage-key ci-cpp \
+            --storage-expected first \
+            --storage-write second \
+            | tee "$work/cpp-a2.log"
+          timeout 40s "$cpp_host" \
+            --storage-path "$work/cpp-b" \
+            --storage-key ci-cpp \
+            --storage-expected __absent__ \
+            --storage-write isolated \
+            | tee "$work/cpp-b1.log"
+
+          timeout --kill-after=5s --preserve-status --signal=INT 4s \
+            "$cpp_host" \
+            --wait-for-signal true \
+            --storage-path "$work/cpp-signal" \
+            --storage-key ci-cpp-signal \
+            --storage-expected __absent__ \
+            --storage-write signal \
+            | tee "$work/cpp-signal.log"
+          SCRIPT
+      - name: Retain native diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-webview-spike-logs
+          path: ${{ runner.temp }}/native-webview-spike/*.log

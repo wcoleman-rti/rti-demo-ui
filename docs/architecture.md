@@ -34,10 +34,10 @@ Component `revision` records the application revision at its latest mutation.
 Component IDs remain stable for the lifetime of the application.
 
 Python uses `NEW -> STARTING -> RUNNING -> STOPPING -> STOPPED` and an
-`aiohttp.web.AppRunner`. C++ uses a blocking httplib server. Both bind before
-announcing readiness. The default is literal `127.0.0.1` with port `0`; callers
-obtain the selected port through public `ReadyInfo` APIs. `stop()` is
-idempotent.
+`aiohttp.web.AppRunner`. C++ uses a blocking httplib server. Both start
+listening before announcing readiness. The default is literal `127.0.0.1` with
+port `0`; callers obtain the selected port through public `ReadyInfo` APIs.
+`stop()` is idempotent.
 Python waits for aiohttp cleanup. C++ stops accepting requests, closes active
 event streams, drains active commands, cancels SDK timers, and joins them before
 returning.

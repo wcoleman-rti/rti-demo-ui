@@ -2,9 +2,10 @@
 
 ## Status
 
-Technology spike completed on 2026-08-31. Do not promote to
-`feature/native-webview`: the fixed SSE and C++ lifecycle gates failed, and no
-C++ combination completed a real-engine cycle.
+Technology spike re-evaluated on 2026-08-31. Linux Python and C++ now pass the
+available local real-engine, lifecycle, profile, navigation, and headless
+conformance gates, and both manual Linux checks passed. Do not promote to
+`feature/native-webview` until the added Ubuntu 22.04 hosted job passes.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -75,6 +76,10 @@ that answer:
   contract in all three engines?
 - Do EventSource, WebGL/Three.js, canvas, local fonts, MapLibre workers, and
   dynamic adapter imports work without engine-specific changes?
+- Does a persistent profile retain browser-owned preferences for the same
+  application while keeping distinct application identities isolated?
+- How do a dynamic loopback port and browser origin rules constrain durable
+  `localStorage`, IndexedDB, and cookie use?
 - What system packages are required on Linux, and can CI run under a virtual
   display?
 - Does Windows require a WebView2 runtime bootstrap or documented system
@@ -92,7 +97,8 @@ The intended steady-state sequence is:
 
 1. Validate loopback host and native dependency availability.
 2. Start the state server on a managed background execution context.
-3. Wait for public `ReadyInfo` and use its canonical URL.
+3. Wait for public `ReadyInfo`, which guarantees that the listener is accepting
+   requests, and use its canonical URL.
 4. Create and run the native window on the required GUI thread.
 5. Navigate only after successful bind; startup failures never show an empty
    window or stale URL.
@@ -134,12 +140,21 @@ existing async `DemoUiApp.run()`:
 ```python
 from rti_demo_ui_native import run_native
 
-run_native(app, async_main=run_demo, width=1280, height=800, devtools=False)
+run_native(
+    app,
+    application_id="com.example.factory-dashboard",
+    async_main=run_demo,
+    width=1280,
+    height=800,
+    devtools=False,
+)
 ```
 
-`run_native` validates positive bounded dimensions, loopback hosting, and app
-lifecycle state. It starts `app.run()` on a dedicated asyncio loop/thread,
-waits for `app.wait_until_ready()`, creates the window on the main thread, and
+`run_native` validates a reverse-DNS-style `application_id`, positive bounded
+dimensions, loopback hosting, and app lifecycle state. The identifier selects
+a stable Python profile namespace; changing it intentionally creates a separate
+profile. The runner starts `app.run()` on a dedicated asyncio loop/thread, waits
+for `app.wait_until_ready()`, creates the window on the main thread, and
 marshals stop back to the owner loop. It must not add speculative
 `start_background_server()` or `stop_sync()` methods to the core public API.
 
@@ -200,10 +215,27 @@ macOS, or GCC 11/Clang 14 on Ubuntu.
 - Do not add a privileged JavaScript-native bridge in the first release.
 - Keep remote subresource policy consistent with the SDK's local/offline asset
   model and adapter-specific rules.
-- Create a unique temporary browser profile/cache directory for every run and
-  remove it after clean or failed shutdown. Inability to prevent reuse of a
-  persistent default profile fails the support gate for that host/platform
-  combination.
+- Use a persistent browser profile scoped to the native application's stable
+  identity. Repeated executions of the same application may reuse that profile;
+  distinct application identities must not share it.
+- Python uses the explicit `application_id` to select its profile namespace.
+  For the first C++ release, the packaged executable identity is the profile
+  identity supplied to the selected platform backend. Same-executable
+  invocations may intentionally share browser state.
+- The SDK does not intentionally place snapshots, SSE payloads, command
+  capabilities, command results, credentials, or other operational state in
+  persistent browser storage. API and command responses remain `no-store`; SSE
+  and static assets retain their existing explicit cache policies.
+- A persistent profile does not provide a stable web origin. Applications using
+  port `0` receive a new origin when the selected port changes, so
+  origin-scoped `localStorage` and IndexedDB are not guaranteed to carry across
+  runs. Application-scoped persistent cookies work across those loopback ports
+  and are the bounded first-release browser preference mechanism. Larger or
+  sensitive configuration remains application-owned; a stable virtual-origin
+  or SDK preferences feature requires a separate future design. The SDK itself
+  does not set localhost cookies.
+- Private or per-run ephemeral execution may be added later as an explicit
+  option, but it is not a first-release support gate.
 
 ## Packaging and Platform Support
 
@@ -246,7 +278,11 @@ window behavior and rendering quality.
    results to a test-only loopback endpoint that is absent from production
    builds. Canvas and WebGL checks read known rendered pixels so a created but
    blank surface cannot pass.
-4. Capture a window or webview image where the selected host API supports it
+4. Run the same application profile twice on different dynamic ports and verify
+   a persistent cookie sentinel survives. Run a distinct application identity
+   and verify the sentinel is absent. Record the platform identity and profile
+   location or namespace used by the selected backend.
+5. Capture a window or webview image where the selected host API supports it
    reliably. Use screenshots for diagnostics and a few stable bounds/pixel
    assertions, not broad golden-image comparison across different operating
    system engines and font rasterizers.
@@ -352,6 +388,9 @@ never imported or linked unless the application opts in.
 - Browser conformance inside the embedded engine: snapshot/SSE, commands,
   themes/layouts, adapter dynamic import, canvas/WebGL, keyboard focus, and
   narrow resizing.
+- Persistent-profile conformance across dynamic ports: same-application cookie
+  reuse, distinct-application isolation, and documented behavior for
+  origin-scoped storage, simultaneous instances, and executable relocation.
 - Linux CI under Xvfb/D-Bus with WebKitGTK and software rendering;
   Windows CI with a recorded WebView2 runtime; and macOS CI with WKWebView on
   the main thread.
@@ -374,8 +413,10 @@ Run the applicable core repository checks in addition to native target tests.
   WebView2, or macOS 12/WKWebView; otherwise that combination is unsupported.
 - Python application work enters through one structured `async_main` callback
   on the owner loop.
-- Developer tools require an explicit option and every run uses an ephemeral
-  profile removed at shutdown.
+- Developer tools require an explicit option. Native mode uses an
+  application-scoped persistent profile; Python identifies it with the required
+  `application_id`, while C++ uses the packaged executable identity in the
+  first release.
 - One application has exactly one native window. Multi-window hosting is
   outside this API permanently.
 
@@ -392,6 +433,8 @@ The spike may advance to implementation only when:
   proposed APIs.
 - Command Origin, SSE, adapter loading, and WebGL behavior are verified in the
   selected engines.
+- Persistent-profile reuse across dynamic ports for one application identity
+  and isolation between distinct identities are verified.
 - Optional packaging leaves core installation and linking unaffected.
 - Every supported combination has a repeatable build, runtime prerequisites,
   a required real-engine CI smoke test, and a manual release checklist.
@@ -400,33 +443,35 @@ The implementation is accepted when supported platforms satisfy those checks
 with production runner code and external browser mode remains behaviorally
 unchanged.
 
-## Phase 0 Spike Result (2026-08-31)
+## Phase 0 Spike Result and Storage Re-evaluation (2026-08-31)
 
 ### Recommendation
 
-**Do not begin Phase 1.** The spike does not meet the acceptance criteria. The
-current baseline has no `/api/events` SSE route, so the shared conformance page
-correctly fails SSE in the real Linux Python engine. The C++ lifecycle also has
-a readiness/stop race: `ReadyInfo` is published before `listen_after_bind()`,
-allowing `stop()` to run before the blocking listen begins. In 100 immediate
-readiness/stop iterations, 63 exceeded the two-second watchdog. This API
-mismatch must be resolved in the applicable lifecycle/transport plan and this
-plan revalidated rather than redesigned silently in Phase 1.
+**Do not begin Phase 1 yet.** The persistent-profile revision and installed
+WebKitGTK development dependencies allowed both selected Linux hosts to complete
+the real-engine conformance cycle. The selected dependencies are viable for a
+Linux-first release. The remaining Linux gates are execution of the checked-in
+Ubuntu 22.04 hosted job.
 
-An isolated runner workaround was also validated: after `ReadyInfo`, polling
-the public `/api/health` route until it returns 200 produced 100 clean stops in
-100 iterations, while the raw `ReadyInfo` path still timed out in 19 of 25
-additional iterations. The public runner signature need not change, but the
-proposed lifecycle sequence must explicitly require health-confirmed readiness
-before window creation.
+The SSE implementation from `develop` commit `5647f40` passed both embedded
+Linux engines. The C++ readiness race was fixed in the core contract rather
+than hidden behind runner health polling. `run()` now starts the bound httplib
+listener on a managed execution context, waits for its running state, and only
+then publishes `ReadyInfo`. `stop()` serializes against readiness publication.
+The public API and blocking `run()` behavior are unchanged, while
+`wait_until_ready()` now guarantees that the reported URL accepts requests.
+All six C++ suites pass, a new 50-iteration immediate-health regression passes,
+and the formerly failing raw immediate-stop stress passes 100/100.
 
 The selected dependency pins remain appropriate spike candidates:
 `pywebview==6.2.1` (BSD-3-Clause) and webview commit
 `3ab4b5d722438fc8a13e6ca830c5e2372d19a01d`, tag `0.12.0` (MIT).
-No alternative engine, dependency, production API, or lower platform floor was
-selected. The prototype and its Python dependency declaration are isolated in
-`tools/native_webview_spike/`; core Python and C++ dependency manifests are
-unchanged.
+No alternative engine, dependency, production native-host API, or lower
+platform floor was selected. The Linux C++ prototype uses webview's public
+native browser handle to configure WebKitGTK's supported persistent cookie
+store and navigation-policy signal before navigation; no private API or fork is
+required. The prototype dependencies remain isolated in
+`tools/native_webview_spike/`; core dependency manifests are unchanged.
 
 ### Six-Combination Support Matrix
 
@@ -435,15 +480,16 @@ that the underlying operating-system engine can never be supported.
 
 | Backend | Platform gate | Classification | Reproducible evidence tied to a fixed gate |
 | --- | --- | --- | --- |
-| Python 3.11+ / pywebview 6.2.1 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported | A real `gtkwebkit2` cycle ran on Ubuntu 26.04.1 with GTK 3.24.52 and WebKitGTK 2.52.3. Snapshot, exact command Origin, application and runtime3d dynamic imports, module worker, theme asset, Canvas pixel, WebGL pixel, focus, resize, close, signal, ephemeral context/profile cleanup, port teardown, and owner-loop join passed. The strict result schema reported SSE as its only failure because `/api/events` is absent. |
-| C++17 / webview 0.12.0 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported | The isolated host configure failed its required `webkit2gtk-4.1` `pkg-config` development-package check. Raw `ReadyInfo` retains the stop race; public health-confirmed readiness passed 100/100 lifecycle iterations. Pinned webview creates `webkit_web_view_new()` on the default context and exposes no public ephemeral-profile option. The unchanged server also lacks SSE. |
-| Python 3.11+ / pywebview 6.2.1 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Pinned pywebview uses `defaultDataStore()` and clears shared website data instead of creating a unique per-run store, which fails the fixed profile gate. The unchanged server lacks SSE. |
-| C++17 / webview 0.12.0 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Pinned webview constructs a default `WKWebViewConfiguration` with no public data-store option, which fails the fixed profile gate. The unchanged server lacks SSE. |
-| Python 3.11+ / pywebview 6.2.1 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available, so neither runtime-version detection nor the non-skippable startup/render/close gate was executed. The unchanged server lacks SSE. |
-| C++17 / webview 0.12.0 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available. Pinned webview hard-codes `%APPDATA%/<executable>` as the WebView2 user-data folder and exposes no public override, which fails the fixed profile gate. The unchanged server lacks SSE. |
+| Python 3.11+ / pywebview 6.2.1 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported pending hosted gate | Real `gtkwebkit2` cycles passed on Ubuntu 26.04.1 with GTK 3.24.52 and WebKitGTK 2.52.6. Across three dynamic ports, a same-profile persistent cookie survived and a distinct profile remained isolated. Snapshot, SSE, command Origin, imports, worker, theme, Canvas, WebGL, focus, resize, external-navigation blocking, normal close, signal, port teardown, and owner-loop join passed. The identical sequence passed locally under Xvfb/D-Bus/Mesa. Manual chrome, resizing, rendering, focus/input, DPI, and navigation checks passed. The Ubuntu 22.04 hosted job remains. |
+| C++17 / webview 0.12.0 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported pending hosted gate | The real pinned webview host built and passed the full cycle on WebKitGTK 2.52.6. A supported native-handle adapter configured a profile cookie database and `decide-policy` callback before navigation. Same-profile reuse, distinct-profile isolation, dynamic ports, SSE, exact Origin, imports, worker, theme, Canvas, WebGL, focus, resize, blocked external navigation, normal close, signal, server join, and fixed readiness passed, including the local Xvfb/D-Bus/Mesa sequence. Manual chrome, resizing, rendering, focus/input, DPI, and navigation checks passed. The Ubuntu 22.04 hosted job remains. |
+| Python 3.11+ / pywebview 6.2.1 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Running pywebview with persistence enabled selects WKWebView's default persistent data store, which is compatible with the revised policy in principle; application identity and isolation remain unverified. |
+| C++17 / webview 0.12.0 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Pinned webview's default `WKWebViewConfiguration` selects the persistent data store, which is no longer a failed gate; packaged-application identity and isolation remain unverified. |
+| Python 3.11+ / pywebview 6.2.1 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available, so neither runtime-version detection nor the non-skippable startup/render/close gate was executed. |
+| C++17 / webview 0.12.0 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available. Pinned webview's persistent `%APPDATA%/<executable>` WebView2 user-data folder aligns with same-executable reuse, but distinct executable identity, collisions, and real-engine behavior remain unverified. |
 
-At least one Python and one C++ combination must be supported to advance. This
-matrix has zero supported combinations, so that criterion fails.
+At least one Python and one C++ combination must be supported to advance. Both
+Linux combinations are local candidates but remain formally unsupported until
+their shared hosted gate passes.
 
 ### Prototype and Lifecycle Evidence
 
@@ -463,61 +509,67 @@ server-driven close, `async_main` normal return, exception propagation after
 cleanup, cancellation and await on close, simultaneous close/return,
 owner-thread join, and port release.
 
-The Python real-engine programmatic-close trace reported
-`renderer=gtkwebkit2`, different GUI/owner thread IDs, `close_observed=true`,
-`server_joined=true`, `port_released=true`, and `profile_removed=true`. Known
-pixels were Canvas `17,34,51,255` and WebGL `255,0,0,255`. The signal trace also
-reported `signal_observed=true` and clean teardown. The signal handler only set
-a `threading.Event`; cleanup ran outside signal context.
+The revised Python real-engine sequence used two explicit persistent profile
+directories and dynamic ports 45023, 40117, and 45357. Profile A's first run
+observed an absent cookie and wrote `app-a-first`; its second run read that value
+and wrote `app-a-second`. Profile B observed the cookie as absent. The C++ host
+passed the equivalent sequence on dynamic ports 43981, 60241, and 44343 after
+configuring WebKitGTK's SQLite cookie store through the public native handle.
+Both signal paths passed. All traces reported clean window, server, thread, and
+port teardown.
 
 The page reported passes for snapshot schema 2, command capability and exact
 browser Origin (the report command was accepted), dynamic adapter import,
 runtime3d/Three.js bundle import, a same-origin module worker, applied theme
-CSS, Canvas, WebGL, keyboard focus, and a 1280x800 resize observation. The
-captured JSON passes the checked-in strict result schema and reports SSE as its
-only failed check. Browser command acceptance is the structured test-only
-report path; neither prototype adds a production JavaScript-native bridge.
+CSS, Canvas, WebGL, keyboard focus, a 1280x800 resize observation, persistent
+cookies across dynamic ports, and blocked external top-level navigation. The
+captured JSON passes the checked-in strict result schema. Both engines received
+the immediate `snapshot` SSE event with matching event ID and revision. Browser
+command acceptance uses a separate structured Origin probe before the final
+report; neither prototype adds a production JavaScript-native bridge.
 
-webview 0.12.0 exposes no public cross-platform per-run profile/cache option.
-On Linux it creates a webview on WebKitGTK's default context, on macOS it uses
-a default `WKWebViewConfiguration`, and on Windows it hard-codes an application
-data directory. Its native-handle access does not allow replacing the browser
-data store after creation. No private API was selected. Python's Linux backend
-uses WebKitGTK's public ephemeral context in `private_mode=True`; the per-run
-directory supplied by the prototype was also removed after both close paths.
-Pinned pywebview's macOS backend instead clears `defaultDataStore()`, so it
-does not satisfy the unique per-run profile requirement.
+webview 0.12.0 exposes no portable profile configuration. On Linux, its public
+native `WebKitWebView` handle is available before navigation, allowing the
+companion adapter to assign a supported persistent cookie database and
+navigation callback without modifying webview. On macOS it uses the default
+persistent `WKWebsiteDataStore`; on Windows it hard-codes an
+application-derived WebView2 data directory. The macOS and Windows identity,
+collision, relocation, navigation, and simultaneous-instance behavior remain
+unverified. Origin-scoped `localStorage` and IndexedDB still vary with a dynamic
+port; bounded persistent cookies work across ports, while larger configuration
+remains application-owned.
 
 ### Exit-Criterion Evaluation
 
 | Exit criterion | Result |
 | --- | --- |
 | Six combinations complete a leak-free real cycle or receive a failed-gate classification | Pass: all six are classified above; unavailable platforms were not conditionally skipped or claimed supported. |
-| At least one Python and one C++ combination supported | **Fail:** zero combinations are supported. |
+| At least one Python and one C++ combination supported | **Pending:** both Linux combinations pass local automation and manual checks but await the hosted Ubuntu 22.04 gate. |
 | Main-thread and owner-loop rules documented and represented | Pass for prototype shape: both hosts put the GUI loop on the main thread and server ownership on a managed, joined background context. |
-| Origin, SSE, adapter loading, and WebGL verified | **Fail:** Origin, adapter import, and WebGL pass on Linux Python; SSE fails and no other real engine ran. |
+| Origin, SSE, adapter loading, navigation policy, and WebGL verified | **Partial:** all pass in both Linux real engines; macOS and Windows did not run. |
+| Same-application persistence and distinct-profile isolation verified | **Partial:** both pass across dynamic ports for Linux Python and C++; macOS, Windows, simultaneous-instance, and relocation behavior remain unverified. |
 | Optional packaging leaves core unaffected | Pass for spike scope: core manifests have no native dependency/probe, core CMake tests and Python tests pass, and the native dependency exists only in the spike directory. |
-| Every supported combination has repeatable prerequisites, CI smoke, and manual checklist | Vacuous because none are supported; this does not offset the minimum-support failure. |
+| Every supported combination has repeatable prerequisites, CI smoke, and manual checklist | **Pending:** prerequisites and manual Linux checks pass; the Ubuntu 22.04 job is checked in but has not executed on GitHub. |
 
-Manual focus feel, accessibility, DPI/multi-monitor behavior, native chrome,
-hardware-accelerated WebGL, external-link handling, and visual quality remain
-unsupported/unassessed. The observed WebGL result is for the current Linux
-display environment only and does not establish hardware GPU support. No
-hosted Xvfb/D-Bus run was available (`Xvfb` was absent), and no screenshot was
-captured. The installed WebKitGTK runtime was usable from Python, but its
-development metadata/headers required by the C++ host were absent. Node.js was
-also absent, so the Scene3D runtime could be checksum-verified but not rebuilt.
+The user manually accepted native chrome, responsive resizing, readable visual
+quality, keyboard focus/input, DPI behavior, and absence of unexpected external
+navigation in both Linux hosts. The programmatic WebGL probe passed known-pixel
+readback and reported renderer `Apple GPU`; the local Xvfb/D-Bus sequence also
+passed with Mesa software rendering. Multi-monitor behavior and independent
+physical-GPU verification remain unassessed and are documented limitations, not
+Linux hosted-CI blockers. No screenshot was captured. Node.js was absent during
+the original run, so the Scene3D runtime was checksum-verified but not rebuilt
+in that run.
 
-### Waiting Point Before SSE Integration
+### Phase 0 Conclusion
 
-All locally executable work that does not require the pending SSE transport is
-complete. The Linux Python real-engine result is schema-valid and has exactly
-one failed browser check: `sse`. Resume this spike only after confirmation that
-the SSE implementation has merged into `develop`; then fetch/pull `develop`,
-merge it into this branch, and rerun the commands below without weakening the
-snapshot-event assertion. A passing SSE result will not by itself promote the
-plan: C++ profile isolation and real-engine platform jobs still require a plan
-decision and suitable runners.
+Phase 0 has positive local evidence but is not yet complete under its fixed
+hosted gate. Linux Python and C++ satisfy every available automated local
+criterion, including real rendering, dynamic-port persistence, isolation,
+navigation policy, signals, and lifecycle. Promotion is blocked only by
+execution of the new Ubuntu 22.04 CI job. If it passes, the minimum
+one-Python/one-C++ rule is met and Phase 1 may begin as Linux-first work; macOS
+and Windows remain unsupported until separately qualified.
 
 ### Exact Verification Commands and Results
 
@@ -527,6 +579,10 @@ Run from the repository root:
 git merge-base --is-ancestor \
   3525d507d5865a364d8a2cd496fc0b26a7d82ed8 HEAD
 # exit 0
+
+git fetch origin develop
+git merge --no-edit origin/develop
+# merged develop commit 5647f40 as merge commit 2339ec2
 
 python3 -m venv --system-site-packages \
   /tmp/rti-demo-ui-native-spike-venv
@@ -541,14 +597,35 @@ PYTHONPATH=tools/native_webview_spike \
 # 10 passed
 
 set -o pipefail
+rm -rf /tmp/rti-demo-ui-native-dynamic-app-a \
+  /tmp/rti-demo-ui-native-dynamic-app-b
 timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
   tools/native_webview_spike/python_host.py --timeout 20 \
-  | tee /tmp/native-python-spike-programmatic.log
-# exit 0; strict report has exactly one failed check: SSE
+  --storage-path /tmp/rti-demo-ui-native-dynamic-app-a \
+  --storage-key rti-demo-ui-dynamic-python \
+  --storage-expected __absent__ --storage-write app-a-first \
+  | tee /tmp/native-python-dynamic-a1.log
+timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  tools/native_webview_spike/python_host.py --timeout 20 \
+  --storage-path /tmp/rti-demo-ui-native-dynamic-app-a \
+  --storage-key rti-demo-ui-dynamic-python \
+  --storage-expected app-a-first --storage-write app-a-second \
+  | tee /tmp/native-python-dynamic-a2.log
+timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  tools/native_webview_spike/python_host.py --timeout 20 \
+  --storage-path /tmp/rti-demo-ui-native-dynamic-app-b \
+  --storage-key rti-demo-ui-dynamic-python \
+  --storage-expected __absent__ --storage-write app-b-first \
+  | tee /tmp/native-python-dynamic-b1.log
+# all exit 0 on different ports; persistence, isolation, and navigation pass
 
+rm -rf /tmp/rti-demo-ui-native-python-signal
 timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
   tools/native_webview_spike/python_host.py --timeout 20 --signal-after 4 \
-  | tee /tmp/native-python-spike-signal.log
+  --storage-path /tmp/rti-demo-ui-native-python-signal \
+  --storage-key rti-demo-ui-python-signal \
+  --storage-expected __absent__ --storage-write signal-run \
+  | tee /tmp/native-python-signal.log
 # exit 0; signal_observed=true and teardown checks pass
 
 cmake -S tools/native_webview_spike \
@@ -576,25 +653,7 @@ for i in $(seq 1 100); do
 done
 printf 'iterations=100 passes=%s timeouts=%s other_failures=%s\n' \
   "$passes" "$timeouts" "$failures"
-# iterations=100 passes=37 timeouts=63 other_failures=0
-
-passes=0; timeouts=0; failures=0
-for i in $(seq 1 100); do
-  timeout 2s \
-    ./build/native-webview-spike-fake/native_webview_cpp_lifecycle \
-    >"/tmp/native-cpp-health-$i.log" 2>&1
-  rc=$?
-  if [ "$rc" -eq 0 ]; then
-    passes=$((passes+1))
-  elif [ "$rc" -eq 124 ]; then
-    timeouts=$((timeouts+1))
-  else
-    failures=$((failures+1))
-  fi
-done
-printf 'health_gated_iterations=100 passes=%s timeouts=%s other_failures=%s\n' \
-  "$passes" "$timeouts" "$failures"
-# health_gated_iterations=100 passes=100 timeouts=0 other_failures=0
+# iterations=100 passes=100 timeouts=0 other_failures=0
 
 /usr/bin/python3 - <<'PY'
 import json
@@ -606,7 +665,7 @@ schema = json.loads(
     Path("tools/native_webview_spike/conformance/result-schema.json").read_text()
 )
 trace = json.loads(
-    Path("/tmp/native-python-spike-programmatic.log").read_text().splitlines()[-1]
+    Path("/tmp/native-python-dynamic-a2.log").read_text().splitlines()[-1]
 )
 jsonschema.validate({"results": trace["report"]["results"]}, schema)
 failed = [
@@ -614,30 +673,69 @@ failed = [
     for name, result in trace["report"]["results"].items()
     if not result["passed"]
 ]
-assert failed == ["sse"], failed
+assert failed == [], failed
 PY
 # exit 0
+
+rm -rf /tmp/rti-demo-ui-native-dynamic-app-a \
+  /tmp/rti-demo-ui-native-dynamic-app-b \
+  /tmp/rti-demo-ui-native-python-signal
 
 cmake -S tools/native_webview_spike \
   -B build/native-webview-spike-real \
   -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
   -DWEBVIEW_WEBKITGTK_API=4.1
-# fails: required package webkit2gtk-4.1 not found
+cmake --build build/native-webview-spike-real \
+  --target native_webview_cpp_host --parallel
+# succeeds with WebKitGTK 4.1 version 2.52.6 and GTK 3.24.52
+
+rm -rf /tmp/rti-demo-ui-native-cpp-app-a \
+  /tmp/rti-demo-ui-native-cpp-app-b
+cpp_host=./build/native-webview-spike-real/native_webview_cpp_host
+timeout 40s "$cpp_host" \
+  --storage-path /tmp/rti-demo-ui-native-cpp-app-a \
+  --storage-key rti-demo-ui-dynamic-cpp \
+  --storage-expected __absent__ --storage-write cpp-a-first \
+  | tee /tmp/native-cpp-dynamic-a1.log
+timeout 40s "$cpp_host" \
+  --storage-path /tmp/rti-demo-ui-native-cpp-app-a \
+  --storage-key rti-demo-ui-dynamic-cpp \
+  --storage-expected cpp-a-first --storage-write cpp-a-second \
+  | tee /tmp/native-cpp-dynamic-a2.log
+timeout 40s "$cpp_host" \
+  --storage-path /tmp/rti-demo-ui-native-cpp-app-b \
+  --storage-key rti-demo-ui-dynamic-cpp \
+  --storage-expected __absent__ --storage-write cpp-b-first \
+  | tee /tmp/native-cpp-dynamic-b1.log
+# all exit 0 on different ports; persistence, isolation, and navigation pass
+
+rm -rf /tmp/rti-demo-ui-native-cpp-signal
+timeout --kill-after=5s --preserve-status --signal=INT 4s "$cpp_host" \
+  --wait-for-signal true \
+  --storage-path /tmp/rti-demo-ui-native-cpp-signal \
+  --storage-key rti-demo-ui-cpp-signal \
+  --storage-expected __absent__ --storage-write signal \
+  | tee /tmp/native-cpp-signal.log
+# exit 0; signal_observed=true and teardown checks pass
+
+# The exact Xvfb/D-Bus/Mesa sequence is the
+# native-webview-spike job's "Run real native engine conformance" block.
+# The complete block exited 0 locally; GitHub execution remains pending.
 
 cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-# 4/4 passed
+# 6/6 passed
 
 PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
   -m pytest tests/py -q
-# 22 passed
+# 72 passed
 
 /tmp/rti-demo-ui-native-spike-venv/bin/playwright install chromium
 RTI_DEMO_CPP_ARM3D="$PWD/build/cpp/examples/rti_demo_ui_arm3d" \
   PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
   -m pytest tests/browser -q
-# 6 passed
+# 33 passed
 
 sha256sum --check assets/runtime3d.sha256
 git diff --exit-code -- assets/runtime3d.js assets/runtime3d.sha256
