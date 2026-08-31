@@ -1,0 +1,26 @@
+PROJECT_NAME           = "RTI Demo UI"
+PROJECT_NUMBER         = "@PROJECT_VERSION@"
+OUTPUT_DIRECTORY       = "@RTI_DEMO_UI_DOXYGEN_OUTPUT@"
+INPUT                  = "@RTI_DEMO_UI_ROOT@/cpp/include/rti_demo_ui"
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+EXCLUDE_SYMBOLS        = rti::demo::ui::detail*
+
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = "@RTI_DEMO_UI_ROOT@"
+BUILTIN_STL_SUPPORT    = YES
+MACRO_EXPANSION        = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_AS_ERROR          = FAIL_ON_WARNINGS

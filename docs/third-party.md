@@ -56,6 +56,18 @@ runtime dependencies.
 | pre-commit | 4.6.1 | Local quality-check orchestration | MIT | [pre-commit/pre-commit](https://github.com/pre-commit/pre-commit) |
 | build | 1.2.2 | Python release artifact builder | MIT | [PyPA build](https://github.com/pypa/build) |
 
+## Documentation Dependencies
+
+These packages are installed only with the Python `docs` extra. Doxygen is a
+separate system build prerequisite.
+
+| Component | Version | Purpose | License | Source |
+| --- | --- | --- | --- | --- |
+| Breathe | 4.36.0 | Doxygen XML integration for Sphinx | BSD-3-Clause | [breathe-doc/breathe](https://github.com/breathe-doc/breathe) |
+| Furo | 2024.8.6 | Sphinx HTML theme | MIT | [pradyunsg/furo](https://github.com/pradyunsg/furo) |
+| MyST Parser | 4.0.1 | Markdown parsing for Sphinx | MIT | [executablebooks/MyST-Parser](https://github.com/executablebooks/MyST-Parser) |
+| Sphinx | 8.2.3 | Documentation site and Python API generation | BSD-2-Clause | [sphinx-doc/sphinx](https://github.com/sphinx-doc/sphinx) |
+
 ## Optional Scene3D Bundle
 
 The opt-in browser renderer is built from exact npm pins in

@@ -82,6 +82,20 @@ route contract changes, then update both language tests.
 contributor workflow. Decision-bearing implementation plans belong in
 `docs/development/implementation-plans/`; temporary notes do not.
 
+The hosted documentation requires CMake, Doxygen, and the Python documentation
+extra. Build the same warning-as-error site produced by CI from the repository
+root:
+
+```bash
+python -m pip install -e '.[docs]'
+cmake -S docs -B build/docs
+cmake --build build/docs --target docs
+```
+
+Open `build/docs/html/index.html` to inspect the result. The documentation build
+generates C++ XML from the public headers before Sphinx renders the Markdown
+guides and Python/C++ API references.
+
 Start product-facing implementation and planning sessions with
 `docs/development/product-use-cases.md`. It records the representative demo
 workflows, graphical vocabulary, capability status, product boundaries, and

@@ -45,6 +45,12 @@ dev = [
     "clang-format==18.1.8",
     "pre-commit==4.6.1",
 ]
+docs = [
+    "breathe==4.36.0",
+    "furo==2024.8.6",
+    "myst-parser==4.0.1",
+    "sphinx==8.2.3",
+]
 
 [tool.setuptools.packages.find]
 where = ["python"]
