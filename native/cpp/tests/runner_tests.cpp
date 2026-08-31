@@ -50,6 +50,11 @@ class FakeWindowHost final : public native_detail::WindowHost {
         title = received_title;
         url = received_url;
         options = received_options;
+        {
+            std::lock_guard<std::mutex> guard(mutex_);
+            created_ = true;
+        }
+        cv_.notify_all();
         if (fail_create) {
             throw std::runtime_error("window initialization failed");
         }
@@ -75,6 +80,12 @@ class FakeWindowHost final : public native_detail::WindowHost {
         cv_.notify_all();
     }
 
+    bool wait_until_created() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(lock, std::chrono::seconds(2),
+                            [&]() { return created_; });
+    }
+
     bool close_requested() const {
         std::lock_guard<std::mutex> guard(mutex_);
         return close_requested_;
@@ -84,6 +95,7 @@ class FakeWindowHost final : public native_detail::WindowHost {
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     bool close_requested_ = false;
+    bool created_ = false;
 };
 
 bool port_is_released(const std::string& url) {
@@ -162,13 +174,15 @@ void test_bind_failure_does_not_create_window() {
 void test_server_stop_closes_window() {
     DemoUiApp app("Server stop");
     FakeWindowHost host;
+    std::atomic<bool> window_created{false};
     std::thread stopper([&]() {
-        app.wait_until_ready();
+        window_created = host.wait_until_created();
         app.stop();
     });
     native_detail::run_with_host(app, {}, host);
     stopper.join();
 
+    CHECK(window_created);
     CHECK(host.close_requested());
     CHECK(port_is_released(host.url));
 }
