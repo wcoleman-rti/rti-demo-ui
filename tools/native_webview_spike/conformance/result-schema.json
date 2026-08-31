@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Native webview spike browser result",
+  "type": "object",
+  "required": ["results"],
+  "properties": {
+    "results": {
+      "type": "object",
+      "required": [
+        "snapshot",
+        "sse",
+        "dynamic_import",
+        "runtime3d_import",
+        "module_worker",
+        "theme_asset",
+        "canvas",
+        "webgl",
+        "keyboard_focus",
+        "resize_observation",
+        "command_origin"
+      ],
+      "properties": {
+        "snapshot": { "$ref": "#/$defs/check" },
+        "sse": { "$ref": "#/$defs/check" },
+        "dynamic_import": { "$ref": "#/$defs/check" },
+        "runtime3d_import": { "$ref": "#/$defs/check" },
+        "module_worker": { "$ref": "#/$defs/check" },
+        "theme_asset": { "$ref": "#/$defs/check" },
+        "canvas": { "$ref": "#/$defs/check" },
+        "webgl": { "$ref": "#/$defs/check" },
+        "keyboard_focus": { "$ref": "#/$defs/check" },
+        "resize_observation": { "$ref": "#/$defs/check" },
+        "command_origin": { "$ref": "#/$defs/check" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": ["passed", "evidence"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "evidence": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

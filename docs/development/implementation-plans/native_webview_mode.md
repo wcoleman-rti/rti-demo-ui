@@ -2,8 +2,9 @@
 
 ## Status
 
-Technology spike proposed for `spike/native-webview`. Promote to
-`feature/native-webview` only after the spike exit criteria are met.
+Technology spike completed on 2026-08-31. Do not promote to
+`feature/native-webview`: the fixed SSE and C++ lifecycle gates failed, and no
+C++ combination completed a real-engine cycle.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -398,3 +399,253 @@ The spike may advance to implementation only when:
 The implementation is accepted when supported platforms satisfy those checks
 with production runner code and external browser mode remains behaviorally
 unchanged.
+
+## Phase 0 Spike Result (2026-08-31)
+
+### Recommendation
+
+**Do not begin Phase 1.** The spike does not meet the acceptance criteria. The
+current baseline has no `/api/events` SSE route, so the shared conformance page
+correctly fails SSE in the real Linux Python engine. The C++ lifecycle also has
+a readiness/stop race: `ReadyInfo` is published before `listen_after_bind()`,
+allowing `stop()` to run before the blocking listen begins. In 100 immediate
+readiness/stop iterations, 63 exceeded the two-second watchdog. This API
+mismatch must be resolved in the applicable lifecycle/transport plan and this
+plan revalidated rather than redesigned silently in Phase 1.
+
+An isolated runner workaround was also validated: after `ReadyInfo`, polling
+the public `/api/health` route until it returns 200 produced 100 clean stops in
+100 iterations, while the raw `ReadyInfo` path still timed out in 19 of 25
+additional iterations. The public runner signature need not change, but the
+proposed lifecycle sequence must explicitly require health-confirmed readiness
+before window creation.
+
+The selected dependency pins remain appropriate spike candidates:
+`pywebview==6.2.1` (BSD-3-Clause) and webview commit
+`3ab4b5d722438fc8a13e6ca830c5e2372d19a01d`, tag `0.12.0` (MIT).
+No alternative engine, dependency, production API, or lower platform floor was
+selected. The prototype and its Python dependency declaration are isolated in
+`tools/native_webview_spike/`; core Python and C++ dependency manifests are
+unchanged.
+
+### Six-Combination Support Matrix
+
+`Unsupported` is a first-release classification from this spike, not a claim
+that the underlying operating-system engine can never be supported.
+
+| Backend | Platform gate | Classification | Reproducible evidence tied to a fixed gate |
+| --- | --- | --- | --- |
+| Python 3.11+ / pywebview 6.2.1 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported | A real `gtkwebkit2` cycle ran on Ubuntu 26.04.1 with GTK 3.24.52 and WebKitGTK 2.52.3. Snapshot, exact command Origin, application and runtime3d dynamic imports, module worker, theme asset, Canvas pixel, WebGL pixel, focus, resize, close, signal, ephemeral context/profile cleanup, port teardown, and owner-loop join passed. The strict result schema reported SSE as its only failure because `/api/events` is absent. |
+| C++17 / webview 0.12.0 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported | The isolated host configure failed its required `webkit2gtk-4.1` `pkg-config` development-package check. Raw `ReadyInfo` retains the stop race; public health-confirmed readiness passed 100/100 lifecycle iterations. Pinned webview creates `webkit_web_view_new()` on the default context and exposes no public ephemeral-profile option. The unchanged server also lacks SSE. |
+| Python 3.11+ / pywebview 6.2.1 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Pinned pywebview uses `defaultDataStore()` and clears shared website data instead of creating a unique per-run store, which fails the fixed profile gate. The unchanged server lacks SSE. |
+| C++17 / webview 0.12.0 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Pinned webview constructs a default `WKWebViewConfiguration` with no public data-store option, which fails the fixed profile gate. The unchanged server lacks SSE. |
+| Python 3.11+ / pywebview 6.2.1 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available, so neither runtime-version detection nor the non-skippable startup/render/close gate was executed. The unchanged server lacks SSE. |
+| C++17 / webview 0.12.0 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available. Pinned webview hard-codes `%APPDATA%/<executable>` as the WebView2 user-data folder and exposes no public override, which fails the fixed profile gate. The unchanged server lacks SSE. |
+
+At least one Python and one C++ combination must be supported to advance. This
+matrix has zero supported combinations, so that criterion fails.
+
+### Prototype and Lifecycle Evidence
+
+The experimental prototype contains:
+
+- one same-origin conformance page and JSON result schema shared by both hosts;
+- a Python host that runs the app owner asyncio loop on a background thread and
+  pywebview's GTK loop on the main thread;
+- a C++ webview host source pinned to webview 0.12.0 and a GUI-independent C++
+  server-thread lifecycle executable; and
+- a Python fake-host runner prototype and strict lifecycle suite.
+
+The fake-host suite has ten passing tests covering background owner-loop
+operation, main-thread window creation/run, owner-loop mutation, bind failure
+before readiness, window initialization failure after bind, window close,
+server-driven close, `async_main` normal return, exception propagation after
+cleanup, cancellation and await on close, simultaneous close/return,
+owner-thread join, and port release.
+
+The Python real-engine programmatic-close trace reported
+`renderer=gtkwebkit2`, different GUI/owner thread IDs, `close_observed=true`,
+`server_joined=true`, `port_released=true`, and `profile_removed=true`. Known
+pixels were Canvas `17,34,51,255` and WebGL `255,0,0,255`. The signal trace also
+reported `signal_observed=true` and clean teardown. The signal handler only set
+a `threading.Event`; cleanup ran outside signal context.
+
+The page reported passes for snapshot schema 2, command capability and exact
+browser Origin (the report command was accepted), dynamic adapter import,
+runtime3d/Three.js bundle import, a same-origin module worker, applied theme
+CSS, Canvas, WebGL, keyboard focus, and a 1280x800 resize observation. The
+captured JSON passes the checked-in strict result schema and reports SSE as its
+only failed check. Browser command acceptance is the structured test-only
+report path; neither prototype adds a production JavaScript-native bridge.
+
+webview 0.12.0 exposes no public cross-platform per-run profile/cache option.
+On Linux it creates a webview on WebKitGTK's default context, on macOS it uses
+a default `WKWebViewConfiguration`, and on Windows it hard-codes an application
+data directory. Its native-handle access does not allow replacing the browser
+data store after creation. No private API was selected. Python's Linux backend
+uses WebKitGTK's public ephemeral context in `private_mode=True`; the per-run
+directory supplied by the prototype was also removed after both close paths.
+Pinned pywebview's macOS backend instead clears `defaultDataStore()`, so it
+does not satisfy the unique per-run profile requirement.
+
+### Exit-Criterion Evaluation
+
+| Exit criterion | Result |
+| --- | --- |
+| Six combinations complete a leak-free real cycle or receive a failed-gate classification | Pass: all six are classified above; unavailable platforms were not conditionally skipped or claimed supported. |
+| At least one Python and one C++ combination supported | **Fail:** zero combinations are supported. |
+| Main-thread and owner-loop rules documented and represented | Pass for prototype shape: both hosts put the GUI loop on the main thread and server ownership on a managed, joined background context. |
+| Origin, SSE, adapter loading, and WebGL verified | **Fail:** Origin, adapter import, and WebGL pass on Linux Python; SSE fails and no other real engine ran. |
+| Optional packaging leaves core unaffected | Pass for spike scope: core manifests have no native dependency/probe, core CMake tests and Python tests pass, and the native dependency exists only in the spike directory. |
+| Every supported combination has repeatable prerequisites, CI smoke, and manual checklist | Vacuous because none are supported; this does not offset the minimum-support failure. |
+
+Manual focus feel, accessibility, DPI/multi-monitor behavior, native chrome,
+hardware-accelerated WebGL, external-link handling, and visual quality remain
+unsupported/unassessed. The observed WebGL result is for the current Linux
+display environment only and does not establish hardware GPU support. No
+hosted Xvfb/D-Bus run was available (`Xvfb` was absent), and no screenshot was
+captured. The installed WebKitGTK runtime was usable from Python, but its
+development metadata/headers required by the C++ host were absent. Node.js was
+also absent, so the Scene3D runtime could be checksum-verified but not rebuilt.
+
+### Waiting Point Before SSE Integration
+
+All locally executable work that does not require the pending SSE transport is
+complete. The Linux Python real-engine result is schema-valid and has exactly
+one failed browser check: `sse`. Resume this spike only after confirmation that
+the SSE implementation has merged into `develop`; then fetch/pull `develop`,
+merge it into this branch, and rerun the commands below without weakening the
+snapshot-event assertion. A passing SSE result will not by itself promote the
+plan: C++ profile isolation and real-engine platform jobs still require a plan
+decision and suitable runners.
+
+### Exact Verification Commands and Results
+
+Run from the repository root:
+
+```bash
+git merge-base --is-ancestor \
+  3525d507d5865a364d8a2cd496fc0b26a7d82ed8 HEAD
+# exit 0
+
+python3 -m venv --system-site-packages \
+  /tmp/rti-demo-ui-native-spike-venv
+/tmp/rti-demo-ui-native-spike-venv/bin/pip install \
+  -e . -r tools/native_webview_spike/requirements.txt
+/tmp/rti-demo-ui-native-spike-venv/bin/pip install -e '.[dev]'
+
+PYTHONPATH=tools/native_webview_spike \
+  /tmp/rti-demo-ui-native-spike-venv/bin/python -m unittest -v \
+  tools/native_webview_spike/test_python_lifecycle.py \
+  tools/native_webview_spike/test_python_runner_prototype.py
+# 10 passed
+
+set -o pipefail
+timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  tools/native_webview_spike/python_host.py --timeout 20 \
+  | tee /tmp/native-python-spike-programmatic.log
+# exit 0; strict report has exactly one failed check: SSE
+
+timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  tools/native_webview_spike/python_host.py --timeout 20 --signal-after 4 \
+  | tee /tmp/native-python-spike-signal.log
+# exit 0; signal_observed=true and teardown checks pass
+
+cmake -S tools/native_webview_spike \
+  -B build/native-webview-spike-fake \
+  -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=OFF
+cmake --build build/native-webview-spike-fake \
+  --target native_webview_cpp_lifecycle --parallel
+timeout 10s \
+  ./build/native-webview-spike-fake/native_webview_cpp_lifecycle
+# exit 0
+
+passes=0; timeouts=0; failures=0
+for i in $(seq 1 100); do
+  timeout 2s \
+    ./build/native-webview-spike-fake/native_webview_cpp_lifecycle \
+    --immediate-stop >"/tmp/native-cpp-race-$i.log" 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    passes=$((passes+1))
+  elif [ "$rc" -eq 124 ]; then
+    timeouts=$((timeouts+1))
+  else
+    failures=$((failures+1))
+  fi
+done
+printf 'iterations=100 passes=%s timeouts=%s other_failures=%s\n' \
+  "$passes" "$timeouts" "$failures"
+# iterations=100 passes=37 timeouts=63 other_failures=0
+
+passes=0; timeouts=0; failures=0
+for i in $(seq 1 100); do
+  timeout 2s \
+    ./build/native-webview-spike-fake/native_webview_cpp_lifecycle \
+    >"/tmp/native-cpp-health-$i.log" 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    passes=$((passes+1))
+  elif [ "$rc" -eq 124 ]; then
+    timeouts=$((timeouts+1))
+  else
+    failures=$((failures+1))
+  fi
+done
+printf 'health_gated_iterations=100 passes=%s timeouts=%s other_failures=%s\n' \
+  "$passes" "$timeouts" "$failures"
+# health_gated_iterations=100 passes=100 timeouts=0 other_failures=0
+
+/usr/bin/python3 - <<'PY'
+import json
+from pathlib import Path
+
+import jsonschema
+
+schema = json.loads(
+    Path("tools/native_webview_spike/conformance/result-schema.json").read_text()
+)
+trace = json.loads(
+    Path("/tmp/native-python-spike-programmatic.log").read_text().splitlines()[-1]
+)
+jsonschema.validate({"results": trace["report"]["results"]}, schema)
+failed = [
+    name
+    for name, result in trace["report"]["results"].items()
+    if not result["passed"]
+]
+assert failed == ["sse"], failed
+PY
+# exit 0
+
+cmake -S tools/native_webview_spike \
+  -B build/native-webview-spike-real \
+  -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
+  -DWEBVIEW_WEBKITGTK_API=4.1
+# fails: required package webkit2gtk-4.1 not found
+
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+# 4/4 passed
+
+PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  -m pytest tests/py -q
+# 22 passed
+
+/tmp/rti-demo-ui-native-spike-venv/bin/playwright install chromium
+RTI_DEMO_CPP_ARM3D="$PWD/build/cpp/examples/rti_demo_ui_arm3d" \
+  PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  -m pytest tests/browser -q
+# 6 passed
+
+sha256sum --check assets/runtime3d.sha256
+git diff --exit-code -- assets/runtime3d.js assets/runtime3d.sha256
+# checksum passes; no generated diff
+
+node --version
+# exit 127: node not found; runtime rebuild unavailable
+
+/tmp/rti-demo-ui-native-spike-venv/bin/pre-commit run --all-files
+# all configured hooks passed
+```
