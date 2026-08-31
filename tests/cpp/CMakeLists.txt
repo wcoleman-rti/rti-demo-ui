@@ -26,3 +26,8 @@ add_test(NAME static_root_tests COMMAND rti_demo_ui_static_root_tests)
 add_executable(rti_demo_ui_lifecycle_tests lifecycle_tests.cpp)
 target_link_libraries(rti_demo_ui_lifecycle_tests PRIVATE rti_demo_ui::core)
 add_test(NAME lifecycle_tests COMMAND rti_demo_ui_lifecycle_tests)
+
+add_executable(rti_demo_ui_sse_tests sse_tests.cpp)
+target_link_libraries(rti_demo_ui_sse_tests PRIVATE rti_demo_ui::core)
+add_test(NAME sse_tests COMMAND rti_demo_ui_sse_tests)
+set_tests_properties(sse_tests PROPERTIES TIMEOUT 10)

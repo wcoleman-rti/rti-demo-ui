@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
@@ -25,6 +26,8 @@ class Server;
 namespace rti::demo::ui {
 
 namespace detail {
+
+class SseManager;
 
 // Internal model state shared by DemoUiApp, Card, and Scene2DViewport.
 class Model {
@@ -77,6 +80,8 @@ class Model {
     Json data_ = Json::object();
 
    private:
+    friend class SseManager;
+
     std::mutex mutex_;
     bool running_ = true;
     int next_card_id_ = 1;
@@ -86,9 +91,76 @@ class Model {
     bool app_data_dirty_ = false;
     std::set<std::string> dirty_cards_;
     std::set<std::pair<std::string, std::string>> dirty_components_;
+    SseManager* sse_manager_ = nullptr;
 };
 
 class ModelTestAccess;
+class SseTestAccess;
+
+class SseManager {
+   public:
+    struct StateEvent {
+        std::shared_ptr<const std::string> body;
+        long revision;
+        bool snapshot;
+    };
+
+    struct Subscriber {
+        std::optional<StateEvent> pending;
+        long tail_revision = 0;
+        bool reset_pending = false;
+        bool closed = false;
+    };
+
+    enum class DeliveryKind { state, heartbeat, stopped };
+
+    struct Delivery {
+        DeliveryKind kind;
+        std::optional<StateEvent> event;
+        bool reset = false;
+    };
+
+    explicit SseManager(Model& model);
+    ~SseManager();
+
+    void start();
+    void stop() noexcept;
+    void mark_dirty_locked();
+    std::shared_ptr<Subscriber> subscribe();
+    void unsubscribe(const std::shared_ptr<Subscriber>& subscriber);
+    Delivery next(const std::shared_ptr<Subscriber>& subscriber);
+    void delivered(const std::shared_ptr<Subscriber>& subscriber,
+                   const Delivery& delivery, bool success);
+
+   private:
+    friend class SseTestAccess;
+
+    using Clock = std::chrono::steady_clock;
+
+    static std::shared_ptr<const std::string> snapshot_event_locked(
+        const Model& model);
+    static std::shared_ptr<const std::string> patch_event(const Json& patch);
+    void run();
+    void publish_locked(const Json& patch,
+                        std::shared_ptr<const std::string> snapshot);
+    void enqueue_locked(const std::shared_ptr<Subscriber>& subscriber,
+                        const StateEvent& event, const StateEvent& replacement);
+    void close_locked(const std::shared_ptr<Subscriber>& subscriber);
+
+    Model& model_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread thread_;
+    bool active_ = false;
+    bool flush_scheduled_ = false;
+    Clock::time_point flush_deadline_;
+    Clock::time_point previous_flush_;
+    std::chrono::steady_clock::duration publication_interval_;
+    std::chrono::steady_clock::duration heartbeat_interval_;
+    std::set<std::shared_ptr<Subscriber>,
+             std::owner_less<std::shared_ptr<Subscriber>>>
+        subscribers_;
+};
 
 // Thread + synchronization state for one SDK-owned periodic timer. Shared
 // between DemoUiApp (which keeps the timer alive/cancels it at stop()) and any
@@ -173,6 +245,7 @@ class DemoUiApp {
 
    private:
     friend class detail::ModelTestAccess;
+    friend class detail::SseTestAccess;
 
     struct RegisteredCommand {
         CommandSchema schema;
@@ -185,6 +258,7 @@ class DemoUiApp {
     int port_;
     std::filesystem::path static_root_;
     detail::Model model_;
+    std::unique_ptr<detail::SseManager> sse_manager_;
     std::unique_ptr<httplib::Server> server_;
     std::vector<std::shared_ptr<detail::TimerState>> timers_;
     std::atomic<bool> stopped_ = false;

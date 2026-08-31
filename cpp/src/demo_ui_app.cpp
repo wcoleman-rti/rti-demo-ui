@@ -174,6 +174,19 @@ void send_method_not_allowed(httplib::Response& res) {
 }
 
 constexpr size_t kCommandBodyLimit = 64 * 1024;
+constexpr size_t kMaxSseStreams = 16;
+constexpr size_t kServerWorkers = 20;
+constexpr auto kSseHeartbeatInterval = std::chrono::seconds(15);
+constexpr auto kSsePublicationInterval =
+    std::chrono::duration<double>(1.0 / 30.0);
+constexpr char kSseHeartbeat[] = ": heartbeat\n\n";
+constexpr char kSseRetry[] = "retry: 1000\n\n";
+
+std::string sse_event(const char* event, long revision,
+                      const std::string& data) {
+    return "event: " + std::string(event) +
+           "\nid: " + std::to_string(revision) + "\ndata: " + data + "\n\n";
+}
 
 const std::set<std::string> kSchemaKeywords = {
     "type",    "properties", "required",  "items",     "enum",
@@ -404,11 +417,16 @@ void Model::start_dirty_tracking_locked() {
 }
 
 void Model::commit_app_data_locked() {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          dirty_cards_.empty() && dirty_components_.empty();
     ++revision_;
     if (dirty_tracking_) app_data_dirty_ = true;
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
 
 void Model::commit_card_locked(const std::string& card_id) {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          dirty_cards_.empty() && dirty_components_.empty();
     ++revision_;
     if (!dirty_tracking_) return;
     dirty_cards_.insert(card_id);
@@ -420,14 +438,18 @@ void Model::commit_card_locked(const std::string& card_id) {
             ++target;
         }
     }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
 
 void Model::commit_component_locked(const std::string& card_id,
                                     const std::string& component_id) {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          dirty_cards_.empty() && dirty_components_.empty();
     ++revision_;
     if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
         dirty_components_.emplace(card_id, component_id);
     }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
 
 std::optional<Json> Model::flush_dirty_targets_locked() {
@@ -467,6 +489,183 @@ std::optional<Json> Model::flush_dirty_targets_locked() {
                {"changes", std::move(changes)}};
     start_dirty_tracking_locked();
     return patch;
+}
+
+SseManager::SseManager(Model& model)
+    : model_(model),
+      publication_interval_(
+          std::chrono::duration_cast<Clock::duration>(kSsePublicationInterval)),
+      heartbeat_interval_(kSseHeartbeatInterval) {}
+
+SseManager::~SseManager() { stop(); }
+
+void SseManager::start() {
+    std::lock_guard<std::mutex> model_guard(model_.lock());
+    std::lock_guard<std::mutex> sse_guard(mutex_);
+    if (active_) return;
+    active_ = true;
+    previous_flush_ = Clock::now() - publication_interval_;
+    model_.sse_manager_ = this;
+    model_.start_dirty_tracking_locked();
+    thread_ = std::thread([this]() { run(); });
+}
+
+void SseManager::mark_dirty_locked() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!active_ || flush_scheduled_) return;
+    const auto now = Clock::now();
+    flush_deadline_ = std::max(now, previous_flush_ + publication_interval_);
+    flush_scheduled_ = true;
+    cv_.notify_all();
+}
+
+std::shared_ptr<const std::string> SseManager::snapshot_event_locked(
+    const Model& model) {
+    return std::make_shared<const std::string>(
+        sse_event("snapshot", model.revision_, model.snapshot_json_locked()));
+}
+
+std::shared_ptr<const std::string> SseManager::patch_event(const Json& patch) {
+    return std::make_shared<const std::string>(
+        sse_event("patch", patch["revision"].get<long>(), patch.dump()));
+}
+
+std::shared_ptr<SseManager::Subscriber> SseManager::subscribe() {
+    std::lock_guard<std::mutex> model_guard(model_.lock());
+    std::lock_guard<std::mutex> sse_guard(mutex_);
+    if (!active_ || subscribers_.size() >= kMaxSseStreams) return nullptr;
+    auto subscriber = std::make_shared<Subscriber>();
+    subscriber->pending =
+        StateEvent{snapshot_event_locked(model_), model_.revision_, true};
+    subscriber->tail_revision = model_.revision_;
+    subscribers_.insert(subscriber);
+    return subscriber;
+}
+
+void SseManager::close_locked(const std::shared_ptr<Subscriber>& subscriber) {
+    if (subscriber->closed) return;
+    subscriber->closed = true;
+    subscriber->pending.reset();
+    subscribers_.erase(subscriber);
+    cv_.notify_all();
+}
+
+void SseManager::unsubscribe(const std::shared_ptr<Subscriber>& subscriber) {
+    if (!subscriber) return;
+    std::lock_guard<std::mutex> guard(mutex_);
+    close_locked(subscriber);
+}
+
+void SseManager::enqueue_locked(const std::shared_ptr<Subscriber>& subscriber,
+                                const StateEvent& event,
+                                const StateEvent& replacement) {
+    if (subscriber->closed) return;
+    if (subscriber->pending) {
+        if (subscriber->reset_pending) {
+            close_locked(subscriber);
+            return;
+        }
+        subscriber->pending = replacement;
+        subscriber->tail_revision = replacement.revision;
+        subscriber->reset_pending = true;
+    } else {
+        subscriber->pending = event;
+        subscriber->tail_revision = event.revision;
+    }
+}
+
+void SseManager::publish_locked(const Json& patch,
+                                std::shared_ptr<const std::string> snapshot) {
+    const long base_revision = patch["base_revision"].get<long>();
+    const long revision = patch["revision"].get<long>();
+    const StateEvent patch_state{patch_event(patch), revision, false};
+    const StateEvent snapshot_state{std::move(snapshot), revision, true};
+    const std::vector<std::shared_ptr<Subscriber>> subscribers(
+        subscribers_.begin(), subscribers_.end());
+    for (const auto& subscriber : subscribers) {
+        const auto& event = subscriber->tail_revision == base_revision
+                                ? patch_state
+                                : snapshot_state;
+        enqueue_locked(subscriber, event, snapshot_state);
+    }
+    cv_.notify_all();
+}
+
+SseManager::Delivery SseManager::next(
+    const std::shared_ptr<Subscriber>& subscriber) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    const auto deadline = Clock::now() + heartbeat_interval_;
+    if (!cv_.wait_until(lock, deadline, [&]() {
+            return !active_ || subscriber->closed || subscriber->pending;
+        })) {
+        return Delivery{DeliveryKind::heartbeat, std::nullopt, false};
+    }
+    if (!active_ || subscriber->closed) {
+        return Delivery{DeliveryKind::stopped, std::nullopt, false};
+    }
+    Delivery delivery{
+        DeliveryKind::state, subscriber->pending,
+        subscriber->reset_pending && subscriber->pending->snapshot};
+    subscriber->pending.reset();
+    return delivery;
+}
+
+void SseManager::delivered(const std::shared_ptr<Subscriber>& subscriber,
+                           const Delivery& delivery, bool success) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!success) {
+        close_locked(subscriber);
+    } else if (delivery.reset) {
+        subscriber->reset_pending = false;
+    }
+}
+
+void SseManager::run() {
+    std::unique_lock<std::mutex> sse_lock(mutex_);
+    while (active_) {
+        cv_.wait(sse_lock, [this]() { return !active_ || flush_scheduled_; });
+        if (!active_) break;
+        if (cv_.wait_until(sse_lock, flush_deadline_,
+                           [this]() { return !active_; })) {
+            break;
+        }
+        if (Clock::now() < flush_deadline_) continue;
+        flush_scheduled_ = false;
+        sse_lock.unlock();
+
+        std::unique_lock<std::mutex> model_lock(model_.lock());
+        auto patch = model_.flush_dirty_targets_locked();
+        auto snapshot = patch ? snapshot_event_locked(model_) : nullptr;
+        sse_lock.lock();
+        if (active_ && patch) {
+            previous_flush_ = Clock::now();
+            publish_locked(*patch, std::move(snapshot));
+        }
+        sse_lock.unlock();
+        model_lock.unlock();
+        sse_lock.lock();
+    }
+}
+
+void SseManager::stop() noexcept {
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!active_ && !thread_.joinable()) return;
+        active_ = false;
+        flush_scheduled_ = false;
+        for (const auto& subscriber : subscribers_) {
+            subscriber->closed = true;
+            subscriber->pending.reset();
+        }
+        cv_.notify_all();
+    }
+    if (thread_.joinable()) thread_.join();
+    {
+        std::lock_guard<std::mutex> model_guard(model_.lock());
+        std::lock_guard<std::mutex> sse_guard(mutex_);
+        if (model_.sse_manager_ == this) model_.sse_manager_ = nullptr;
+        subscribers_.clear();
+    }
 }
 
 TimerState::TimerState(std::thread thread,
@@ -510,7 +709,8 @@ DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
                      std::filesystem::path static_root)
     : host_(std::move(host)),
       port_(port),
-      model_(std::move(title), static_root) {
+      model_(std::move(title), static_root),
+      sse_manager_(std::make_unique<detail::SseManager>(model_)) {
     if (model_.title_.empty()) {
         throw std::invalid_argument("DemoUiApp: title must not be empty");
     }
@@ -539,6 +739,10 @@ DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
         model_.set_static_root(canonical_root);
     }
     server_ = std::make_unique<httplib::Server>();
+    server_->new_task_queue = []() {
+        return new httplib::ThreadPool(kServerWorkers);
+    };
+    server_->set_write_timeout(5, 0);
 }
 
 DemoUiApp::~DemoUiApp() { stop(); }
@@ -711,6 +915,59 @@ void DemoUiApp::run() {
                      res.set_header("X-Content-Type-Options", "nosniff");
                      res.set_content(body, "application/json");
                  });
+    server_->Get("/api/events", [this](const httplib::Request&,
+                                       httplib::Response& res) {
+        auto subscriber = sse_manager_->subscribe();
+        if (!subscriber) {
+            res.status = 503;
+            res.set_header("Cache-Control", "no-store");
+            res.set_header("X-Content-Type-Options", "nosniff");
+            res.set_content("{\"error\":\"event stream capacity reached\"}",
+                            "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_header("Cache-Control", "no-cache");
+        res.set_header("X-Content-Type-Options", "nosniff");
+        auto retry_sent = std::make_shared<bool>(false);
+        auto* manager = sse_manager_.get();
+        res.set_chunked_content_provider(
+            "text/event-stream",
+            [manager, subscriber, retry_sent](size_t, httplib::DataSink& sink) {
+                if (!*retry_sent) {
+                    *retry_sent = true;
+                    const bool written =
+                        sink.is_writable() &&
+                        sink.write(kSseRetry, sizeof(kSseRetry) - 1);
+                    if (!written) {
+                        manager->unsubscribe(subscriber);
+                    }
+                    return written;
+                }
+                const auto delivery = manager->next(subscriber);
+                if (delivery.kind ==
+                    detail::SseManager::DeliveryKind::stopped) {
+                    sink.done();
+                    return true;
+                }
+                if (delivery.kind ==
+                    detail::SseManager::DeliveryKind::heartbeat) {
+                    const bool written =
+                        sink.is_writable() &&
+                        sink.write(kSseHeartbeat, sizeof(kSseHeartbeat) - 1);
+                    if (!written) {
+                        manager->unsubscribe(subscriber);
+                    }
+                    return written;
+                }
+                const auto& body = *delivery.event->body;
+                const bool written =
+                    sink.is_writable() && sink.write(body.data(), body.size());
+                manager->delivered(subscriber, delivery, written);
+                return written;
+            },
+            [manager, subscriber](bool) { manager->unsubscribe(subscriber); });
+    });
     server_->Get("/api/command-capability", [this](const httplib::Request& req,
                                                    httplib::Response& res) {
         const auto info = ready_info();
@@ -918,9 +1175,11 @@ void DemoUiApp::run() {
     const ReadyInfo info{
         host_, bound_port,
         "http://" + display_host + ":" + std::to_string(bound_port)};
-    {
-        std::lock_guard<std::mutex> guard(model_.lock());
-        model_.start_dirty_tracking_locked();
+    sse_manager_->start();
+    if (stopped_) {
+        sse_manager_->stop();
+        server_->stop();
+        return;
     }
     {
         std::lock_guard<std::mutex> guard(readiness_mutex_);
@@ -939,6 +1198,7 @@ void DemoUiApp::stop() noexcept {
     stopped_ = true;
     readiness_cv_.notify_all();
     model_.stop();
+    sse_manager_->stop();
     if (server_) server_->stop();
     {
         std::unique_lock<std::mutex> lock(command_mutex_);
