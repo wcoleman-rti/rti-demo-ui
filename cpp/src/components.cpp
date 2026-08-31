@@ -747,9 +747,45 @@ Json CustomComponent::to_json_locked() const {
     return component_json(id_, type_, revision_, data_);
 }
 
-Card::Card(detail::Model& model, std::string id, std::string title)
-    : model_(model), id_(std::move(id)), title_(std::move(title)) {
+Card::Card(detail::Model& model, std::string id, std::string title,
+           CardArea area, int span)
+    : model_(model),
+      id_(std::move(id)),
+      title_(std::move(title)),
+      area_(area),
+      span_(span) {
     detail::require_non_empty(title_, "title", "Card: ");
+    to_string(area_);
+    detail::require_card_span(span_);
+}
+void Card::set_area(CardArea area) {
+    to_string(area);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (area == area_) return;
+    if (area == CardArea::sidebar) {
+        for (const auto& card : model_.cards_) {
+            if (card.get() != this && card->area() == CardArea::sidebar) {
+                throw std::invalid_argument(
+                    "DemoUiApp: at most one sidebar card is permitted");
+            }
+        }
+    }
+    if (area_ == CardArea::sidebar && area == CardArea::main &&
+        model_.layout_ == Layout::sidebar_main) {
+        throw std::invalid_argument(
+            "DemoUiApp: sidebar-main requires exactly one sidebar card");
+    }
+    area_ = area;
+    model_.bump_revision_locked();
+}
+void Card::set_span(int span) {
+    detail::require_card_span(span);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (span == span_) return;
+    span_ = span;
+    model_.bump_revision_locked();
 }
 Scene2DViewport* Card::add_scene_2d(int width, int height, GridBounds bounds) {
     detail::require_positive(width, "width", "Scene2DViewport: ");
@@ -847,8 +883,11 @@ Json Card::to_json_locked() const {
     Json components = Json::array();
     for (const auto& component : components_)
         components.push_back(component->to_json_locked());
-    return Json{
-        {"id", id_}, {"title", title_}, {"components", std::move(components)}};
+    return Json{{"id", id_},
+                {"title", title_},
+                {"area", to_string(area_)},
+                {"span", span_},
+                {"components", std::move(components)}};
 }
 
 }  // namespace rti::demo::ui

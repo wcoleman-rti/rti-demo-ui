@@ -23,3 +23,17 @@ add_test(NAME static_root_tests COMMAND rti_demo_ui_static_root_tests)
 add_executable(rti_demo_ui_lifecycle_tests lifecycle_tests.cpp)
 target_link_libraries(rti_demo_ui_lifecycle_tests PRIVATE rti_demo_ui::core)
 add_test(NAME lifecycle_tests COMMAND rti_demo_ui_lifecycle_tests)
+
+add_executable(rti_demo_ui_presentation_contract_tests
+    presentation_contract_tests.cpp
+)
+target_link_libraries(rti_demo_ui_presentation_contract_tests
+    PRIVATE rti_demo_ui::core
+)
+target_compile_definitions(rti_demo_ui_presentation_contract_tests PRIVATE
+    SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+add_test(
+    NAME presentation_contract_tests
+    COMMAND rti_demo_ui_presentation_contract_tests
+)

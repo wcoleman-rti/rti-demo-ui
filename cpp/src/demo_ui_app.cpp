@@ -390,6 +390,8 @@ std::string Model::snapshot_json_locked() const {
     return Json{{"schema_version", 2},
                 {"revision", revision_},
                 {"title", title_},
+                {"theme", to_string(theme_)},
+                {"layout", to_string(layout_)},
                 {"data", data_},
                 {"cards", std::move(cards)}}
         .dump();
@@ -433,10 +435,13 @@ std::vector<Json> CommandSchema::validate(const Json& value) const {
 }
 
 DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
-                     std::filesystem::path static_root)
+                     std::filesystem::path static_root, Theme theme,
+                     Layout layout)
     : host_(std::move(host)),
       port_(port),
-      model_(std::move(title), static_root) {
+      model_(std::move(title), static_root, theme, layout) {
+    to_string(theme);
+    to_string(layout);
     if (model_.title_.empty()) {
         throw std::invalid_argument("DemoUiApp: title must not be empty");
     }
@@ -469,15 +474,53 @@ DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
 
 DemoUiApp::~DemoUiApp() { stop(); }
 
-Card* DemoUiApp::add_card(const std::string& title) {
+Card* DemoUiApp::add_card(const std::string& title, CardArea area, int span) {
+    to_string(area);
+    detail::require_card_span(span);
     std::lock_guard<std::mutex> guard(model_.lock());
     model_.ensure_running();
+    if (area == CardArea::sidebar) {
+        for (const auto& card : model_.cards_) {
+            if (card->area() == CardArea::sidebar) {
+                throw std::invalid_argument(
+                    "DemoUiApp: at most one sidebar card is permitted");
+            }
+        }
+    }
     auto card_id = model_.next_card_id();
-    auto card = std::make_unique<Card>(model_, card_id, title);
+    auto card = std::make_unique<Card>(model_, card_id, title, area, span);
     Card* card_ptr = card.get();
     model_.cards_.push_back(std::move(card));
     model_.bump_revision_locked();
     return card_ptr;
+}
+
+void DemoUiApp::set_theme(Theme theme) {
+    to_string(theme);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (theme == model_.theme_) return;
+    model_.theme_ = theme;
+    model_.bump_revision_locked();
+}
+
+void DemoUiApp::set_layout(Layout layout) {
+    to_string(layout);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (layout == model_.layout_) return;
+    if (layout == Layout::sidebar_main) {
+        int sidebar_count = 0;
+        for (const auto& card : model_.cards_) {
+            if (card->area() == CardArea::sidebar) ++sidebar_count;
+        }
+        if (sidebar_count != 1) {
+            throw std::invalid_argument(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card");
+        }
+    }
+    model_.layout_ = layout;
+    model_.bump_revision_locked();
 }
 
 void DemoUiApp::set_data(Json value) {
@@ -575,6 +618,20 @@ TimerHandle DemoUiApp::add_timer(int interval_ms,
 }
 
 void DemoUiApp::run() {
+    if (!stopped_) {
+        std::lock_guard<std::mutex> guard(model_.lock());
+        if (model_.layout_ == Layout::sidebar_main) {
+            int sidebar_count = 0;
+            for (const auto& card : model_.cards_) {
+                if (card->area() == CardArea::sidebar) ++sidebar_count;
+            }
+            if (sidebar_count != 1) {
+                throw std::invalid_argument(
+                    "DemoUiApp: sidebar-main requires exactly one sidebar "
+                    "card");
+            }
+        }
+    }
     bool expected = false;
     if (!run_started_.compare_exchange_strong(expected, true)) {
         throw std::runtime_error("DemoUiApp: run() may only be called once");

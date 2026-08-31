@@ -206,7 +206,10 @@ class CustomComponent final : public Component {
 
 class Card {
    public:
-    Card(detail::Model& model, std::string id, std::string title);
+    Card(detail::Model& model, std::string id, std::string title,
+         CardArea area = CardArea::main, int span = 1);
+    void set_area(CardArea area);
+    void set_span(int span);
     Scene2DViewport* add_scene_2d(int width, int height, GridBounds bounds);
     Scene3DViewport* add_scene_3d(const std::string& asset,
                                   Json camera = Json::object(),
@@ -225,11 +228,14 @@ class Card {
                                           std::string id = "");
     Json to_json_locked() const;
     const std::string& id() const { return id_; }
+    CardArea area() const { return area_; }
 
    private:
     detail::Model& model_;
     std::string id_;
     std::string title_;
+    CardArea area_;
+    int span_;
     std::vector<std::unique_ptr<Component>> components_;
 };
 
