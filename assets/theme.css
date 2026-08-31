@@ -286,28 +286,30 @@ body {
     .sdk-scene3d-body {
         grid-template-columns: 1fr;
     }
+}
 
-    @media (max-width: 720px) {
-        #sdk-cards,
-        #sdk-cards[data-sdk-layout] {
-            grid-template-columns: minmax(0, 1fr);
-        }
+@media (max-width: 720px) {
+    #sdk-cards,
+    #sdk-cards[data-sdk-layout] {
+        grid-template-columns: minmax(0, 1fr);
+    }
 
-        @container (max-width: 871px) {
-            #sdk-cards[data-sdk-layout="auto"] > .sdk-card[data-sdk-span="3"] {
-                grid-column: span 2;
-            }
-        }
-
-        #sdk-cards[data-sdk-layout] > .sdk-card {
-            grid-column: 1;
-        }
-
-        #sdk-cards[data-sdk-layout="sidebar-main"] > .sdk-card[data-sdk-area] {
-            grid-column: 1;
+    @container (max-width: 871px) {
+        #sdk-cards[data-sdk-layout="auto"] > .sdk-card[data-sdk-span="3"] {
+            grid-column: span 2;
         }
     }
 
+    #sdk-cards[data-sdk-layout] > .sdk-card {
+        grid-column: 1;
+    }
+
+    #sdk-cards[data-sdk-layout="sidebar-main"] > .sdk-card[data-sdk-area] {
+        grid-column: 1;
+    }
+}
+
+@media (max-width: 640px) {
     @media (forced-colors: active) {
         .sdk-card,
         .sdk-scene2d,

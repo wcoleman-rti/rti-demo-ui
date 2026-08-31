@@ -734,6 +734,16 @@ def test_every_presentation_preset_is_responsive_and_readable(
             assert desktop_boxes[0]["x"] != desktop_boxes[1]["x"]
             assert desktop_boxes[1]["x"] == desktop_boxes[2]["x"]
 
+        page.set_viewport_size({"width": 680, "height": 844})
+        compact_boxes = [
+            page.locator(f"#card-{suffix}").bounding_box() for suffix in ("a", "b", "c")
+        ]
+        _assert_no_overlaps(compact_boxes)
+        assert len({box["x"] for box in compact_boxes}) == 1
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+
         page.set_viewport_size({"width": 390, "height": 844})
         mobile_boxes = [
             page.locator(f"#card-{suffix}").bounding_box() for suffix in ("a", "b", "c")
