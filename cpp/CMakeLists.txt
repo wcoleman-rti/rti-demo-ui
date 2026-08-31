@@ -30,6 +30,9 @@ set(RTI_DEMO_ASSET_FILES
     "${RTI_DEMO_UI_ASSETS_DIR}/client.js"
     "${RTI_DEMO_UI_ASSETS_DIR}/theme.css"
 )
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${RTI_DEMO_ASSET_FILES}
+)
 foreach(asset_file ${RTI_DEMO_ASSET_FILES})
     if(NOT EXISTS "${asset_file}")
         message(FATAL_ERROR "RTI Demo UI asset not found: ${asset_file}")

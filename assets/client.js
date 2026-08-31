@@ -230,8 +230,15 @@ export function applyPatch(snapshot, patch) {
 }
 
 export function createClient(options = {}) {
-    const baseUrl = options.baseUrl || '';
-    const pollInterval = options.pollIntervalMs || POLL_INTERVAL_MS;
+    const baseUrl = (options.baseUrl || '').replace(/\/+$/, '');
+    const transport = options.transport ?? 'poll';
+    const pollInterval = options.pollIntervalMs ?? POLL_INTERVAL_MS;
+    if (transport !== 'poll' && transport !== 'sse') {
+        throw new Error(`unsupported transport: ${transport}`);
+    }
+    if (!Number.isFinite(pollInterval) || pollInterval <= 0) {
+        throw new Error('pollIntervalMs must be a positive number');
+    }
     const listeners = new Set();
     let snapshot = null;
     let revision = null;
@@ -239,8 +246,14 @@ export function createClient(options = {}) {
     let inFlight = false;
     let backoffIndex = 0;
     let running = false;
+    let generation = 0;
+    let eventSource = null;
     let connectionState = 'stopped';
     let capability = null;
+
+    function endpoint(path) {
+        return new URL(`${baseUrl}${path}`, window.location.href);
+    }
 
     function notify() {
         listeners.forEach((listener) => listener(snapshot, connectionState));
@@ -252,37 +265,127 @@ export function createClient(options = {}) {
         notify();
     }
 
-    function schedule(delay) {
-        if (timer) clearTimeout(timer);
-        if (running) timer = setTimeout(poll, delay);
+    function publish(next, force = false) {
+        if (!force && revision !== null && next.revision <= revision) return;
+        revision = next.revision;
+        snapshot = freeze(next);
+        notify();
     }
 
-    async function poll() {
-        if (!running || inFlight) return;
+    function schedule(delay, currentGeneration, callback) {
+        if (timer) clearTimeout(timer);
+        if (running && currentGeneration === generation) {
+            timer = setTimeout(() => callback(currentGeneration), delay);
+        }
+    }
+
+    async function poll(currentGeneration) {
+        if (!running || currentGeneration !== generation || inFlight) return;
         inFlight = true;
         try {
-            const response = await fetch(`${baseUrl}/api/state`, { cache: 'no-store' });
+            const response = await fetch(endpoint('/api/state'), { cache: 'no-store' });
             if (!response.ok) throw new Error(`state request failed: ${response.status}`);
             const next = validateSnapshot(await response.json());
+            if (!running || currentGeneration !== generation) return;
             backoffIndex = 0;
             setConnectionState('connected');
-            if (revision !== next.revision) {
-                revision = next.revision;
-                snapshot = freeze(next);
-                notify();
-            }
-            schedule(pollInterval);
+            publish(next);
+            schedule(pollInterval, currentGeneration, poll);
         } catch (error) {
+            if (!running || currentGeneration !== generation) return;
             setConnectionState('reconnecting');
-            schedule(BACKOFF_STEPS_MS[Math.min(backoffIndex++, BACKOFF_STEPS_MS.length - 1)]);
+            schedule(
+                BACKOFF_STEPS_MS[Math.min(backoffIndex++, BACKOFF_STEPS_MS.length - 1)],
+                currentGeneration,
+                poll
+            );
         } finally {
-            inFlight = false;
+            if (currentGeneration === generation) inFlight = false;
         }
+    }
+
+    function closeEventSource() {
+        if (eventSource) eventSource.close();
+        eventSource = null;
+    }
+
+    function openEventSource(currentGeneration) {
+        if (!running || currentGeneration !== generation) return;
+        const eventsUrl = endpoint('/api/events');
+        if (eventsUrl.origin !== window.location.origin) {
+            running = false;
+            setConnectionState('stopped');
+            throw new Error('sse transport requires a same-origin baseUrl');
+        }
+
+        const source = new EventSource(eventsUrl.href);
+        eventSource = source;
+        source.onopen = () => {
+            if (running && currentGeneration === generation && eventSource === source) {
+                backoffIndex = 0;
+                setConnectionState('connected');
+            }
+        };
+        source.onerror = () => {
+            if (running && currentGeneration === generation && eventSource === source) {
+                setConnectionState('reconnecting');
+            }
+        };
+        source.addEventListener('snapshot', (event) => {
+            if (!running || currentGeneration !== generation || eventSource !== source) return;
+            try {
+                publish(validateSnapshot(JSON.parse(event.data)));
+            } catch (error) {
+                recoverEventSource(currentGeneration);
+            }
+        });
+        source.addEventListener('patch', (event) => {
+            if (!running || currentGeneration !== generation || eventSource !== source) return;
+            try {
+                const patch = JSON.parse(event.data);
+                if (!isObject(patch) || !Number.isSafeInteger(patch.revision) || patch.revision < 0) {
+                    throw new Error('patch revision must be a non-negative safe integer');
+                }
+                if (revision !== null && patch.revision <= revision) return;
+                if (!snapshot) throw new Error('patch received before snapshot');
+                publish(applyPatch(snapshot, patch));
+            } catch (error) {
+                recoverEventSource(currentGeneration);
+            }
+        });
+    }
+
+    async function resynchronize(currentGeneration) {
+        try {
+            const response = await fetch(endpoint('/api/state'), { cache: 'no-store' });
+            if (!response.ok) throw new Error(`state request failed: ${response.status}`);
+            const next = validateSnapshot(await response.json());
+            if (!running || currentGeneration !== generation) return;
+            backoffIndex = 0;
+            publish(next, true);
+            openEventSource(currentGeneration);
+        } catch (error) {
+            if (!running || currentGeneration !== generation) return;
+            schedule(
+                BACKOFF_STEPS_MS[Math.min(backoffIndex++, BACKOFF_STEPS_MS.length - 1)],
+                currentGeneration,
+                resynchronize
+            );
+        }
+    }
+
+    function recoverEventSource(sourceGeneration) {
+        if (!running || sourceGeneration !== generation) return;
+        closeEventSource();
+        generation += 1;
+        const recoveryGeneration = generation;
+        setConnectionState('reconnecting');
+        resynchronize(recoveryGeneration);
     }
 
     async function getCapability() {
         if (capability) return capability;
-        const response = await fetch(`${baseUrl}/api/command-capability`, { cache: 'no-store' });
+        const response = await fetch(endpoint('/api/command-capability'), { cache: 'no-store' });
         const body = await response.json().catch(() => ({}));
         if (!response.ok || !body.capability) {
             const error = new Error(body.error?.message || 'command capability unavailable');
@@ -298,14 +401,20 @@ export function createClient(options = {}) {
         start() {
             if (running) return;
             running = true;
+            generation += 1;
+            const currentGeneration = generation;
             setConnectionState('connecting');
-            poll();
+            if (transport === 'poll') poll(currentGeneration);
+            else openEventSource(currentGeneration);
         },
         stop() {
+            if (!running && connectionState === 'stopped') return;
             running = false;
+            generation += 1;
             if (timer) clearTimeout(timer);
             timer = null;
             inFlight = false;
+            closeEventSource();
             setConnectionState('stopped');
         },
         subscribe(listener) {
@@ -325,7 +434,7 @@ export function createClient(options = {}) {
         async invokeCommand(name, payload) {
             assertJson(payload);
             const token = await getCapability();
-            const response = await fetch(`${baseUrl}/api/commands/${encodeURIComponent(name)}`, {
+            const response = await fetch(endpoint(`/api/commands/${encodeURIComponent(name)}`), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

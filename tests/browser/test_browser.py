@@ -4,6 +4,8 @@ Run explicitly: `pytest tests/browser/test_browser.py`.
 """
 
 import asyncio
+import concurrent.futures
+import math
 import os
 import queue
 import re
@@ -84,9 +86,32 @@ def running_arm_server(request):
                 position=(0.0, 0.25 + index * 0.6, 0.0),
             )
         loop, thread = _start_app_on_thread(app)
+
+        async def update_scene():
+            step = 0
+            while True:
+                await asyncio.sleep(0.1)
+                angle = math.sin(step * 0.12) * 0.25
+                scene.update_node(
+                    "joint-0",
+                    rotation=(
+                        0.0,
+                        math.sin(angle / 2.0),
+                        0.0,
+                        math.cos(angle / 2.0),
+                    ),
+                )
+                step += 1
+
+        updates = asyncio.run_coroutine_threadsafe(update_scene(), loop)
         try:
             yield request.param, app.ready_info.url
         finally:
+            updates.cancel()
+            try:
+                updates.result(1)
+            except concurrent.futures.CancelledError:
+                pass
             asyncio.run_coroutine_threadsafe(app.stop(), loop).result(2)
             thread.join(2)
             assert not thread.is_alive()
@@ -205,6 +230,47 @@ def test_arm3d_fallback_preserves_accessibility(running_arm_server):
         assert page.locator('[role="option"][aria-selected="true"]').count() == 1
         assert "unavailable" in page.locator(".sdk-scene3d-fallback-text").inner_text()
         browser.close()
+
+
+def test_sse_client_streams_updates_for_both_backends(running_arm_server):
+    _backend, base_url = running_arm_server
+    state_requests = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page()
+        page.on(
+            "request",
+            lambda request: state_requests.append(request.url)
+            if request.url.endswith("/api/state")
+            else None,
+        )
+        page.goto(base_url + "/sdk/client.js")
+        result = page.evaluate(
+            """async () => {
+                const {createClient} = await import('/sdk/client.js');
+                const revisions = [];
+                const client = createClient({transport: 'sse'});
+                client.subscribe((snapshot) => {
+                    if (snapshot && revisions.at(-1) !== snapshot.revision) {
+                        revisions.push(snapshot.revision);
+                    }
+                });
+                client.start();
+                const deadline = performance.now() + 3000;
+                while (revisions.length < 2 && performance.now() < deadline) {
+                    await new Promise((resolve) => setTimeout(resolve, 20));
+                }
+                const state = client.getConnectionState();
+                client.stop();
+                return {revisions, state};
+            }"""
+        )
+        browser.close()
+
+    assert len(result["revisions"]) >= 2
+    assert result["revisions"][1] > result["revisions"][0]
+    assert result["state"] == "connected"
+    assert state_requests == []
 
 
 def test_scene_renders_without_console_errors(running_app):
