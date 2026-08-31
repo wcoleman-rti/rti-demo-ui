@@ -392,8 +392,8 @@ Phase 1 is complete for the supported Linux combinations:
   failure, normal close, independent server stop, `async_main` completion,
   exception and cancellation, single-use app enforcement, released ports, and
   joined execution contexts. Real Python and C++ production API smoke tests pass
-  under Xvfb/D-Bus/WebKitGTK, and the Ubuntu 22.04 native job is configured to
-  run both suites.
+  under Xvfb/D-Bus/WebKitGTK. The Ubuntu 22.04 native job passed both suites in
+  GitHub Actions run `33440092333`.
 
 The C++ host uses the public Linux native window handle for initial resizable
 dimensions because webview 0.12.0 performs the GTK resize but incorrectly
