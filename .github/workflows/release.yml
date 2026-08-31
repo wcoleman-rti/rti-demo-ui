@@ -23,10 +23,53 @@ jobs:
             echo "create=false" >> "$GITHUB_OUTPUT"
             echo "Tag $TAG is not a release tag; skipping release creation."
           fi
+      - uses: actions/checkout@v4
+        if: steps.release_tag.outputs.create == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.release_tag.outputs.create == 'true'
+        with:
+          python-version: "3.11"
+      - name: Build Python release artifacts
+        if: steps.release_tag.outputs.create == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          tag_version = os.environ["TAG"].removeprefix("v")
+          manifests = [pathlib.Path("pyproject.toml"),
+                       pathlib.Path("native/python/pyproject.toml")]
+          versions = {
+              path.as_posix(): tomllib.loads(path.read_text())["project"]["version"]
+              for path in manifests
+          }
+          mismatches = {
+              path: version
+              for path, version in versions.items()
+              if version != tag_version
+          }
+          if mismatches:
+              raise SystemExit(
+                  f"tag version {tag_version} does not match package versions "
+                  f"{mismatches}"
+              )
+          PY
+          python -m pip install build==1.2.2
+          python -m build --outdir dist/core .
+          python -m build --outdir dist/native native/python
+          mkdir -p dist/release
+          cp dist/core/* dist/native/* dist/release/
 
       - name: Create GitHub release
         if: steps.release_tag.outputs.create == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$TAG"
+        run: |
+          gh release create "$TAG" dist/release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --generate-notes \
+            --title "$TAG"

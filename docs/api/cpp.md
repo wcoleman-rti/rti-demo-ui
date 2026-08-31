@@ -40,6 +40,25 @@ state uses `set_data()` and `update_data()`. Commands use `register_command()`
 with the shared schema subset and are available only for literal loopback
 hosts.
 
+## Native Window
+
+On supported Linux systems, add the separate `native/cpp` CMake project after
+the core target and link `rti_demo_ui_native::native_webview`:
+
+```cpp
+#include <rti_demo_ui_native/native_webview.hpp>
+
+rti::demo::ui::native::NativeWindowOptions options;
+options.width = 1280;
+options.height = 800;
+rti::demo::ui::native::run(app, options);
+```
+
+The call owns the native main-thread loop and a joined server thread. Browser
+targets remain core-only and call `app.run()`. See
+[Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
+profiles, platform support, and troubleshooting.
+
 Both `GET /api/state` and `GET /api/events` are served by the C++ backend.
 Browser transport selection is not a `DemoUiApp` constructor option: custom
 JavaScript calls `createClient({transport: "sse"})` to opt into SSE or omits the

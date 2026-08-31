@@ -69,6 +69,12 @@ See [examples/py/simple.py](examples/py/simple.py) and
 [examples/cpp/simple.cpp](examples/cpp/simple.cpp) for animation and graceful
 interactive shutdown.
 
+An opt-in native window is available on supported Linux systems through
+separately packaged Python and C++ companions. Browser mode and core
+installation remain unchanged. See
+[Native Webview Mode](docs/native-webview.md) for prerequisites, API examples,
+profiles, troubleshooting, platform tier, and the release checklist.
+
 Run the application-owned gallery in any governed presentation:
 
 ```bash
@@ -95,6 +101,7 @@ fallback behavior, and replacement guidance are documented in
 ```text
 assets/       canonical index.html, runtime.js, runtime3d.js, client.js, theme.css
 cpp/          C++17 SDK core (rti_demo_ui::core)
+native/       opt-in Python and C++ native webview companions
 python/       Python 3.11+ SDK source (rti_demo_ui)
 examples/     simple, gallery, and guarded Connext examples per language
 tests/        cpp (CTest), py (pytest model/HTTP), browser (Playwright)
@@ -218,9 +225,11 @@ loop after startup. Foreign threads must schedule work with
 `loop.call_soon_threadsafe`. C++ retains its blocking, thread-safe lifecycle
 and SDK timer API. Applications that start their own DDS/worker threads must
 join those workers themselves before destroying `DemoUiApp`.
-The SDK does not install process-global signal handlers. Python examples catch
-`asyncio.CancelledError`; C++ examples use an example-local controller, so
-terminal Ctrl-C is a normal interactive exit path without a traceback.
+The core SDK does not install process-global signal handlers. Python browser
+examples catch `asyncio.CancelledError`; C++ browser examples use an
+example-local controller. The optional native companions temporarily install
+minimal `SIGINT`/`SIGTERM` handlers and restore the previous handlers after
+their managed window lifecycle exits.
 
 See [docs/lifecycle.md](docs/lifecycle.md) for startup, cancellation, worker
 ownership, and platform-specific control behavior.

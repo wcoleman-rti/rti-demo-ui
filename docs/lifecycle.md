@@ -51,7 +51,7 @@ async def main() -> None:
 examples catch `asyncio.CancelledError`, let their `TaskGroup` cancel and await
 application work, and call `await app.stop()` in `finally`. They do not catch
 `KeyboardInterrupt` inside the coroutine or create SDK-owned worker threads.
-The SDK does not install process-global signal handlers.
+The core SDK does not install process-global signal handlers.
 
 ## C++ Ctrl-C
 
@@ -66,6 +66,29 @@ and wakes blocked SSE providers before normal HTTP cleanup. After `run()`
 returns, Connext workers are signaled and joined, then the controller is joined
 and released. A terminal Ctrl-C is therefore a normal interactive exit path
 with no application traceback.
+
+## Native Window Lifecycle
+
+The optional companions preserve the core single-use contract while owning the
+extra GUI execution context.
+
+Python `run_native()` must be called on the main thread. It starts one
+background owner loop, awaits public server readiness, creates the pywebview
+window, and starts the optional `async_main(app)` coroutine on that owner loop.
+Window close cancels and awaits `async_main`, stops aiohttp, joins the owner
+thread, and then returns. A normal `async_main` return requests the same
+shutdown; an exception is propagated after cleanup.
+
+C++ `native::run()` creates and runs webview on the calling thread and calls
+blocking `app.run()` on one joined server thread. It races readiness against
+early server completion so bind failures cannot hang. Window close stops and
+joins the server; independent server completion dispatches window termination.
+
+Both native runners temporarily handle `SIGINT` and `SIGTERM`. The Python
+handler only sets a `threading.Event`; the C++ handler only updates
+`volatile std::sig_atomic_t`. Managed watchers request window close outside
+signal context, and the prior process handlers are restored on every exit.
+Close, signal, and programmatic stop are idempotent and may race.
 
 ## Browser Client Lifecycle
 

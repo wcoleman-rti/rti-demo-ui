@@ -47,11 +47,34 @@ returning.
 ```text
 assets/                 canonical index.html, runtime.js, client.js, theme.css
 cpp/                    C++17 library and embedded asset generation
+native/                 opt-in Python and C++ native webview companions
 python/                 Python package and package-data build hook
 examples/               Python, C++, web, and optional Connext examples
 tests/                  Python, C++, browser, and shared fixtures
 docs/                   architecture, API, lifecycle, and frontend contracts
 ```
+
+## 3.1 Optional Native Host
+
+The core packages remain browser-first and contain no native GUI dependency,
+import, or platform probe. The independently versioned 0.4.x companions host
+the same loopback frontend in a native window on supported Linux systems:
+
+- Python runs pywebview 6.2.1 on the calling main thread and owns the app's
+  asyncio loop in one joined worker.
+- C++ runs webview 0.12.0 on the calling main thread and owns blocking
+  `DemoUiApp::run()` in one joined worker.
+- Both wait for listener readiness before initial navigation, permit only the
+  exact bound origin for top-level/new-window navigation, and expose no
+  JavaScript-native bridge.
+- Browser-owned preference cookies persist by explicit Python application ID
+  or C++ executable filename. Dynamic ports prevent a guarantee for
+  origin-scoped localStorage or IndexedDB.
+- Signal handlers only set async-safe primitives; managed watchers dispatch
+  close and previous handlers are restored.
+
+Native mode changes hosting and lifecycle ownership, not the HTTP, snapshot,
+SSE, command, frontend, or component contracts.
 
 ## 4. HTTP Contract
 

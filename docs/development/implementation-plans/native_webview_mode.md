@@ -2,10 +2,11 @@
 
 ## Status
 
-Phase 0, Phase 1, and Phase 2 completed on 2026-08-31. Linux Python and C++
-passed the technology gates, and the independently packaged runners now
-provide managed lifecycle and supported-platform integration. Phase 3 may
-proceed as Linux-first work; macOS and Windows remain unsupported.
+All implementation phases completed on 2026-08-31 for the supported Linux
+Python and C++ combinations. The independently packaged runners provide
+managed lifecycle, supported-platform integration, release artifacts,
+consumer examples, and documented operations. macOS and Windows remain
+unsupported.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -474,6 +475,11 @@ native execution. Browser mode remains the Python default; the C++ native
 example is excluded unless `RTI_DEMO_NATIVE_BUILD_EXAMPLES=ON`, so the core
 example graph performs no native dependency discovery.
 
+Hosted run `33442500677` passed the production native job on Ubuntu 22.04. Its
+first browser job encountered the pre-existing C++ Arm3D selection timing
+flake; rerunning that failed job passed all 33 browser tests, making the
+overall run green without a source change.
+
 Phase 2 verification commands:
 
 ```bash
@@ -544,6 +550,89 @@ sha256sum --check assets/runtime3d.sha256
   troubleshooting, and platform tier.
 - Update lifecycle, architecture, third-party notices, and release packaging.
 - Perform automated and manual release smoke tests.
+
+#### Phase 3 Result (2026-08-31)
+
+Phase 3 implementation is complete. `docs/native-webview.md` is the
+installation and operations guide for the Linux-first release. It records the
+Ubuntu system packages, Python and C++ opt-in setup, synchronous native APIs,
+browser fallback, profile identity and storage behavior, exact-origin policy,
+shutdown semantics, troubleshooting, support tier, and versioned manual
+release checklist. The language API guides, lifecycle, architecture, root
+README, and third-party register now agree with that contract.
+
+The Python companion now publishes its own package README and Linux
+classifiers. Unsupported platforms no longer install an unused pywebview
+dependency, while `run_native()` retains its actionable unsupported-platform
+error before lazy engine import. Python 3.11 and 3.12 install the qualified
+PyGObject 3.50 pin against the documented Ubuntu development packages; Python
+3.13+ uses its matching distro binding through a `--system-site-packages`
+environment. The tag release workflow verifies that both distribution versions
+match the tag, then builds and attaches wheel and source distributions for
+`rti-demo-ui` and `rti-demo-ui-native`. C++ remains a source CMake companion in
+the GitHub source archive; a clean downstream consumer configure proves that
+adding the native project is opt-in and that the public target links from
+outside the repository top-level graph.
+
+Release-artifact smoke tests built both wheels and source distributions,
+installed the wheels in a clean environment outside the checkout, served the
+built-in packaged frontend in a real pywebview window, and exited cleanly on
+SIGINT. The clean C++ consumer configured, built, opened the built-in frontend
+through the production runner, and stopped without a leaked server.
+
+Manual release evidence combines the earlier user-accepted Linux checks for
+both engines (chrome, resize, rendering, keyboard focus/input, DPI, and blocked
+navigation) with the current production runners on the physical display. The
+current host reported two 1920x1080 monitors and an Intel Arrow Lake-P display
+controller. Production Python conformance on that display passed known-pixel
+Canvas/WebGL rendering, focus, commands, imports, and navigation. Both
+production release-smoke windows then exited normally from SIGINT. Direct
+AT-SPI tree capture and `glxinfo` renderer identification were unavailable
+because the inspection-only packages were absent and this session could not
+authenticate for system installation. Those tools are diagnostics rather than
+runtime gates; semantic browser accessibility coverage passed, and the manual
+checklist requires direct accessibility and hardware-renderer inspection again
+for each tagged release candidate.
+
+Phase 3 verification commands:
+
+```bash
+python -m pip install build==1.2.2
+python -m build --outdir /tmp/rti-demo-ui-phase3-artifacts/core .
+python -m build --outdir /tmp/rti-demo-ui-phase3-artifacts/native native/python
+
+cmake -S native/cpp/tests/consumer -B build/native-consumer \
+  -DRTI_DEMO_UI_SOURCE_DIR="$PWD"
+cmake --build build/native-consumer --parallel
+
+# From a clean environment outside the checkout, install the two built wheels.
+cd /tmp
+/tmp/rti-demo-ui-phase3-smoke/bin/python -c \
+  'import rti_demo_ui, rti_demo_ui_native'
+
+# Return to the checkout and run both release artifacts on a real or Xvfb
+# display. The Python command is sent SIGINT after startup.
+XDG_DATA_HOME=/tmp/rti-demo-ui-phase3-profiles/python \
+  /tmp/rti-demo-ui-phase3-smoke/bin/python - <<'PY'
+import os
+import signal
+import threading
+
+from rti_demo_ui import DemoUiApp
+from rti_demo_ui_native import run_native
+
+threading.Timer(1, lambda: os.kill(os.getpid(), signal.SIGINT)).start()
+run_native(
+    DemoUiApp("Installed native wheel smoke"),
+    application_id="org.rti.phase3-wheel-smoke",
+)
+PY
+XDG_DATA_HOME=/tmp/rti-demo-ui-phase3-profiles/cpp \
+  ./build/native-consumer/rti_demo_ui_native_consumer
+
+xrandr --listmonitors
+lspci | grep -Ei 'vga|3d|display'
+```
 
 ## Verification
 

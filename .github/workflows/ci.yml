@@ -92,6 +92,10 @@ jobs:
             -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON \
             -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
           cmake --build build/native-phase2 --parallel
+          cmake -S native/cpp/tests/consumer \
+            -B build/native-consumer \
+            -DRTI_DEMO_UI_SOURCE_DIR="$PWD"
+          cmake --build build/native-consumer --parallel
           cmake -S tools/native_webview_spike \
             -B build/native-webview-spike-real \
             -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
@@ -162,6 +166,33 @@ jobs:
             ctest --test-dir build/native-phase2 \
               --output-on-failure \
               -L real_engine
+          XDG_DATA_HOME="$work/phase3-cpp-consumer" \
+            timeout 40s ./build/native-consumer/rti_demo_ui_native_consumer
+
+          mkdir -p "$work/wheels"
+          python -m pip wheel --no-deps \
+            --wheel-dir "$work/wheels" . native/python
+          python -m venv --system-site-packages "$work/release-venv"
+          "$work/release-venv/bin/pip" install --no-deps "$work"/wheels/*.whl
+          (
+            cd "$work"
+            XDG_DATA_HOME="$work/phase3-python-wheel" \
+              timeout 40s "$work/release-venv/bin/python" - <<'PY'
+          import asyncio
+
+          from rti_demo_ui import DemoUiApp
+          from rti_demo_ui_native import run_native
+
+          async def close_after_start(_app):
+              await asyncio.sleep(0.5)
+
+          run_native(
+              DemoUiApp("Installed native wheel smoke"),
+              application_id="org.rti.phase3-wheel-smoke",
+              async_main=close_after_start,
+          )
+          PY
+          )
 
           XDG_DATA_HOME="$work/production-python" \
             timeout 40s python native/python/tests/real_conformance.py \
