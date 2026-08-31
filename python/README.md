@@ -24,6 +24,9 @@ asyncio.run(app.run())
 `/sdk/runtime.js`, and the framework-independent `/sdk/client.js`, and resolves
 other paths beneath the validated root. Port `0` selects an available loopback
 port; use `await app.wait_until_ready()` and `app.ready_info` to retrieve it.
+The client polls by default; custom frontends can explicitly select
+`createClient({transport: "sse"})`. Both `/api/state` and `/api/events` remain
+reserved SDK routes.
 Wheel and source-distribution installs load built-in assets from package
 resources; application-owned frontend files are deployed separately.
 

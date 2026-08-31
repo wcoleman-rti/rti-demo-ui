@@ -86,11 +86,19 @@ Component::Component(detail::Model& model, std::string id, std::string type)
     : model_(model), id_(std::move(id)), type_(std::move(type)) {}
 
 void Component::mutated_locked() {
-    model_.bump_revision_locked();
+    if (card_id_.empty()) {
+        throw std::runtime_error(
+            "Component: component is not attached to a card");
+    }
+    model_.commit_component_locked(card_id_, id_);
     revision_ = model_.revision_;
 }
 
-void Component::added_locked() { mutated_locked(); }
+void Component::added_locked(const std::string& card_id) {
+    card_id_ = card_id;
+    model_.commit_card_locked(card_id_);
+    revision_ = model_.revision_;
+}
 
 Scene2DViewport::Scene2DViewport(detail::Model& model, std::string id,
                                  int width, int height, GridBounds bounds)
@@ -747,9 +755,45 @@ Json CustomComponent::to_json_locked() const {
     return component_json(id_, type_, revision_, data_);
 }
 
-Card::Card(detail::Model& model, std::string id, std::string title)
-    : model_(model), id_(std::move(id)), title_(std::move(title)) {
+Card::Card(detail::Model& model, std::string id, std::string title,
+           CardArea area, int span)
+    : model_(model),
+      id_(std::move(id)),
+      title_(std::move(title)),
+      area_(area),
+      span_(span) {
     detail::require_non_empty(title_, "title", "Card: ");
+    to_string(area_);
+    detail::require_card_span(span_);
+}
+void Card::set_area(CardArea area) {
+    to_string(area);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (area == area_) return;
+    if (area == CardArea::sidebar) {
+        for (const auto& card : model_.cards_) {
+            if (card.get() != this && card->area() == CardArea::sidebar) {
+                throw std::invalid_argument(
+                    "DemoUiApp: at most one sidebar card is permitted");
+            }
+        }
+    }
+    if (area_ == CardArea::sidebar && area == CardArea::main &&
+        model_.layout_ == Layout::sidebar_main) {
+        throw std::invalid_argument(
+            "DemoUiApp: sidebar-main requires exactly one sidebar card");
+    }
+    area_ = area;
+    model_.commit_card_locked(id_);
+}
+void Card::set_span(int span) {
+    detail::require_card_span(span);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (span == span_) return;
+    span_ = span;
+    model_.commit_card_locked(id_);
 }
 Scene2DViewport* Card::add_scene_2d(int width, int height, GridBounds bounds) {
     detail::require_positive(width, "width", "Scene2DViewport: ");
@@ -761,7 +805,7 @@ Scene2DViewport* Card::add_scene_2d(int width, int height, GridBounds bounds) {
         model_, model_.next_component_id("scene"), width, height, bounds);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Scene3DViewport* Card::add_scene_3d(const std::string& asset, Json camera,
@@ -773,7 +817,7 @@ Scene3DViewport* Card::add_scene_3d(const std::string& asset, Json camera,
         std::move(background), grid);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Table* Card::add_table(Json columns, Json rows, std::string empty_state) {
@@ -784,7 +828,7 @@ Table* Card::add_table(Json columns, Json rows, std::string empty_state) {
         std::move(rows), std::move(empty_state));
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Metric* Card::add_metric(const std::string& label, Json value,
@@ -796,7 +840,7 @@ Metric* Card::add_metric(const std::string& label, Json value,
                                  label, std::move(value), severity);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Text* Card::add_text(const std::string& text,
@@ -807,7 +851,7 @@ Text* Card::add_text(const std::string& text,
         model_, model_.next_component_id("text"), text, severity);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Badge* Card::add_badge(const std::string& text, Severity severity) {
@@ -817,7 +861,7 @@ Badge* Card::add_badge(const std::string& text, Severity severity) {
         model_, model_.next_component_id("badge"), text, severity);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Log* Card::add_log(Json entries, std::string empty_state, int max_entries) {
@@ -828,7 +872,7 @@ Log* Card::add_log(Json entries, std::string empty_state, int max_entries) {
         std::move(empty_state), max_entries);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 CustomComponent* Card::add_custom_component(const std::string& type, Json data,
@@ -840,15 +884,18 @@ CustomComponent* Card::add_custom_component(const std::string& type, Json data,
                                                        type, std::move(data));
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Json Card::to_json_locked() const {
     Json components = Json::array();
     for (const auto& component : components_)
         components.push_back(component->to_json_locked());
-    return Json{
-        {"id", id_}, {"title", title_}, {"components", std::move(components)}};
+    return Json{{"id", id_},
+                {"title", title_},
+                {"area", to_string(area_)},
+                {"span", span_},
+                {"components", std::move(components)}};
 }
 
 }  // namespace rti::demo::ui

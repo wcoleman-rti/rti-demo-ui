@@ -17,6 +17,8 @@ raises an error and never prints a false listening message. Cancellation runs
 the same aiohttp cleanup path before `CancelledError` is propagated. Stop
 during startup signals shutdown without allowing the server to enter its wait.
 An app stopped from another event loop schedules shutdown on its owner loop.
+Shutdown rejects new event subscriptions, wakes connected and idle SSE handlers,
+closes their transports, and then completes normal aiohttp cleanup.
 
 Component factory and mutation methods remain synchronous. Configuration before
 startup is allowed; after startup, mutations and snapshots must run on the
@@ -53,6 +55,19 @@ threads. An example-local controller waits with `sigtimedwait()` and calls
 manual-reset event; its console callback handles only `CTRL_C_EVENT` and
 `CTRL_BREAK_EVENT` and only calls `SetEvent()`.
 
-`run()` remains on the main thread. After it returns, Connext workers are
-signaled and joined, then the controller is joined and released. A terminal
-Ctrl-C is therefore a normal interactive exit path with no application traceback.
+`run()` remains on the main thread. `stop()` first prevents new subscriptions
+and wakes blocked SSE providers before normal HTTP cleanup. After `run()`
+returns, Connext workers are signaled and joined, then the controller is joined
+and released. A terminal Ctrl-C is therefore a normal interactive exit path
+with no application traceback.
+
+## Browser Client Lifecycle
+
+`createClient()` is stopped initially. `start()` and `stop()` are idempotent.
+Polling mode owns at most one request and one retry/poll timer. SSE mode owns one
+EventSource and uses the browser's reconnect behavior; recovery from an invalid
+or gapped patch temporarily owns one `/api/state` fetch and may own one retry
+timer. Calling `stop()` closes the source, clears timers, and invalidates the
+connection generation so late events and fetch completions cannot notify
+subscribers. Calling `start()` again retains the last immutable snapshot while
+creating a new transport generation.

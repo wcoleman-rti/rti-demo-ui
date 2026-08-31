@@ -1,7 +1,8 @@
 # Custom Frontends
 
 RTI Demo UI has a built-in frontend and an opt-in application-owned static
-frontend. Both modes use the same local server and `/api/state` model contract.
+frontend. Both modes use the same local server and read-only `/api/state` and
+`/api/events` model contracts.
 
 ## Modes
 
@@ -47,6 +48,7 @@ SDK routes are reserved in every mode:
 | `/sdk/theme.css` | SDK theme | SDK theme |
 | `/api/health` | health JSON | health JSON |
 | `/api/state` | model snapshot | model snapshot |
+| `/api/events` | SSE state stream | SSE state stream |
 | `/api/command-capability` | opt-in command capability | opt-in command capability |
 | `/api/commands/{name}` | opt-in command POST | opt-in command POST |
 
@@ -60,6 +62,44 @@ broken links, directory links, and symlinks that resolve outside the root. The
 explicit MIME map covers HTML, JavaScript, CSS, JSON, SVG, common images, fonts,
 GLB, and GLTF. Other regular files use `application/octet-stream`.
 
+## Browser Transport
+
+Import the canonical client rather than copying it. Polling remains the
+compatibility default:
+
+```js
+import {createClient} from "/sdk/client.js";
+
+const client = createClient({
+  transport: "poll",
+  pollIntervalMs: 200,
+});
+client.subscribe((snapshot, connectionState) => {
+  render(snapshot, connectionState);
+});
+client.start();
+```
+
+High-update-rate applications may explicitly select SSE:
+
+```js
+const client = createClient({transport: "sse"});
+```
+
+SSE uses a same-origin `/api/events` URL, applies patches in the browser, and
+uses `/api/state` only to recover from an invalid payload or revision gap.
+`reconnecting` means the browser is retrying SSE or the client is
+resynchronizing. There is no `auto` mode and no fallback from SSE to polling.
+Call `client.stop()` when disposing the frontend; it closes the EventSource and
+prevents late events from reaching subscribers.
+
+Custom `baseUrl` values used with SSE must resolve `/api/events` to the page's
+origin. The event response has no CORS headers. Reverse proxies are unsupported
+unless configured to pass `text/event-stream` without compression buffering,
+preserve long-lived chunked delivery, and keep idle connections open longer
+than the 15-second heartbeat interval. Choose polling when that streaming path
+cannot be guaranteed.
+
 ## SDK Styling
 
 Load the SDK theme without copying it:
@@ -71,10 +111,40 @@ Load the SDK theme without copying it:
 
 Stable custom properties include `--sdk-bg`, `--sdk-surface`, `--sdk-card-bg`,
 `--sdk-text`, `--sdk-muted`, `--sdk-border`, `--sdk-accent`,
-`--sdk-success`, `--sdk-warning`, and `--sdk-danger`. Stable component classes
-include `sdk-app`, `sdk-card`, `sdk-card-title`, `sdk-metric`, `sdk-table`,
-`sdk-button`, `sdk-slider`, `sdk-connection-banner`, `sdk-scene2d`, and the
-Scene3D host/listbox classes.
+`--sdk-accent-hover`, `--sdk-success`, `--sdk-warning`, and `--sdk-danger`.
+Both governed palettes provide every token. Set `data-sdk-theme="dark"` or
+`data-sdk-theme="light"` on `<html>`; missing or malformed values must use
+`dark`. Do not replace `document.documentElement.className`, because it may
+contain application-owned classes.
+
+Custom frontends that consume presentation metadata use the same closed values
+and compatibility defaults as the built-in renderer:
+
+```js
+const themes = new Set(["dark", "light"]);
+const layouts = new Set(["auto", "grid-2", "grid-3", "sidebar-main"]);
+
+client.subscribe((snapshot) => {
+  const theme = themes.has(snapshot.theme) ? snapshot.theme : "dark";
+  const layout = layouts.has(snapshot.layout) ? snapshot.layout : "auto";
+  document.documentElement.dataset.sdkTheme = theme;
+  document.querySelector("#dashboard").dataset.sdkLayout = layout;
+});
+```
+
+Card `area` defaults to `main`; `span` defaults to `1` and must be an integer
+from `1` through `3`. A malformed field falls back independently rather than
+retaining its previously applied value. Applications must use closed-value
+attributes rather than constructing arbitrary classes, selectors, or
+`style.cssText` from snapshot strings.
+
+The built-in layout rules target `#sdk-cards`, `.sdk-card`,
+`data-sdk-layout`, `data-sdk-area`, and `data-sdk-span`. A custom frontend may
+opt into that markup or implement its own responsive organization; loading the
+theme does not require using the built-in layout classes. Stable component
+classes include `sdk-app`, `sdk-card`, `sdk-card-title`, `sdk-metric`,
+`sdk-table`, `sdk-button`, `sdk-slider`, `sdk-connection-banner`,
+`sdk-scene2d`, and the Scene3D host/listbox classes.
 
 ## Scene3D
 
@@ -102,6 +172,9 @@ The gallery is an application-owned frontend at
 `examples/web/gallery/index.html`. It loads `/sdk/theme.css`, uses semantic
 HTML, and serves at `/` when launched through either gallery example. Its
 button and slider update browser-only text; no custom server route is needed.
+Both launchers accept `--theme dark|light` and
+`--layout auto|grid-2|grid-3|sidebar-main`, so every governed presentation can
+be exercised without application CSS overrides.
 
 The v2 snapshot has top-level `schema_version`, `revision`, `title`, `data`, and
 `cards`; every component has `id`, `type`, `revision`, and `data`. The browser

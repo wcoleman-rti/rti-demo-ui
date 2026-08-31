@@ -7,12 +7,16 @@ import re
 from typing import Dict, List, Optional
 
 from .types import (
+    CardArea,
     Freshness,
     GridBounds,
+    Layout,
     Severity,
+    coerce_card_area,
     coerce_freshness,
     coerce_severity,
     copy_json_value,
+    require_card_span,
     require_finite,
     require_non_empty,
     require_positive_int,
@@ -27,9 +31,12 @@ class _Component:
         self.id = component_id
         self.type = component_type
         self.revision = 0
+        self._card_id = None
 
     def _mutated(self) -> None:
-        self._model.bump_revision_locked()
+        if self._card_id is None:
+            raise RuntimeError("Component: component is not attached to a card")
+        self._model.commit_component_locked(self._card_id, self.id)
         self.revision = self._model.revision
 
     def _envelope(self, data: dict) -> dict:
@@ -44,16 +51,59 @@ class _Component:
 class Card:
     """Titled grouping of components. Owned exclusively by DemoUiApp."""
 
-    def __init__(self, model, card_id: str, title: str) -> None:
+    def __init__(
+        self,
+        model,
+        card_id: str,
+        title: str,
+        area=CardArea.main,
+        span: int = 1,
+    ) -> None:
         require_non_empty(title, "title", "Card: ")
+        area = coerce_card_area(area)
+        require_card_span(span)
         self._model = model
         self.id = card_id
         self.title = title
+        self.area = area
+        self.span = span
         self._components: List[_Component] = []
+
+    def set_area(self, area) -> None:
+        area = coerce_card_area(area)
+        self._model.check_owner()
+        self._model.ensure_running()
+        if area == self.area:
+            return
+        if area == CardArea.sidebar and any(
+            card is not self and card.area == CardArea.sidebar
+            for card in self._model.cards
+        ):
+            raise ValueError("DemoUiApp: at most one sidebar card is permitted")
+        if (
+            self.area == CardArea.sidebar
+            and area == CardArea.main
+            and self._model.layout == Layout.sidebar_main
+        ):
+            raise ValueError(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card"
+            )
+        self.area = area
+        self._model.commit_card_locked(self.id)
+
+    def set_span(self, span: int) -> None:
+        require_card_span(span)
+        self._model.check_owner()
+        self._model.ensure_running()
+        if span == self.span:
+            return
+        self.span = span
+        self._model.commit_card_locked(self.id)
 
     def _add_component(self, component: _Component) -> _Component:
         self._components.append(component)
-        self._model.bump_revision_locked()
+        component._card_id = self.id
+        self._model.commit_card_locked(self.id)
         component.revision = self._model.revision
         return component
 
@@ -166,6 +216,8 @@ class Card:
         return {
             "id": self.id,
             "title": self.title,
+            "area": self.area.value,
+            "span": self.span,
             "components": [component.to_dict() for component in self._components],
         }
 

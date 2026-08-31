@@ -1,0 +1,230 @@
+{
+  "values": {
+    "theme": {
+      "default": "dark",
+      "valid": ["dark", "light"],
+      "invalid": ["", "Dark", "blue", null, true, 1, {}, []]
+    },
+    "layout": {
+      "default": "auto",
+      "valid": ["auto", "grid-2", "grid-3", "sidebar-main"],
+      "invalid": ["", "grid", "grid-4", "sidebar_main", null, true, 2, {}, []]
+    },
+    "area": {
+      "default": "main",
+      "valid": ["main", "sidebar"],
+      "invalid": ["", "Main", "aside", null, true, 1, {}, []]
+    },
+    "span": {
+      "default": 1,
+      "valid": [1, 2, 3],
+      "invalid": [0, 4, -1, 1.5, true, false, "2", null, {}, []]
+    }
+  },
+  "snapshots": {
+    "defaults": {
+      "schema_version": 2,
+      "revision": 1,
+      "title": "Presentation Defaults",
+      "theme": "dark",
+      "layout": "auto",
+      "data": {},
+      "cards": [
+        {
+          "id": "card-1",
+          "title": "Telemetry",
+          "area": "main",
+          "span": 1,
+          "components": []
+        }
+      ]
+    },
+    "non_default": {
+      "schema_version": 2,
+      "revision": 2,
+      "title": "Presentation Non-Defaults",
+      "theme": "light",
+      "layout": "sidebar-main",
+      "data": {},
+      "cards": [
+        {
+          "id": "card-1",
+          "title": "Controls",
+          "area": "sidebar",
+          "span": 1,
+          "components": []
+        },
+        {
+          "id": "card-2",
+          "title": "Telemetry",
+          "area": "main",
+          "span": 3,
+          "components": []
+        }
+      ]
+    }
+  },
+  "sidebar_cases": [
+    {
+      "name": "runtime sidebar-main with one sidebar",
+      "operation": "set_layout",
+      "validation_point": "mutation_commit",
+      "initial_layout": "auto",
+      "attempted_layout": "sidebar-main",
+      "sidebar_count": 1,
+      "accepted": true,
+      "revision_delta": 1
+    },
+    {
+      "name": "runtime sidebar-main without sidebar",
+      "operation": "set_layout",
+      "validation_point": "mutation_commit",
+      "initial_layout": "auto",
+      "attempted_layout": "sidebar-main",
+      "sidebar_count": 0,
+      "accepted": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "duplicate sidebar assignment",
+      "operation": "set_area",
+      "validation_point": "mutation_commit",
+      "initial_layout": "auto",
+      "attempted_area": "sidebar",
+      "sidebar_count": 1,
+      "accepted": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "constructed sidebar-main without sidebar",
+      "operation": "run",
+      "validation_point": "before_run",
+      "initial_layout": "sidebar-main",
+      "sidebar_count": 0,
+      "accepted": false,
+      "revision_delta": 0
+    }
+  ],
+  "revision_cases": [
+    {
+      "name": "theme value change",
+      "scope": "application",
+      "field": "theme",
+      "initial_value": "dark",
+      "attempted_value": "light",
+      "accepted": true,
+      "state_changed": true,
+      "revision_delta": 1
+    },
+    {
+      "name": "theme no-op",
+      "scope": "application",
+      "field": "theme",
+      "initial_value": "light",
+      "attempted_value": "light",
+      "accepted": true,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "theme invalid",
+      "scope": "application",
+      "field": "theme",
+      "initial_value": "dark",
+      "attempted_value": "blue",
+      "accepted": false,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "layout value change",
+      "scope": "application",
+      "field": "layout",
+      "initial_value": "auto",
+      "attempted_value": "grid-2",
+      "accepted": true,
+      "state_changed": true,
+      "revision_delta": 1
+    },
+    {
+      "name": "layout no-op",
+      "scope": "application",
+      "field": "layout",
+      "initial_value": "grid-2",
+      "attempted_value": "grid-2",
+      "accepted": true,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "layout invalid",
+      "scope": "application",
+      "field": "layout",
+      "initial_value": "auto",
+      "attempted_value": "grid-4",
+      "accepted": false,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "area value change",
+      "scope": "card",
+      "field": "area",
+      "initial_value": "main",
+      "attempted_value": "sidebar",
+      "accepted": true,
+      "state_changed": true,
+      "revision_delta": 1
+    },
+    {
+      "name": "area no-op",
+      "scope": "card",
+      "field": "area",
+      "initial_value": "sidebar",
+      "attempted_value": "sidebar",
+      "accepted": true,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "area invalid",
+      "scope": "card",
+      "field": "area",
+      "initial_value": "main",
+      "attempted_value": "aside",
+      "accepted": false,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "span value change",
+      "scope": "card",
+      "field": "span",
+      "initial_value": 1,
+      "attempted_value": 3,
+      "accepted": true,
+      "state_changed": true,
+      "revision_delta": 1
+    },
+    {
+      "name": "span no-op",
+      "scope": "card",
+      "field": "span",
+      "initial_value": 3,
+      "attempted_value": 3,
+      "accepted": true,
+      "state_changed": false,
+      "revision_delta": 0
+    },
+    {
+      "name": "span invalid",
+      "scope": "card",
+      "field": "span",
+      "initial_value": 1,
+      "attempted_value": true,
+      "accepted": false,
+      "state_changed": false,
+      "revision_delta": 0
+    }
+  ]
+}

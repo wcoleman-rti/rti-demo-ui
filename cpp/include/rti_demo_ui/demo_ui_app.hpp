@@ -3,12 +3,15 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -25,11 +28,17 @@ namespace rti::demo::ui {
 
 namespace detail {
 
+class SseManager;
+
 // Internal model state shared by DemoUiApp, Card, and Scene2DViewport.
 class Model {
    public:
-    explicit Model(std::string title, std::filesystem::path static_root = {})
-        : title_(std::move(title)), static_root_(std::move(static_root)) {}
+    explicit Model(std::string title, std::filesystem::path static_root = {},
+                   Theme theme = Theme::dark, Layout layout = Layout::automatic)
+        : title_(std::move(title)),
+          static_root_(std::move(static_root)),
+          theme_(theme),
+          layout_(layout) {}
 
     std::mutex& lock() { return mutex_; }
     const std::filesystem::path& static_root() const { return static_root_; }
@@ -48,13 +57,24 @@ class Model {
         running_ = false;
     }
 
-    void bump_revision_locked() { ++revision_; }
+    void start_dirty_tracking_locked();
+    void commit_app_data_locked();
+    void commit_presentation_locked();
+    void commit_card_locked(const std::string& card_id);
+    void commit_card_removal_locked(const std::string& card_id);
+    void commit_component_locked(const std::string& card_id,
+                                 const std::string& component_id);
+    void commit_component_removal_locked(const std::string& card_id,
+                                         const std::string& component_id);
+    std::optional<Json> flush_dirty_targets_locked();
 
     std::string next_card_id() {
         return "card-" + std::to_string(next_card_id_++);
     }
     std::string next_component_id(const std::string& type) {
-        return type + "-" + std::to_string(next_component_ids_[type]++);
+        int& next_id = next_component_ids_[type];
+        if (next_id == 0) next_id = 1;
+        return type + "-" + std::to_string(next_id++);
     }
 
     Json update_value(const Json& current, const std::vector<std::string>& path,
@@ -64,15 +84,104 @@ class Model {
 
     std::string title_;
     std::filesystem::path static_root_;
+    Theme theme_;
+    Layout layout_;
     long revision_ = 0;
     std::vector<std::unique_ptr<Card>> cards_;
     Json data_ = Json::object();
 
    private:
+    friend class SseManager;
+
+    enum class DirtyOperation { upsert, remove };
+
     std::mutex mutex_;
     bool running_ = true;
     int next_card_id_ = 1;
     std::unordered_map<std::string, int> next_component_ids_;
+    bool dirty_tracking_ = false;
+    long published_revision_ = 0;
+    bool app_data_dirty_ = false;
+    bool presentation_dirty_ = false;
+    std::map<std::string, DirtyOperation> dirty_cards_;
+    std::map<std::pair<std::string, std::string>, DirtyOperation>
+        dirty_components_;
+    std::set<std::string> removed_card_ids_;
+    std::set<std::pair<std::string, std::string>> removed_component_ids_;
+    SseManager* sse_manager_ = nullptr;
+};
+
+class ModelTestAccess;
+class SseTestAccess;
+
+class SseManager {
+   public:
+    struct StateEvent {
+        std::shared_ptr<const std::string> body;
+        long revision;
+        bool snapshot;
+    };
+
+    struct Subscriber {
+        std::optional<StateEvent> pending;
+        long tail_revision = 0;
+        bool reset_pending = false;
+        bool closed = false;
+    };
+
+    enum class DeliveryKind { state, heartbeat, stopped };
+    enum class WriteResult { written, unwritable, failed, timed_out };
+    using Writer = std::function<WriteResult(const char*, size_t)>;
+
+    struct Delivery {
+        DeliveryKind kind;
+        std::optional<StateEvent> event;
+        bool reset = false;
+    };
+
+    explicit SseManager(Model& model);
+    ~SseManager();
+
+    void start();
+    void stop() noexcept;
+    void mark_dirty_locked();
+    std::shared_ptr<Subscriber> subscribe();
+    void unsubscribe(const std::shared_ptr<Subscriber>& subscriber);
+    Delivery next(const std::shared_ptr<Subscriber>& subscriber);
+    void delivered(const std::shared_ptr<Subscriber>& subscriber,
+                   const Delivery& delivery, bool success);
+    bool write(const std::shared_ptr<Subscriber>& subscriber,
+               const Delivery* delivery, const char* data, size_t size,
+               const Writer& writer);
+
+   private:
+    friend class SseTestAccess;
+
+    using Clock = std::chrono::steady_clock;
+
+    static std::shared_ptr<const std::string> snapshot_event_locked(
+        const Model& model);
+    static std::shared_ptr<const std::string> patch_event(const Json& patch);
+    void run();
+    void publish_locked(const Json& patch,
+                        std::shared_ptr<const std::string> snapshot);
+    void enqueue_locked(const std::shared_ptr<Subscriber>& subscriber,
+                        const StateEvent& event, const StateEvent& replacement);
+    void close_locked(const std::shared_ptr<Subscriber>& subscriber);
+
+    Model& model_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::thread thread_;
+    bool active_ = false;
+    bool flush_scheduled_ = false;
+    Clock::time_point flush_deadline_;
+    Clock::time_point previous_flush_;
+    std::chrono::steady_clock::duration publication_interval_;
+    std::chrono::steady_clock::duration heartbeat_interval_;
+    std::set<std::shared_ptr<Subscriber>,
+             std::owner_less<std::shared_ptr<Subscriber>>>
+        subscribers_;
 };
 
 // Thread + synchronization state for one SDK-owned periodic timer. Shared
@@ -137,13 +246,18 @@ class DemoUiApp {
    public:
     explicit DemoUiApp(std::string title, int port = 0,
                        std::string host = "127.0.0.1",
-                       std::filesystem::path static_root = {});
+                       std::filesystem::path static_root = {},
+                       Theme theme = Theme::dark,
+                       Layout layout = Layout::automatic);
     ~DemoUiApp();
 
     DemoUiApp(const DemoUiApp&) = delete;
     DemoUiApp& operator=(const DemoUiApp&) = delete;
 
-    Card* add_card(const std::string& title);
+    Card* add_card(const std::string& title, CardArea area = CardArea::main,
+                   int span = 1);
+    void set_theme(Theme theme);
+    void set_layout(Layout layout);
     void set_data(Json value);
     void update_data(const std::vector<std::string>& path, Json value,
                      bool create_missing = false);
@@ -157,6 +271,9 @@ class DemoUiApp {
     std::optional<ReadyInfo> ready_info() const;
 
    private:
+    friend class detail::ModelTestAccess;
+    friend class detail::SseTestAccess;
+
     struct RegisteredCommand {
         CommandSchema schema;
         CommandHandler handler;
@@ -168,6 +285,7 @@ class DemoUiApp {
     int port_;
     std::filesystem::path static_root_;
     detail::Model model_;
+    std::unique_ptr<detail::SseManager> sse_manager_;
     std::unique_ptr<httplib::Server> server_;
     std::vector<std::shared_ptr<detail::TimerState>> timers_;
     std::atomic<bool> stopped_ = false;

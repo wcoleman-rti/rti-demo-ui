@@ -174,6 +174,19 @@ void send_method_not_allowed(httplib::Response& res) {
 }
 
 constexpr size_t kCommandBodyLimit = 64 * 1024;
+constexpr size_t kMaxSseStreams = 16;
+constexpr size_t kServerWorkers = 20;
+constexpr auto kSseHeartbeatInterval = std::chrono::seconds(15);
+constexpr auto kSsePublicationInterval =
+    std::chrono::duration<double>(1.0 / 30.0);
+constexpr char kSseHeartbeat[] = ": heartbeat\n\n";
+constexpr char kSseRetry[] = "retry: 1000\n\n";
+
+std::string sse_event(const char* event, long revision,
+                      const std::string& data) {
+    return "event: " + std::string(event) +
+           "\nid: " + std::to_string(revision) + "\ndata: " + data + "\n\n";
+}
 
 const std::set<std::string> kSchemaKeywords = {
     "type",    "properties", "required",  "items",     "enum",
@@ -390,9 +403,355 @@ std::string Model::snapshot_json_locked() const {
     return Json{{"schema_version", 2},
                 {"revision", revision_},
                 {"title", title_},
+                {"theme", to_string(theme_)},
+                {"layout", to_string(layout_)},
                 {"data", data_},
                 {"cards", std::move(cards)}}
         .dump();
+}
+
+void Model::start_dirty_tracking_locked() {
+    dirty_tracking_ = true;
+    published_revision_ = revision_;
+    app_data_dirty_ = false;
+    presentation_dirty_ = false;
+    dirty_cards_.clear();
+    dirty_components_.clear();
+}
+
+void Model::commit_app_data_locked() {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    if (dirty_tracking_) app_data_dirty_ = true;
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_presentation_locked() {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    if (dirty_tracking_) presentation_dirty_ = true;
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_card_locked(const std::string& card_id) {
+    if (removed_card_ids_.count(card_id) != 0) {
+        throw std::runtime_error("cannot upsert removed card target: " +
+                                 card_id);
+    }
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    if (!dirty_tracking_) return;
+    dirty_cards_[card_id] = DirtyOperation::upsert;
+    for (auto target = dirty_components_.begin();
+         target != dirty_components_.end();) {
+        if (target->first.first == card_id) {
+            target = dirty_components_.erase(target);
+        } else {
+            ++target;
+        }
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_card_removal_locked(const std::string& card_id) {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    removed_card_ids_.insert(card_id);
+    if (!dirty_tracking_) return;
+    dirty_cards_[card_id] = DirtyOperation::remove;
+    for (auto target = dirty_components_.begin();
+         target != dirty_components_.end();) {
+        if (target->first.first == card_id) {
+            target = dirty_components_.erase(target);
+        } else {
+            ++target;
+        }
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_component_locked(const std::string& card_id,
+                                    const std::string& component_id) {
+    const auto target = std::make_pair(card_id, component_id);
+    if (removed_card_ids_.count(card_id) != 0 ||
+        removed_component_ids_.count(target) != 0) {
+        throw std::runtime_error("cannot upsert removed component target: " +
+                                 card_id + ":" + component_id);
+    }
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
+        dirty_components_[target] = DirtyOperation::upsert;
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_component_removal_locked(const std::string& card_id,
+                                            const std::string& component_id) {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    removed_component_ids_.emplace(card_id, component_id);
+    if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
+        dirty_components_[{card_id, component_id}] = DirtyOperation::remove;
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+std::optional<Json> Model::flush_dirty_targets_locked() {
+    if (!dirty_tracking_ ||
+        (!app_data_dirty_ && !presentation_dirty_ && dirty_cards_.empty() &&
+         dirty_components_.empty())) {
+        return std::nullopt;
+    }
+
+    Json changes = Json::array();
+    if (app_data_dirty_) {
+        changes.push_back({{"op", "replace-app-data"}, {"value", data_}});
+    }
+    if (presentation_dirty_) {
+        changes.push_back({{"op", "replace-presentation"},
+                           {"theme", to_string(theme_)},
+                           {"layout", to_string(layout_)}});
+    }
+    for (const auto& [card_id, operation] : dirty_cards_) {
+        if (operation == DirtyOperation::remove) {
+            changes.push_back({{"op", "remove-card"}, {"card_id", card_id}});
+            continue;
+        }
+        const auto card = std::find_if(
+            cards_.begin(), cards_.end(),
+            [&card_id](const auto& item) { return item->id_ == card_id; });
+        changes.push_back(
+            {{"op", "upsert-card"}, {"value", (*card)->to_json_locked()}});
+    }
+    for (const auto& [target, operation] : dirty_components_) {
+        const auto& [card_id, component_id] = target;
+        if (operation == DirtyOperation::remove) {
+            changes.push_back({{"op", "remove-component"},
+                               {"card_id", card_id},
+                               {"component_id", component_id}});
+            continue;
+        }
+        const auto card = std::find_if(
+            cards_.begin(), cards_.end(),
+            [&card_id](const auto& item) { return item->id_ == card_id; });
+        const auto component = std::find_if(
+            (*card)->components_.begin(), (*card)->components_.end(),
+            [&component_id](const auto& item) {
+                return item->id() == component_id;
+            });
+        changes.push_back({{"op", "upsert-component"},
+                           {"card_id", card_id},
+                           {"value", (*component)->to_json_locked()}});
+    }
+
+    Json patch{{"schema_version", 1},
+               {"base_revision", published_revision_},
+               {"revision", revision_},
+               {"changes", std::move(changes)}};
+    start_dirty_tracking_locked();
+    return patch;
+}
+
+SseManager::SseManager(Model& model)
+    : model_(model),
+      publication_interval_(
+          std::chrono::ceil<Clock::duration>(kSsePublicationInterval)),
+      heartbeat_interval_(kSseHeartbeatInterval) {}
+
+SseManager::~SseManager() { stop(); }
+
+void SseManager::start() {
+    std::lock_guard<std::mutex> model_guard(model_.lock());
+    std::lock_guard<std::mutex> sse_guard(mutex_);
+    if (active_) return;
+    active_ = true;
+    previous_flush_ = Clock::now() - publication_interval_;
+    model_.sse_manager_ = this;
+    model_.start_dirty_tracking_locked();
+    thread_ = std::thread([this]() { run(); });
+}
+
+void SseManager::mark_dirty_locked() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!active_ || flush_scheduled_) return;
+    const auto now = Clock::now();
+    flush_deadline_ = std::max(now, previous_flush_ + publication_interval_);
+    flush_scheduled_ = true;
+    cv_.notify_all();
+}
+
+std::shared_ptr<const std::string> SseManager::snapshot_event_locked(
+    const Model& model) {
+    return std::make_shared<const std::string>(
+        sse_event("snapshot", model.revision_, model.snapshot_json_locked()));
+}
+
+std::shared_ptr<const std::string> SseManager::patch_event(const Json& patch) {
+    return std::make_shared<const std::string>(
+        sse_event("patch", patch["revision"].get<long>(), patch.dump()));
+}
+
+std::shared_ptr<SseManager::Subscriber> SseManager::subscribe() {
+    std::lock_guard<std::mutex> model_guard(model_.lock());
+    std::lock_guard<std::mutex> sse_guard(mutex_);
+    if (!active_ || subscribers_.size() >= kMaxSseStreams) return nullptr;
+    auto subscriber = std::make_shared<Subscriber>();
+    subscriber->pending =
+        StateEvent{snapshot_event_locked(model_), model_.revision_, true};
+    subscriber->tail_revision = model_.revision_;
+    subscribers_.insert(subscriber);
+    return subscriber;
+}
+
+void SseManager::close_locked(const std::shared_ptr<Subscriber>& subscriber) {
+    if (subscriber->closed) return;
+    subscriber->closed = true;
+    subscriber->pending.reset();
+    subscribers_.erase(subscriber);
+    cv_.notify_all();
+}
+
+void SseManager::unsubscribe(const std::shared_ptr<Subscriber>& subscriber) {
+    if (!subscriber) return;
+    std::lock_guard<std::mutex> guard(mutex_);
+    close_locked(subscriber);
+}
+
+void SseManager::enqueue_locked(const std::shared_ptr<Subscriber>& subscriber,
+                                const StateEvent& event,
+                                const StateEvent& replacement) {
+    if (subscriber->closed) return;
+    if (subscriber->pending) {
+        if (subscriber->reset_pending) {
+            close_locked(subscriber);
+            return;
+        }
+        subscriber->pending = replacement;
+        subscriber->tail_revision = replacement.revision;
+        subscriber->reset_pending = true;
+    } else {
+        subscriber->pending = event;
+        subscriber->tail_revision = event.revision;
+    }
+}
+
+void SseManager::publish_locked(const Json& patch,
+                                std::shared_ptr<const std::string> snapshot) {
+    const long base_revision = patch["base_revision"].get<long>();
+    const long revision = patch["revision"].get<long>();
+    const StateEvent patch_state{patch_event(patch), revision, false};
+    const StateEvent snapshot_state{std::move(snapshot), revision, true};
+    const std::vector<std::shared_ptr<Subscriber>> subscribers(
+        subscribers_.begin(), subscribers_.end());
+    for (const auto& subscriber : subscribers) {
+        const auto& event = subscriber->tail_revision == base_revision
+                                ? patch_state
+                                : snapshot_state;
+        enqueue_locked(subscriber, event, snapshot_state);
+    }
+    cv_.notify_all();
+}
+
+SseManager::Delivery SseManager::next(
+    const std::shared_ptr<Subscriber>& subscriber) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    const auto deadline = Clock::now() + heartbeat_interval_;
+    if (!cv_.wait_until(lock, deadline, [&]() {
+            return !active_ || subscriber->closed || subscriber->pending;
+        })) {
+        return Delivery{DeliveryKind::heartbeat, std::nullopt, false};
+    }
+    if (!active_ || subscriber->closed) {
+        return Delivery{DeliveryKind::stopped, std::nullopt, false};
+    }
+    Delivery delivery{
+        DeliveryKind::state, subscriber->pending,
+        subscriber->reset_pending && subscriber->pending->snapshot};
+    subscriber->pending.reset();
+    return delivery;
+}
+
+void SseManager::delivered(const std::shared_ptr<Subscriber>& subscriber,
+                           const Delivery& delivery, bool success) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!success) {
+        close_locked(subscriber);
+    } else if (delivery.reset) {
+        subscriber->reset_pending = false;
+    }
+}
+
+bool SseManager::write(const std::shared_ptr<Subscriber>& subscriber,
+                       const Delivery* delivery, const char* data, size_t size,
+                       const Writer& writer) {
+    const bool success = writer(data, size) == WriteResult::written;
+    if (delivery) {
+        delivered(subscriber, *delivery, success);
+    } else if (!success) {
+        unsubscribe(subscriber);
+    }
+    return success;
+}
+
+void SseManager::run() {
+    std::unique_lock<std::mutex> sse_lock(mutex_);
+    while (active_) {
+        cv_.wait(sse_lock, [this]() { return !active_ || flush_scheduled_; });
+        if (!active_) break;
+        if (cv_.wait_until(sse_lock, flush_deadline_,
+                           [this]() { return !active_; })) {
+            break;
+        }
+        if (Clock::now() < flush_deadline_) continue;
+        flush_scheduled_ = false;
+        sse_lock.unlock();
+
+        std::unique_lock<std::mutex> model_lock(model_.lock());
+        auto patch = model_.flush_dirty_targets_locked();
+        auto snapshot = patch ? snapshot_event_locked(model_) : nullptr;
+        sse_lock.lock();
+        if (active_ && patch) {
+            previous_flush_ = Clock::now();
+            publish_locked(*patch, std::move(snapshot));
+        }
+        sse_lock.unlock();
+        model_lock.unlock();
+        sse_lock.lock();
+    }
+}
+
+void SseManager::stop() noexcept {
+    {
+        std::lock_guard<std::mutex> guard(mutex_);
+        if (!active_ && !thread_.joinable()) return;
+        active_ = false;
+        flush_scheduled_ = false;
+        for (const auto& subscriber : subscribers_) {
+            subscriber->closed = true;
+            subscriber->pending.reset();
+        }
+        cv_.notify_all();
+    }
+    if (thread_.joinable()) thread_.join();
+    {
+        std::lock_guard<std::mutex> model_guard(model_.lock());
+        std::lock_guard<std::mutex> sse_guard(mutex_);
+        if (model_.sse_manager_ == this) model_.sse_manager_ = nullptr;
+        subscribers_.clear();
+    }
 }
 
 TimerState::TimerState(std::thread thread,
@@ -433,10 +792,14 @@ std::vector<Json> CommandSchema::validate(const Json& value) const {
 }
 
 DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
-                     std::filesystem::path static_root)
+                     std::filesystem::path static_root, Theme theme,
+                     Layout layout)
     : host_(std::move(host)),
       port_(port),
-      model_(std::move(title), static_root) {
+      model_(std::move(title), static_root, theme, layout),
+      sse_manager_(std::make_unique<detail::SseManager>(model_)) {
+    to_string(theme);
+    to_string(layout);
     if (model_.title_.empty()) {
         throw std::invalid_argument("DemoUiApp: title must not be empty");
     }
@@ -465,19 +828,61 @@ DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
         model_.set_static_root(canonical_root);
     }
     server_ = std::make_unique<httplib::Server>();
+    server_->new_task_queue = []() {
+        return new httplib::ThreadPool(kServerWorkers);
+    };
+    server_->set_write_timeout(5, 0);
 }
 
 DemoUiApp::~DemoUiApp() { stop(); }
 
-Card* DemoUiApp::add_card(const std::string& title) {
+Card* DemoUiApp::add_card(const std::string& title, CardArea area, int span) {
+    to_string(area);
+    detail::require_card_span(span);
     std::lock_guard<std::mutex> guard(model_.lock());
     model_.ensure_running();
+    if (area == CardArea::sidebar) {
+        for (const auto& card : model_.cards_) {
+            if (card->area() == CardArea::sidebar) {
+                throw std::invalid_argument(
+                    "DemoUiApp: at most one sidebar card is permitted");
+            }
+        }
+    }
     auto card_id = model_.next_card_id();
-    auto card = std::make_unique<Card>(model_, card_id, title);
+    auto card = std::make_unique<Card>(model_, card_id, title, area, span);
     Card* card_ptr = card.get();
     model_.cards_.push_back(std::move(card));
-    model_.bump_revision_locked();
+    model_.commit_card_locked(card_id);
     return card_ptr;
+}
+
+void DemoUiApp::set_theme(Theme theme) {
+    to_string(theme);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (theme == model_.theme_) return;
+    model_.theme_ = theme;
+    model_.commit_presentation_locked();
+}
+
+void DemoUiApp::set_layout(Layout layout) {
+    to_string(layout);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (layout == model_.layout_) return;
+    if (layout == Layout::sidebar_main) {
+        int sidebar_count = 0;
+        for (const auto& card : model_.cards_) {
+            if (card->area() == CardArea::sidebar) ++sidebar_count;
+        }
+        if (sidebar_count != 1) {
+            throw std::invalid_argument(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card");
+        }
+    }
+    model_.layout_ = layout;
+    model_.commit_presentation_locked();
 }
 
 void DemoUiApp::set_data(Json value) {
@@ -485,7 +890,7 @@ void DemoUiApp::set_data(Json value) {
     std::lock_guard<std::mutex> guard(model_.lock());
     model_.ensure_running();
     model_.data_ = std::move(value);
-    model_.bump_revision_locked();
+    model_.commit_app_data_locked();
 }
 
 void DemoUiApp::update_data(const std::vector<std::string>& path, Json value,
@@ -495,7 +900,7 @@ void DemoUiApp::update_data(const std::vector<std::string>& path, Json value,
     model_.ensure_running();
     model_.data_ = model_.update_value(model_.data_, path, std::move(value),
                                        create_missing);
-    model_.bump_revision_locked();
+    model_.commit_app_data_locked();
 }
 
 void DemoUiApp::register_command(
@@ -575,6 +980,20 @@ TimerHandle DemoUiApp::add_timer(int interval_ms,
 }
 
 void DemoUiApp::run() {
+    if (!stopped_) {
+        std::lock_guard<std::mutex> guard(model_.lock());
+        if (model_.layout_ == Layout::sidebar_main) {
+            int sidebar_count = 0;
+            for (const auto& card : model_.cards_) {
+                if (card->area() == CardArea::sidebar) ++sidebar_count;
+            }
+            if (sidebar_count != 1) {
+                throw std::invalid_argument(
+                    "DemoUiApp: sidebar-main requires exactly one sidebar "
+                    "card");
+            }
+        }
+    }
     bool expected = false;
     if (!run_started_.compare_exchange_strong(expected, true)) {
         throw std::runtime_error("DemoUiApp: run() may only be called once");
@@ -637,6 +1056,56 @@ void DemoUiApp::run() {
                      res.set_header("X-Content-Type-Options", "nosniff");
                      res.set_content(body, "application/json");
                  });
+    server_->Get("/api/events", [this](const httplib::Request&,
+                                       httplib::Response& res) {
+        auto subscriber = sse_manager_->subscribe();
+        if (!subscriber) {
+            res.status = 503;
+            res.set_header("Cache-Control", "no-store");
+            res.set_header("X-Content-Type-Options", "nosniff");
+            res.set_content("{\"error\":\"event stream capacity reached\"}",
+                            "application/json");
+            return;
+        }
+        res.status = 200;
+        res.set_header("Cache-Control", "no-cache");
+        res.set_header("X-Content-Type-Options", "nosniff");
+        auto retry_sent = std::make_shared<bool>(false);
+        auto* manager = sse_manager_.get();
+        res.set_chunked_content_provider(
+            "text/event-stream",
+            [manager, subscriber, retry_sent](size_t, httplib::DataSink& sink) {
+                const detail::SseManager::Writer writer =
+                    [&sink](const char* data, size_t size) {
+                        if (!sink.is_writable()) {
+                            return detail::SseManager::WriteResult::unwritable;
+                        }
+                        return sink.write(data, size)
+                                   ? detail::SseManager::WriteResult::written
+                                   : detail::SseManager::WriteResult::failed;
+                    };
+                if (!*retry_sent) {
+                    *retry_sent = true;
+                    return manager->write(subscriber, nullptr, kSseRetry,
+                                          sizeof(kSseRetry) - 1, writer);
+                }
+                const auto delivery = manager->next(subscriber);
+                if (delivery.kind ==
+                    detail::SseManager::DeliveryKind::stopped) {
+                    sink.done();
+                    return true;
+                }
+                if (delivery.kind ==
+                    detail::SseManager::DeliveryKind::heartbeat) {
+                    return manager->write(subscriber, nullptr, kSseHeartbeat,
+                                          sizeof(kSseHeartbeat) - 1, writer);
+                }
+                const auto& body = *delivery.event->body;
+                return manager->write(subscriber, &delivery, body.data(),
+                                      body.size(), writer);
+            },
+            [manager, subscriber](bool) { manager->unsubscribe(subscriber); });
+    });
     server_->Get("/api/command-capability", [this](const httplib::Request& req,
                                                    httplib::Response& res) {
         const auto info = ready_info();
@@ -844,6 +1313,12 @@ void DemoUiApp::run() {
     const ReadyInfo info{
         host_, bound_port,
         "http://" + display_host + ":" + std::to_string(bound_port)};
+    sse_manager_->start();
+    if (stopped_) {
+        sse_manager_->stop();
+        server_->stop();
+        return;
+    }
     {
         std::lock_guard<std::mutex> guard(readiness_mutex_);
         ready_info_ = info;
@@ -861,6 +1336,7 @@ void DemoUiApp::stop() noexcept {
     stopped_ = true;
     readiness_cv_.notify_all();
     model_.stop();
+    sse_manager_->stop();
     if (server_) server_->stop();
     {
         std::unique_lock<std::mutex> lock(command_mutex_);

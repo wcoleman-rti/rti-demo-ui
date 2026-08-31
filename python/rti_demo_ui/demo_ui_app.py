@@ -17,15 +17,30 @@ from typing import Any, Dict, Optional
 from urllib.parse import unquote
 from urllib.parse import unquote_to_bytes
 
-from aiohttp import web
+from aiohttp import ClientConnectionError, web
 
 from .components import Card
 from .commands import COMMAND_NAME, Command, CommandConfirmation, CommandSchema
-from .types import copy_json_value, require_non_empty
+from .types import (
+    CardArea,
+    Layout,
+    Theme,
+    coerce_card_area,
+    coerce_layout,
+    coerce_theme,
+    copy_json_value,
+    require_card_span,
+    require_non_empty,
+)
 
 _COMMAND_BODY_LIMIT = 64 * 1024
 _COMMAND_CAPABILITY_HEADER = "X-RTI-Demo-Command-Capability"
 _COMMAND_PATH_PREFIX = "/api/commands/"
+_SSE_HEARTBEAT_INTERVAL = 15.0
+_SSE_MAX_STREAMS = 16
+_SSE_PUBLICATION_INTERVAL = 1.0 / 30.0
+_SSE_RETRY = b"retry: 1000\n\n"
+_SSE_WRITE_TIMEOUT = 5.0
 _logger = logging.getLogger(__name__)
 
 _ASSET_ROUTES = {
@@ -65,6 +80,305 @@ class ReadyInfo:
     url: str
 
 
+def _json_bytes(payload: Any) -> bytes:
+    return json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+@dataclass(frozen=True)
+class _StateEvent:
+    body: bytes
+    revision: int
+    snapshot: bool
+
+
+class _Subscriber:
+    def __init__(self, initial: _StateEvent) -> None:
+        self.queue = asyncio.Queue(maxsize=1)
+        self.queue.put_nowait(initial)
+        self.tail_revision = initial.revision
+        self.reset_pending = False
+        self.closed = False
+
+    def take_pending(self) -> None:
+        if not self.queue.empty():
+            self.queue.get_nowait()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.take_pending()
+        self.queue.put_nowait(None)
+
+
+class _DirtyTargets:
+    _UPSERT = "upsert"
+    _REMOVE = "remove"
+
+    def __init__(self) -> None:
+        self.active = False
+        self.base_revision = 0
+        self.app_data = False
+        self.presentation = False
+        self.cards = {}
+        self.components = {}
+        self.removed_cards = set()
+        self.removed_components = set()
+
+    def start(self, revision: int) -> None:
+        self.active = True
+        self.base_revision = revision
+        self.app_data = False
+        self.presentation = False
+        self.cards.clear()
+        self.components.clear()
+
+    def empty(self) -> bool:
+        return not (self.app_data or self.presentation or self.cards or self.components)
+
+    def mark_app_data(self) -> bool:
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        self.app_data = True
+        return was_empty
+
+    def mark_presentation(self) -> bool:
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        self.presentation = True
+        return was_empty
+
+    def mark_card(self, card_id: str) -> bool:
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        if card_id in self.removed_cards:
+            raise RuntimeError(f"cannot upsert removed card target: {card_id}")
+        self.cards[card_id] = self._UPSERT
+        self.components = {
+            target: operation
+            for target, operation in self.components.items()
+            if target[0] != card_id
+        }
+        return was_empty
+
+    def mark_card_removed(self, card_id: str) -> bool:
+        was_empty = self.empty()
+        self.removed_cards.add(card_id)
+        if not self.active:
+            return False
+        self.cards[card_id] = self._REMOVE
+        self.components = {
+            target: operation
+            for target, operation in self.components.items()
+            if target[0] != card_id
+        }
+        return was_empty
+
+    def mark_component(self, card_id: str, component_id: str) -> bool:
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        if card_id in self.removed_cards:
+            raise RuntimeError(
+                f"cannot upsert component in removed card target: {card_id}"
+            )
+        target = (card_id, component_id)
+        if target in self.removed_components:
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        if card_id not in self.cards:
+            self.components[target] = self._UPSERT
+        return self.active and was_empty and not self.empty()
+
+    def mark_component_removed(self, card_id: str, component_id: str) -> bool:
+        was_empty = self.empty()
+        self.removed_components.add((card_id, component_id))
+        if not self.active:
+            return False
+        if card_id not in self.cards:
+            self.components[(card_id, component_id)] = self._REMOVE
+        return was_empty and not self.empty()
+
+    def flush(self, model) -> Optional[dict]:
+        if not self.active or not (
+            self.app_data or self.presentation or self.cards or self.components
+        ):
+            return None
+        changes = []
+        if self.app_data:
+            changes.append(
+                {
+                    "op": "replace-app-data",
+                    "value": copy_json_value(model.data, "DemoUiApp: "),
+                }
+            )
+        if self.presentation:
+            changes.append(
+                {
+                    "op": "replace-presentation",
+                    "theme": model.theme.value,
+                    "layout": model.layout.value,
+                }
+            )
+        cards_by_id = {card.id: card for card in model.cards}
+        for card_id, operation in sorted(self.cards.items()):
+            if operation == self._REMOVE:
+                changes.append({"op": "remove-card", "card_id": card_id})
+            else:
+                changes.append(
+                    {
+                        "op": "upsert-card",
+                        "value": cards_by_id[card_id].to_dict(),
+                    }
+                )
+        for (card_id, component_id), operation in sorted(self.components.items()):
+            if operation == self._REMOVE:
+                changes.append(
+                    {
+                        "op": "remove-component",
+                        "card_id": card_id,
+                        "component_id": component_id,
+                    }
+                )
+                continue
+            card = cards_by_id[card_id]
+            component = next(
+                item for item in card._components if item.id == component_id
+            )
+            changes.append(
+                {
+                    "op": "upsert-component",
+                    "card_id": card_id,
+                    "value": component.to_dict(),
+                }
+            )
+        patch = {
+            "schema_version": 1,
+            "base_revision": self.base_revision,
+            "revision": model.revision,
+            "changes": changes,
+        }
+        self.start(model.revision)
+        return patch
+
+
+class _EventBroadcaster:
+    def __init__(self, model) -> None:
+        self._model = model
+        self._loop = None
+        self._active = False
+        self._flush_handle = None
+        self._previous_flush = 0.0
+        self._subscribers = set()
+        self.publication_interval = _SSE_PUBLICATION_INTERVAL
+        self.heartbeat_interval = _SSE_HEARTBEAT_INTERVAL
+        self.write_timeout = _SSE_WRITE_TIMEOUT
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
+
+    def start(self, loop) -> None:
+        self._loop = loop
+        self._active = True
+        self._previous_flush = loop.time() - self.publication_interval
+        self._model.start_dirty_tracking_locked(self.mark_dirty)
+
+    def mark_dirty(self) -> None:
+        if not self._active or self._flush_handle is not None:
+            return
+        deadline = max(
+            self._loop.time(), self._previous_flush + self.publication_interval
+        )
+        self._flush_handle = self._loop.call_at(deadline, self._flush)
+
+    def _snapshot_event(self) -> _StateEvent:
+        snapshot = self._model.snapshot()
+        return _StateEvent(_sse_event("snapshot", snapshot), snapshot["revision"], True)
+
+    def subscribe(self) -> Optional[_Subscriber]:
+        if not self._active or len(self._subscribers) >= _SSE_MAX_STREAMS:
+            return None
+        subscriber = _Subscriber(self._snapshot_event())
+        self._subscribers.add(subscriber)
+        return subscriber
+
+    def unsubscribe(self, subscriber: _Subscriber) -> None:
+        self._subscribers.discard(subscriber)
+        subscriber.close()
+
+    def _enqueue(
+        self, subscriber: _Subscriber, event: _StateEvent, snapshot_event
+    ) -> None:
+        if subscriber.closed:
+            self._subscribers.discard(subscriber)
+            return
+        if subscriber.queue.full():
+            if subscriber.reset_pending:
+                self.unsubscribe(subscriber)
+                return
+            subscriber.take_pending()
+            event = snapshot_event()
+            subscriber.reset_pending = True
+        subscriber.queue.put_nowait(event)
+        subscriber.tail_revision = event.revision
+
+    def _publish(self, patch: dict) -> None:
+        patch_event = _StateEvent(_sse_event("patch", patch), patch["revision"], False)
+        replacement = None
+
+        def snapshot_event():
+            nonlocal replacement
+            if replacement is None:
+                replacement = self._snapshot_event()
+            return replacement
+
+        for subscriber in tuple(self._subscribers):
+            event = patch_event
+            if subscriber.tail_revision != patch["base_revision"]:
+                event = snapshot_event()
+            self._enqueue(subscriber, event, snapshot_event)
+
+    def _flush(self) -> None:
+        self._flush_handle = None
+        if not self._active:
+            return
+        patch = self._model.flush_dirty_targets_locked()
+        if patch is None:
+            return
+        self._previous_flush = self._loop.time()
+        self._publish(patch)
+
+    def stop(self) -> None:
+        if not self._active:
+            return
+        self._active = False
+        if self._flush_handle is not None:
+            self._flush_handle.cancel()
+            self._flush_handle = None
+        for subscriber in tuple(self._subscribers):
+            self.unsubscribe(subscriber)
+
+
+def _sse_event(event: str, payload: dict) -> bytes:
+    revision = payload["revision"]
+    return (
+        f"event: {event}\nid: {revision}\ndata: ".encode("utf-8")
+        + _json_bytes(payload)
+        + b"\n\n"
+    )
+
+
 def _load_assets() -> Dict[str, bytes]:
     assets = {}
     asset_package = resources.files("rti_demo_ui").joinpath("_assets")
@@ -80,7 +394,7 @@ def _load_assets() -> Dict[str, bytes]:
 
 
 def _json_response(status: int, payload: dict) -> web.Response:
-    body = json.dumps(payload, allow_nan=False).encode("utf-8")
+    body = _json_bytes(payload)
     return web.Response(
         status=status,
         body=body,
@@ -123,9 +437,17 @@ def _static_not_found_response() -> web.Response:
 class _Model:
     """Internal model state shared by DemoUiApp, Card, and Scene2DViewport."""
 
-    def __init__(self, title: str, static_root: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        static_root: Optional[Path] = None,
+        theme=Theme.dark,
+        layout=Layout.auto,
+    ) -> None:
         self.title = title
         self.static_root = static_root
+        self.theme = theme
+        self.layout = layout
         self.revision = 0
         self.cards = []
         self._running = True
@@ -134,6 +456,8 @@ class _Model:
         self._next_card_id = 1
         self._next_component_ids = {}
         self.data: Any = {}
+        self._dirty_targets = _DirtyTargets()
+        self._dirty_callback = None
 
     def set_owner(self, loop) -> None:
         self._owner_loop = loop
@@ -164,8 +488,64 @@ class _Model:
     def stop(self) -> None:
         self._running = False
 
-    def bump_revision_locked(self) -> None:
+    def start_dirty_tracking_locked(self, callback=None) -> None:
+        self._dirty_targets.start(self.revision)
+        self._dirty_callback = callback
+
+    def commit_app_data_locked(self) -> None:
         self.revision += 1
+        if self._dirty_targets.mark_app_data() and self._dirty_callback is not None:
+            self._dirty_callback()
+
+    def commit_presentation_locked(self) -> None:
+        self.revision += 1
+        if self._dirty_targets.mark_presentation() and self._dirty_callback is not None:
+            self._dirty_callback()
+
+    def commit_card_locked(self, card_id: str) -> None:
+        if card_id in self._dirty_targets.removed_cards:
+            raise RuntimeError(f"cannot upsert removed card target: {card_id}")
+        self.revision += 1
+        if self._dirty_targets.mark_card(card_id) and self._dirty_callback is not None:
+            self._dirty_callback()
+
+    def commit_card_removal_locked(self, card_id: str) -> None:
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_card_removed(card_id)
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
+    def commit_component_locked(self, card_id: str, component_id: str) -> None:
+        if (
+            card_id in self._dirty_targets.removed_cards
+            or (
+                card_id,
+                component_id,
+            )
+            in self._dirty_targets.removed_components
+        ):
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_component(card_id, component_id)
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
+    def commit_component_removal_locked(self, card_id: str, component_id: str) -> None:
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_component_removed(card_id, component_id)
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
+    def flush_dirty_targets_locked(self) -> Optional[dict]:
+        return self._dirty_targets.flush(self)
 
     def next_card_id(self) -> str:
         card_id = f"card-{self._next_card_id}"
@@ -215,6 +595,8 @@ class _Model:
             "schema_version": 2,
             "revision": self.revision,
             "title": self.title,
+            "theme": self.theme.value,
+            "layout": self.layout.value,
             "data": copy_json_value(self.data, "DemoUiApp: "),
             "cards": [card.to_dict() for card in self.cards],
         }
@@ -235,13 +617,18 @@ class DemoUiApp:
         port: int = 0,
         host: str = "127.0.0.1",
         static_root: str | os.PathLike[str] | None = None,
+        *,
+        theme=Theme.dark,
+        layout=Layout.auto,
     ) -> None:
         require_non_empty(title, "title", "DemoUiApp: ")
         require_non_empty(host, "host", "DemoUiApp: ")
+        theme = coerce_theme(theme)
+        layout = coerce_layout(layout)
         if not (0 <= port <= 65535):
             raise ValueError("DemoUiApp: port must be between 0 and 65535")
         self._static_root = self._canonical_static_root(static_root)
-        self._model = _Model(title, self._static_root)
+        self._model = _Model(title, self._static_root, theme, layout)
         self._assets = _load_assets()
         self._host = host
         self._port = port
@@ -261,6 +648,7 @@ class DemoUiApp:
         self._active_commands = set()
         self._commands_done = asyncio.Event()
         self._commands_done.set()
+        self._events = _EventBroadcaster(self._model)
 
     @staticmethod
     def _canonical_static_root(
@@ -449,6 +837,10 @@ class DemoUiApp:
 
     async def _handle_request(self, request: web.Request) -> web.StreamResponse:
         path = request.raw_path.split("?", 1)[0]
+        if path == "/api/events":
+            if request.method != "GET":
+                return _json_response(405, {"error": "method not allowed"})
+            return await self._handle_events(request)
         if path == "/api/command-capability":
             if request.method != "GET":
                 return _json_response(405, {"error": "method not allowed"})
@@ -475,6 +867,69 @@ class DemoUiApp:
             return self._static_response(path)
         return _json_response(404, {"error": "not found"})
 
+    async def _write_sse(
+        self, request: web.Request, response: web.StreamResponse, body: bytes
+    ) -> bool:
+        transport = request.transport
+        if transport is None or transport.is_closing():
+            return False
+        try:
+            await asyncio.wait_for(
+                response.write(body), timeout=self._events.write_timeout
+            )
+        except (
+            ClientConnectionError,
+            ConnectionResetError,
+            BrokenPipeError,
+            asyncio.TimeoutError,
+        ):
+            return False
+        return True
+
+    async def _handle_events(self, request: web.Request) -> web.StreamResponse:
+        subscriber = self._events.subscribe()
+        if subscriber is None:
+            return _json_response(503, {"error": "event stream capacity reached"})
+        response = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+        response.enable_chunked_encoding()
+        prepared = False
+        try:
+            await response.prepare(request)
+            prepared = True
+            if not await self._write_sse(request, response, _SSE_RETRY):
+                return response
+            while True:
+                try:
+                    event = await asyncio.wait_for(
+                        subscriber.queue.get(),
+                        timeout=self._events.heartbeat_interval,
+                    )
+                except asyncio.TimeoutError:
+                    if not await self._write_sse(request, response, b": heartbeat\n\n"):
+                        break
+                    continue
+                if event is None:
+                    break
+                completing_reset = event.snapshot and subscriber.reset_pending
+                if not await self._write_sse(request, response, event.body):
+                    break
+                if completing_reset:
+                    subscriber.reset_pending = False
+        except (ClientConnectionError, ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            self._events.unsubscribe(subscriber)
+            if prepared:
+                response.force_close()
+        return response
+
     def _static_response(self, path: str) -> web.StreamResponse:
         asset = self._resolve_static_asset(path)
         if asset is None:
@@ -500,6 +955,7 @@ class DemoUiApp:
 
     async def _cleanup_impl(self) -> None:
         try:
+            self._events.stop()
             if self._active_commands:
                 await self._commands_done.wait()
             if self._runner is not None:
@@ -527,6 +983,7 @@ class DemoUiApp:
             self._state = self._STOPPED
         elif self._state in (self._STARTING, self._RUNNING):
             self._model.stop()
+            self._events.stop()
             self._state = self._STOPPING
             if self._shutdown_event is not None:
                 self._shutdown_event.set()
@@ -536,14 +993,45 @@ class DemoUiApp:
         if self._cleanup_complete is not None and self._state != self._STOPPED:
             await self._cleanup_complete.wait()
 
-    def add_card(self, title: str) -> Card:
+    def add_card(self, title: str, area=CardArea.main, span: int = 1) -> Card:
+        area = coerce_card_area(area)
+        require_card_span(span)
         self._model.check_owner()
         self._model.ensure_running()
+        if area == CardArea.sidebar and any(
+            card.area == CardArea.sidebar for card in self._model.cards
+        ):
+            raise ValueError("DemoUiApp: at most one sidebar card is permitted")
         card_id = self._model.next_card_id()
-        card = Card(self._model, card_id, title)
+        card = Card(self._model, card_id, title, area, span)
         self._model.cards.append(card)
-        self._model.bump_revision_locked()
+        self._model.commit_card_locked(card_id)
         return card
+
+    def set_theme(self, theme) -> None:
+        theme = coerce_theme(theme)
+        self._model.check_owner()
+        self._model.ensure_running()
+        if theme == self._model.theme:
+            return
+        self._model.theme = theme
+        self._model.commit_presentation_locked()
+
+    def set_layout(self, layout) -> None:
+        layout = coerce_layout(layout)
+        self._model.check_owner()
+        self._model.ensure_running()
+        if layout == self._model.layout:
+            return
+        if (
+            layout == Layout.sidebar_main
+            and sum(card.area == CardArea.sidebar for card in self._model.cards) != 1
+        ):
+            raise ValueError(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card"
+            )
+        self._model.layout = layout
+        self._model.commit_presentation_locked()
 
     def set_data(self, value) -> None:
         self._model.check_owner()
@@ -551,7 +1039,7 @@ class DemoUiApp:
         from .types import copy_json_value
 
         self._model.data = copy_json_value(value, "DemoUiApp: ")
-        self._model.bump_revision_locked()
+        self._model.commit_app_data_locked()
 
     def update_data(self, path, value, create_missing=False) -> None:
         self._model.check_owner()
@@ -559,7 +1047,7 @@ class DemoUiApp:
         self._model.data = self._model.update_value(
             self._model.data, path, value, create_missing
         )
-        self._model.bump_revision_locked()
+        self._model.commit_app_data_locked()
 
     @property
     def ready_info(self) -> Optional[ReadyInfo]:
@@ -595,9 +1083,17 @@ class DemoUiApp:
         loop = asyncio.get_running_loop()
         if self._run_started:
             raise RuntimeError("DemoUiApp: run() may only be called once")
-        self._run_started = True
         if self._state == self._STOPPED:
+            self._run_started = True
             return
+        if (
+            self._model.layout == Layout.sidebar_main
+            and sum(card.area == CardArea.sidebar for card in self._model.cards) != 1
+        ):
+            raise ValueError(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card"
+            )
+        self._run_started = True
         self._owner_loop = loop
         self._owner_thread_id = threading.get_ident()
         self._model.set_owner(loop)
@@ -620,6 +1116,7 @@ class DemoUiApp:
             self._ready_info = ReadyInfo(
                 self._host, actual_port, f"http://{display_host}:{actual_port}"
             )
+            self._events.start(loop)
             self._state = self._RUNNING
             self._ready_event.set()
             print(f"RTI Demo UI listening on {self._ready_info.url}/")
