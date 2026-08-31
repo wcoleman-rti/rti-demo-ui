@@ -87,10 +87,11 @@ jobs:
       - name: Build C++ native host
         run: |
           cmake -S native/cpp \
-            -B build/native-phase1 \
+            -B build/native-phase2 \
             -DBUILD_TESTING=ON \
+            -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON \
             -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
-          cmake --build build/native-phase1 --parallel
+          cmake --build build/native-phase2 --parallel
           cmake -S tools/native_webview_spike \
             -B build/native-webview-spike-real \
             -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
@@ -102,7 +103,7 @@ jobs:
         run: |
           PYTHONPATH=python:native/python/src \
             python -m pytest native/python/tests -q
-          ctest --test-dir build/native-phase1 \
+          ctest --test-dir build/native-phase2 \
             --output-on-failure \
             -LE real_engine
           PYTHONPATH=tools/native_webview_spike \
@@ -126,10 +127,11 @@ jobs:
             bash -euo pipefail <<'SCRIPT'
           work="$RUNNER_TEMP/native-webview-spike"
           cpp_host="./build/native-webview-spike-real/native_webview_cpp_host"
+          production_cpp="./build/native-phase2/tests/rti_demo_ui_native_real_conformance"
           rm -rf "$work"
           mkdir -p "$work"
 
-          XDG_DATA_HOME="$work/phase1-python-profile" \
+          XDG_DATA_HOME="$work/phase2-python-smoke" \
             timeout 40s python - <<'PY'
           import asyncio
 
@@ -140,15 +142,59 @@ jobs:
               await asyncio.sleep(0.5)
 
           run_native(
-              DemoUiApp("Native Phase 1 Python smoke"),
-              application_id="org.rti.phase1-smoke",
+              DemoUiApp("Native Phase 2 Python smoke"),
+              application_id="org.rti.phase2-smoke",
               async_main=close_after_start,
           )
           PY
-          XDG_DATA_HOME="$work/phase1-cpp-profile" \
-            ctest --test-dir build/native-phase1 \
+          XDG_DATA_HOME="$work/phase2-python-signal" \
+            timeout --kill-after=5s --preserve-status --signal=INT 4s \
+            python - <<'PY'
+          from rti_demo_ui import DemoUiApp
+          from rti_demo_ui_native import run_native
+
+          run_native(
+              DemoUiApp("Native Phase 2 Python signal smoke"),
+              application_id="org.rti.phase2-signal",
+          )
+          PY
+          XDG_DATA_HOME="$work/phase2-cpp-signal" \
+            ctest --test-dir build/native-phase2 \
               --output-on-failure \
               -L real_engine
+
+          XDG_DATA_HOME="$work/production-python" \
+            timeout 40s python native/python/tests/real_conformance.py \
+              --application-id org.rti.phase2.same \
+              --expected __absent__ \
+              --write first \
+              --static-root tools/native_webview_spike/conformance \
+              | tee "$work/production-python-a1.log"
+          XDG_DATA_HOME="$work/production-python" \
+            timeout 40s python native/python/tests/real_conformance.py \
+              --application-id org.rti.phase2.same \
+              --expected first \
+              --write second \
+              --static-root tools/native_webview_spike/conformance \
+              | tee "$work/production-python-a2.log"
+          XDG_DATA_HOME="$work/production-python" \
+            timeout 40s python native/python/tests/real_conformance.py \
+              --application-id org.rti.phase2.isolated \
+              --expected __absent__ \
+              --write isolated \
+              --static-root tools/native_webview_spike/conformance \
+              | tee "$work/production-python-b1.log"
+
+          XDG_DATA_HOME="$work/production-cpp" \
+            timeout 40s "$production_cpp" __absent__ first \
+              | tee "$work/production-cpp-a1.log"
+          XDG_DATA_HOME="$work/production-cpp" \
+            timeout 40s "$production_cpp" first second \
+              | tee "$work/production-cpp-a2.log"
+          cp "$production_cpp" "$work/production_cpp_isolated"
+          XDG_DATA_HOME="$work/production-cpp" \
+            timeout 40s "$work/production_cpp_isolated" __absent__ isolated \
+              | tee "$work/production-cpp-b1.log"
 
           timeout 40s python tools/native_webview_spike/python_host.py \
             --timeout 20 \

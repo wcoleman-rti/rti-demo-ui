@@ -7,12 +7,14 @@ import importlib
 import os
 import queue
 import re
+import signal
 import sys
 import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
+from urllib.parse import urlsplit
 
 from rti_demo_ui import DemoUiApp
 
@@ -65,6 +67,7 @@ class _PyWebviewHost:
         self._close_requested = threading.Event()
         self._close_error: list[BaseException] = []
         self._devtools = False
+        self._allowed_origin = ""
 
     def create(
         self,
@@ -76,6 +79,8 @@ class _PyWebviewHost:
         devtools: bool,
     ) -> None:
         self._devtools = devtools
+        self._allowed_origin = _origin(url)
+        self._webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
         self._window = self._webview.create_window(
             title,
             url,
@@ -83,6 +88,37 @@ class _PyWebviewHost:
             height=height,
             resizable=True,
         )
+        self._window.events.before_show += self._install_navigation_policy
+
+    def _install_navigation_policy(self) -> None:
+        def find_webview(widget):
+            if widget.__gtype__.name == "WebKitWebView":
+                return widget
+            get_children = getattr(widget, "get_children", None)
+            if get_children is not None:
+                for child in get_children():
+                    if (found := find_webview(child)) is not None:
+                        return found
+            return None
+
+        browser = find_webview(self._window.native)
+        if browser is None:
+            raise NativeWebviewError(
+                "WebKitWebView native child was not found; verify pywebview "
+                "6.2.1 is using the GTK backend"
+            )
+
+        def block_external_navigation(_browser, decision, _decision_type):
+            get_action = getattr(decision, "get_navigation_action", None)
+            if get_action is None:
+                return False
+            uri = get_action().get_request().get_uri()
+            if _same_origin(uri, self._allowed_origin):
+                return False
+            decision.ignore()
+            return True
+
+        browser.connect("decide-policy", block_external_navigation)
 
     def _on_started(self) -> None:
         self._started.set()
@@ -111,6 +147,20 @@ class _PyWebviewHost:
         )
         if self._close_error:
             raise self._close_error[0]
+
+
+def _origin(url: str) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme != "http" or not parsed.netloc:
+        raise NativeWebviewError("native window URL must be an HTTP loopback origin")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _same_origin(url: str, allowed_origin: str) -> bool:
+    try:
+        return _origin(url) == allowed_origin
+    except NativeWebviewError:
+        return False
 
 
 def _profile_path(application_id: str) -> Path:
@@ -208,6 +258,26 @@ def _run_with_host(
     shutdown_requested = threading.Event()
     owner_errors: list[BaseException] = []
     application_errors: list[BaseException] = []
+    signal_requested = threading.Event()
+    signal_watcher_stop = threading.Event()
+    previous_handlers = {}
+
+    def request_signal_shutdown(_signum, _frame) -> None:
+        signal_requested.set()
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.signal(signum, request_signal_shutdown)
+
+    def watch_signals() -> None:
+        while not signal_watcher_stop.wait(0.05):
+            if signal_requested.is_set():
+                host.request_close()
+                return
+
+    signal_watcher = threading.Thread(
+        target=watch_signals, name="rti-demo-ui-native-signal"
+    )
+    signal_watcher.start()
 
     async def owner() -> None:
         run_task = asyncio.create_task(app.run())
@@ -308,10 +378,18 @@ def _run_with_host(
             except BaseException as error:
                 owner_errors.append(error)
             owner_thread.join(timeout)
+        signal_watcher_stop.set()
+        signal_watcher.join(timeout)
+        for signum, previous_handler in previous_handlers.items():
+            signal.signal(signum, previous_handler)
 
     if owner_thread.is_alive():
         raise NativeWebviewError(
             "native shutdown timed out while joining the app owner thread"
+        )
+    if signal_watcher.is_alive():
+        raise NativeWebviewError(
+            "native shutdown timed out while joining the signal watcher"
         )
     if application_errors:
         raise application_errors[0]

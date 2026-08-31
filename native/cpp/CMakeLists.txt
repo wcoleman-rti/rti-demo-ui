@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS
        "Build real native-window smoke coverage" OFF)
+option(RTI_DEMO_NATIVE_BUILD_EXAMPLES
+       "Build native companion examples" OFF)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR
@@ -64,4 +66,7 @@ add_library(
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(tests)
+endif()
+if(RTI_DEMO_NATIVE_BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif()

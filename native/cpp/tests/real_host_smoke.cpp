@@ -1,6 +1,7 @@
 #include <rti_demo_ui_native/native_webview.hpp>
 
 #include <chrono>
+#include <csignal>
 #include <exception>
 #include <iostream>
 #include <thread>
@@ -26,7 +27,7 @@ int main() {
     std::thread stopper([&]() {
         app.wait_until_ready();
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        app.stop();
+        std::raise(SIGINT);
     });
     try {
         rti::demo::ui::native::run(app);

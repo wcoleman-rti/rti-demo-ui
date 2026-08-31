@@ -1,4 +1,5 @@
 const results = {};
+let initialSnapshot;
 
 async function check(name, operation) {
     try {
@@ -15,6 +16,7 @@ await check('snapshot', async () => {
     if (!response.ok || snapshot.schema_version !== 2) {
         throw new Error(`status=${response.status} schema=${snapshot.schema_version}`);
     }
+    initialSnapshot = snapshot;
     return `status=${response.status} schema=${snapshot.schema_version}`;
 });
 
@@ -99,9 +101,12 @@ await check('theme_asset', () => new Promise((resolve, reject) => {
 
 await check('persistent_storage', async () => {
     const parameters = new URLSearchParams(location.search);
-    const key = parameters.get('storage_key');
-    const expected = parameters.get('storage_expected');
-    const write = parameters.get('storage_write');
+    const key = parameters.get('storage_key')
+        ?? initialSnapshot?.data?.native_storage_key;
+    const expected = parameters.get('storage_expected')
+        ?? initialSnapshot?.data?.native_storage_expected;
+    const write = parameters.get('storage_write')
+        ?? initialSnapshot?.data?.native_storage_write;
     if (!key || expected === null || write === null) {
         throw new Error('storage_key, storage_expected, and storage_write are required');
     }
@@ -172,13 +177,28 @@ await check('resize_observation', async () => {
 
 await check('navigation_policy', () => new Promise((resolve, reject) => {
     const original = location.href;
-    location.assign('https://example.invalid/rti-demo-ui-native-navigation-probe');
+    const popup = window.open(
+        'https://example.invalid/rti-demo-ui-native-new-window-probe',
+        '_blank',
+    );
     setTimeout(() => {
+        if (popup !== null) {
+            popup.close();
+            reject(new Error('external new-window navigation returned a window'));
+            return;
+        }
         if (location.href !== original) {
             reject(new Error(`external navigation was not blocked: ${location.href}`));
             return;
         }
-        resolve(`blocked external navigation from ${location.origin}`);
+        location.assign('https://example.invalid/rti-demo-ui-native-navigation-probe');
+        setTimeout(() => {
+            if (location.href !== original) {
+                reject(new Error(`external navigation was not blocked: ${location.href}`));
+                return;
+            }
+            resolve(`blocked external and new-window navigation from ${location.origin}`);
+        }, 750);
     }, 750);
 }));
 

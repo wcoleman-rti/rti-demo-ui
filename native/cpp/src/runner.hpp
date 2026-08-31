@@ -18,5 +18,7 @@ class WindowHost {
 
 void run_with_host(DemoUiApp& app, const NativeWindowOptions& options,
                    WindowHost& host);
+void run_with_signals(DemoUiApp& app, const NativeWindowOptions& options,
+                      WindowHost& host);
 
 }  // namespace rti::demo::ui::native::detail

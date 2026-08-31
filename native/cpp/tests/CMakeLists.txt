@@ -21,4 +21,14 @@ if(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS)
     set_tests_properties(
         native_real_engine_smoke PROPERTIES LABELS real_engine TIMEOUT 30
     )
+
+    add_executable(rti_demo_ui_native_real_conformance real_conformance.cpp)
+    target_compile_definitions(
+        rti_demo_ui_native_real_conformance PRIVATE
+        NATIVE_CONFORMANCE_STATIC_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/native_webview_spike/conformance"
+    )
+    target_link_libraries(
+        rti_demo_ui_native_real_conformance PRIVATE
+        rti_demo_ui_native::native_webview
+    )
 endif()

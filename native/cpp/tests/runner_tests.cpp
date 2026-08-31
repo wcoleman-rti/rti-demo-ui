@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <condition_variable>
 #include <cstdio>
 #include <mutex>
@@ -187,6 +188,20 @@ void test_server_stop_closes_window() {
     CHECK(port_is_released(host.url));
 }
 
+void test_signal_closes_window() {
+    DemoUiApp app("Signal close");
+    FakeWindowHost host;
+    std::thread interrupter([&]() {
+        CHECK(host.wait_until_created());
+        std::raise(SIGINT);
+    });
+    native_detail::run_with_signals(app, {}, host);
+    interrupter.join();
+
+    CHECK(host.close_requested());
+    CHECK(port_is_released(host.url));
+}
+
 void test_validation() {
     {
         DemoUiApp app("Width");
@@ -225,6 +240,7 @@ int main() {
     test_window_failure_cleans_up();
     test_bind_failure_does_not_create_window();
     test_server_stop_closes_window();
+    test_signal_closes_window();
     test_validation();
     test_app_is_single_use();
     return failures == 0 ? 0 : 1;

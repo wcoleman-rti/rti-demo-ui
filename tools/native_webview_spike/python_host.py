@@ -64,6 +64,7 @@ def main() -> int:
 
     import webview
 
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     root = Path(__file__).resolve().parent / "conformance"
     report_event = threading.Event()
     signal_event = threading.Event()

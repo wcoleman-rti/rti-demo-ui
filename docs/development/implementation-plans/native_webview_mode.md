@@ -2,10 +2,10 @@
 
 ## Status
 
-Phase 0 and Phase 1 completed on 2026-08-31. Linux Python and C++ passed the
-technology gates, and the independently packaged runner cores now provide the
-planned synchronous APIs with managed server ownership and failure cleanup.
-Phase 2 may proceed as Linux-first work; macOS and Windows remain unsupported.
+Phase 0, Phase 1, and Phase 2 completed on 2026-08-31. Linux Python and C++
+passed the technology gates, and the independently packaged runners now
+provide managed lifecycle and supported-platform integration. Phase 3 may
+proceed as Linux-first work; macOS and Windows remain unsupported.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -431,6 +431,112 @@ LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- \
   signal coordination for each supported platform.
 - Add examples using the same application model in browser and native modes.
 - Verify built-in, custom, and adapter-provided frontends.
+
+#### Phase 2 Result (2026-08-31)
+
+Phase 2 is complete for the supported Linux Python and C++ combinations.
+Production runners now block top-level navigation and new-window actions
+outside the exact dynamically bound loopback origin. Python installs the
+WebKitGTK policy synchronously during pywebview's `before_show`; C++ installs
+the WebKitGTK `decide-policy` handler through webview's public browser
+controller before initial navigation. Neither runner exposes a privileged
+JavaScript-native bridge.
+
+Both runners coordinate `SIGINT` and `SIGTERM` without performing window or
+server operations in the signal handler. Python handlers only set a
+`threading.Event`; C++ handlers only update `volatile std::sig_atomic_t`.
+Managed watcher threads request window closure, all server/owner contexts are
+joined, and previous handlers are restored on exit. Fake-host and real-engine
+SIGINT tests pass.
+
+The C++ production adapter now configures WebKitGTK's supported SQLite cookie
+store under
+`$XDG_DATA_HOME/rti-demo-ui-native/<executable-filename>/cookies.sqlite`, or
+the corresponding GLib user-data directory when `XDG_DATA_HOME` is unset.
+The executable filename is the packaged application identity. Moving an
+executable without renaming it retains the profile; renaming it selects a new
+profile. Packagers must therefore assign distinct executable filenames to
+applications that require isolated state. Python continues to use the
+required reverse-DNS `application_id` under its documented user-data root.
+
+The shared custom conformance frontend now obtains storage probe settings from
+application data when URL parameters are absent, allowing the unmodified
+production runner APIs to test dynamic-port persistence. Production Python
+and C++ hosts passed snapshot/SSE, command Origin, dynamic adapter and runtime
+imports, module workers, themes, Canvas, WebGL, keyboard focus, resize
+observation, external-navigation blocking, and cookie storage. Two sequential
+runs under one identity reused a cookie across different dynamic ports; a
+distinct Python application ID and a distinctly named C++ executable remained
+isolated. Existing built-in frontend real-engine smoke tests also pass.
+
+Dual-mode Python and C++ examples construct one model and select browser or
+native execution. Browser mode remains the Python default; the C++ native
+example is excluded unless `RTI_DEMO_NATIVE_BUILD_EXAMPLES=ON`, so the core
+example graph performs no native dependency discovery.
+
+Phase 2 verification commands:
+
+```bash
+PYTHONPATH=python:native/python/src \
+  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  -m pytest tests/py native/python/tests -q
+
+cmake -S native/cpp -B build/native-phase2 \
+  -DBUILD_TESTING=ON \
+  -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON \
+  -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
+cmake --build build/native-phase2 --parallel
+ctest --test-dir build/native-phase2 --output-on-failure -LE real_engine
+
+LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- \
+  xvfb-run -a -s "-screen 0 1440x900x24" \
+  ctest --test-dir build/native-phase2 --output-on-failure -L real_engine
+
+LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- \
+  xvfb-run -a -s "-screen 0 1440x900x24" \
+  bash -euo pipefail <<'SCRIPT'
+rm -rf /tmp/rti-demo-ui-phase2-production
+mkdir -p /tmp/rti-demo-ui-phase2-production
+export XDG_DATA_HOME=/tmp/rti-demo-ui-phase2-production/python-data
+PYTHONPATH=python:native/python/src \
+  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  native/python/tests/real_conformance.py \
+  --application-id org.rti.phase2.same --expected __absent__ --write first \
+  --static-root tools/native_webview_spike/conformance
+PYTHONPATH=python:native/python/src \
+  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  native/python/tests/real_conformance.py \
+  --application-id org.rti.phase2.same --expected first --write second \
+  --static-root tools/native_webview_spike/conformance
+PYTHONPATH=python:native/python/src \
+  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  native/python/tests/real_conformance.py \
+  --application-id org.rti.phase2.isolated \
+  --expected __absent__ --write isolated \
+  --static-root tools/native_webview_spike/conformance
+
+export XDG_DATA_HOME=/tmp/rti-demo-ui-phase2-production/cpp-data
+production_cpp=./build/native-phase2/tests/rti_demo_ui_native_real_conformance
+"$production_cpp" __absent__ first
+"$production_cpp" first second
+cp "$production_cpp" \
+  /tmp/rti-demo-ui-phase2-production/real_conformance_isolated
+/tmp/rti-demo-ui-phase2-production/real_conformance_isolated \
+  __absent__ isolated
+SCRIPT
+
+RTI_DEMO_CPP_ARM3D="$PWD/build/phase2-full/cpp/examples/rti_demo_ui_arm3d" \
+  PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  -m pytest tests/browser -q
+
+/tmp/rti-demo-ui-native-spike-venv/bin/python -m pip wheel \
+  --no-deps --wheel-dir /tmp/rti-demo-ui-phase2-wheel native/python
+
+cmake -S cpp -B build/phase2-core-isolation -DBUILD_TESTING=OFF
+cmake --build build/phase2-core-isolation --parallel
+sha256sum --check assets/runtime3d.sha256
+/tmp/rti-demo-ui-native-spike-venv/bin/pre-commit run --all-files
+```
 
 ### Phase 3: Documentation and Release
 

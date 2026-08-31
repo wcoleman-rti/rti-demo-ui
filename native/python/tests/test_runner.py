@@ -1,17 +1,25 @@
 import asyncio
+import os
+import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from rti_demo_ui import DemoUiApp
 from rti_demo_ui_native import NativeWebviewError
 from rti_demo_ui_native import runner
-from rti_demo_ui_native.runner import _load_pywebview, _run_native
+from rti_demo_ui_native.runner import (
+    _load_pywebview,
+    _origin,
+    _run_native,
+    _same_origin,
+)
 
 
 class FakeWindowHost:
@@ -157,6 +165,39 @@ def test_run_native_requires_main_thread():
     assert "main thread" in str(errors[0])
 
 
+def test_navigation_origin_is_exact():
+    origin = _origin("http://127.0.0.1:42000/")
+    assert _same_origin("http://127.0.0.1:42000/dashboard", origin)
+    assert _same_origin("http://127.0.0.1:42000/?view=main", origin)
+    assert not _same_origin("http://127.0.0.1:42001/", origin)
+    assert not _same_origin("http://localhost:42000/", origin)
+    assert not _same_origin("https://example.invalid/", origin)
+    assert not _same_origin("about:blank", origin)
+
+
+def test_pywebview_external_browser_navigation_is_disabled(tmp_path):
+    class EventHook:
+        def __iadd__(self, _callback):
+            return self
+
+    fake_window = SimpleNamespace(
+        events=SimpleNamespace(before_show=EventHook()),
+    )
+    fake_webview = SimpleNamespace(
+        settings={"OPEN_EXTERNAL_LINKS_IN_BROWSER": True},
+        create_window=lambda *args, **kwargs: fake_window,
+    )
+    host = runner._PyWebviewHost(fake_webview, tmp_path)
+    host.create(
+        title="navigation",
+        url="http://127.0.0.1:42000/",
+        width=1280,
+        height=800,
+        devtools=False,
+    )
+    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
+
+
 def test_window_close_joins_owner_and_releases_port():
     host = FakeWindowHost(close_immediately=True)
     app = DemoUiApp("close")
@@ -243,6 +284,21 @@ def test_server_stop_dispatches_window_close():
 
     assert time.monotonic() - started < 2
     assert host.close_requested.is_set()
+    assert_port_released(host.options["url"])
+
+
+def test_sigint_requests_window_close_and_restores_handler():
+    host = FakeWindowHost()
+    previous_handler = signal.getsignal(signal.SIGINT)
+    timer = threading.Timer(0.05, lambda: os.kill(os.getpid(), signal.SIGINT))
+    timer.start()
+    try:
+        run_fake(DemoUiApp("signal"), host)
+    finally:
+        timer.join()
+
+    assert host.close_requested.is_set()
+    assert signal.getsignal(signal.SIGINT) is previous_handler
     assert_port_released(host.options["url"])
 
 
