@@ -18,6 +18,7 @@ extensions = [
 
 source_suffix = {
     ".md": "markdown",
+    ".rst": "restructuredtext",
 }
 exclude_patterns = [
     "_build",

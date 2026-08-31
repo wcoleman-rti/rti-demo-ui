@@ -87,6 +87,15 @@ _MIME_TYPES = {
 
 @dataclass(frozen=True)
 class ReadyInfo:
+    """Connection details published after :meth:`DemoUiApp.run` binds a socket.
+
+    Attributes:
+        host: Bound host string passed to the server.
+        port: Actual bound TCP port. This may differ from the requested port
+            when the app was created with ``port=0``.
+        url: Base origin URL without a trailing slash.
+    """
+
     host: str
     port: int
     url: str
@@ -615,7 +624,13 @@ class _Model:
 
 
 class DemoUiApp:
-    """Model ownership and local asyncio HTTP lifecycle for one SDK process."""
+    """Own the presentation model and local aiohttp server for one process.
+
+    A ``DemoUiApp`` is configured synchronously, then started once with
+    :meth:`run`. After startup, mutating methods must be called on the event
+    loop that owns the running app. The app exposes a local HTTP UI, state
+    snapshot route, event stream, and optional validated command endpoints.
+    """
 
     _NEW = "NEW"
     _STARTING = "STARTING"
@@ -633,6 +648,23 @@ class DemoUiApp:
         theme=Theme.dark,
         layout=Layout.auto,
     ) -> None:
+        """Create an application model and HTTP server wrapper.
+
+        Args:
+            title: Non-empty application title.
+            port: Requested TCP port in ``[0, 65535]``. Use ``0`` to let the OS
+                choose a free port.
+            host: Non-empty bind host string. Commands additionally require a
+                literal loopback host.
+            static_root: Optional existing directory containing ``index.html``
+                and any same-origin assets referenced by the UI.
+            theme: Initial built-in theme.
+            layout: Initial built-in layout.
+
+        Raises:
+            ValueError: If any argument is invalid or ``static_root`` is not an
+                existing directory containing a regular ``index.html`` file.
+        """
         require_non_empty(title, "title", "DemoUiApp: ")
         require_non_empty(host, "host", "DemoUiApp: ")
         theme = coerce_theme(theme)
@@ -962,6 +994,11 @@ class DemoUiApp:
         )
 
     async def wait_until_ready(self) -> ReadyInfo:
+        """Wait until :meth:`run` binds the server socket successfully.
+
+        Returns:
+            The current :class:`ReadyInfo` for the running app.
+        """
         await self._ready_event.wait()
         return self._ready_info
 
@@ -1006,6 +1043,23 @@ class DemoUiApp:
             await self._cleanup_complete.wait()
 
     def add_card(self, title: str, area=CardArea.main, span: int = 1) -> Card:
+        """Create and attach a new card.
+
+        Args:
+            title: Non-empty card title.
+            area: Initial card area as a :class:`CardArea` or matching string.
+            span: Initial card span as an integer from 1 to 3.
+
+        Returns:
+            The newly attached :class:`Card`. Mutate it in place to add
+            components or adjust presentation properties.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If the arguments are invalid or would create more than
+                one sidebar card.
+        """
         area = coerce_card_area(area)
         require_card_span(span)
         self._model.check_owner()
@@ -1021,6 +1075,19 @@ class DemoUiApp:
         return card
 
     def set_theme(self, theme) -> None:
+        """Set the application theme.
+
+        Re-applying the current theme is a no-op and does not bump the model
+        revision.
+
+        Args:
+            theme: A :class:`Theme` value or matching string.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``theme`` is invalid.
+        """
         theme = coerce_theme(theme)
         self._model.check_owner()
         self._model.ensure_running()
@@ -1030,6 +1097,20 @@ class DemoUiApp:
         self._model.commit_presentation_locked()
 
     def set_layout(self, layout) -> None:
+        """Set the application card layout.
+
+        Re-applying the current layout is a no-op. ``sidebar-main`` is only
+        allowed when exactly one sidebar card exists.
+
+        Args:
+            layout: A :class:`Layout` value or matching string.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``layout`` is invalid or violates sidebar-card
+                cardinality rules.
+        """
         layout = coerce_layout(layout)
         self._model.check_owner()
         self._model.ensure_running()
@@ -1046,6 +1127,17 @@ class DemoUiApp:
         self._model.commit_presentation_locked()
 
     def set_data(self, value) -> None:
+        """Replace the application-level JSON payload.
+
+        Args:
+            value: Any JSON-compatible value. The SDK stores a defensive deep
+                copy, so later caller-side mutations are not observed.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``value`` is not JSON-compatible.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         from .types import copy_json_value
@@ -1054,6 +1146,22 @@ class DemoUiApp:
         self._model.commit_app_data_locked()
 
     def update_data(self, path, value, create_missing=False) -> None:
+        """Update a nested field within the application-level data object.
+
+        Args:
+            path: Sequence of non-empty string keys. An empty sequence replaces
+                the complete application data value.
+            value: JSON-compatible value written at the leaf key.
+            create_missing: When ``True``, missing intermediate objects are
+                created. When ``False``, every segment must already exist.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``path`` is invalid, the current data or an
+                intermediate segment is not an object, a required segment is
+                missing, or ``value`` is not JSON-compatible.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self._model.data = self._model.update_value(
@@ -1063,6 +1171,12 @@ class DemoUiApp:
 
     @property
     def ready_info(self) -> Optional[ReadyInfo]:
+        """Current bind information for the running app, if available.
+
+        Returns:
+            ``None`` before the server becomes ready and again after cleanup
+            completes.
+        """
         return self._ready_info
 
     @property
@@ -1084,6 +1198,26 @@ class DemoUiApp:
         handler,
         confirmation: Optional[CommandConfirmation] = None,
     ) -> Command:
+        """Register a validated browser-invoked command before startup.
+
+        Args:
+            name: Command name matching ``^[a-z][a-z0-9-]{0,62}$``.
+            schema: A :class:`CommandSchema` instance or schema dictionary using
+                the supported subset.
+            handler: Sync or async callable invoked with the validated payload.
+                The return value must be JSON-compatible.
+            confirmation: Optional browser confirmation metadata shown before the
+                command is submitted.
+
+        Returns:
+            The registered :class:`Command` definition.
+
+        Raises:
+            RuntimeError: If registration is attempted after :meth:`run`
+                starts.
+            ValueError: If the host is not a literal loopback address, ``name``
+                is invalid or already registered, or ``schema`` is invalid.
+        """
         if self._run_started:
             raise RuntimeError(
                 "DemoUiApp: command registration is closed after run() begins"
@@ -1104,6 +1238,19 @@ class DemoUiApp:
         return command
 
     async def run(self) -> None:
+        """Start serving the demo UI until :meth:`stop` or cancellation occurs.
+
+        This coroutine may be called only once. The running loop becomes the
+        owner for all subsequent model mutations.
+
+        Raises:
+            RuntimeError: If called more than once or if the server does not
+                bind exactly one socket.
+            ValueError: If the current ``sidebar-main`` layout does not have
+                exactly one sidebar card.
+            OSError: If the HTTP site fails to bind.
+            asyncio.CancelledError: If the task is cancelled while running.
+        """
         loop = asyncio.get_running_loop()
         if self._run_started:
             raise RuntimeError("DemoUiApp: run() may only be called once")
@@ -1156,6 +1303,12 @@ class DemoUiApp:
             raise asyncio.CancelledError
 
     async def stop(self) -> None:
+        """Stop the server and wait for cleanup to finish.
+
+        ``stop()`` may be awaited before :meth:`run` to prevent any later bind,
+        from the owner loop, or from another loop while the app is running. The
+        method waits for in-flight requests, active commands, and SSE cleanup.
+        """
         owner_loop = self._owner_loop
         if owner_loop is None:
             self._request_stop()

@@ -15,8 +15,8 @@ frontend process or a runtime dependency on Connext.
 - [Custom frontends](custom-frontends.md)
 - [Lifecycle](lifecycle.md)
 - [Architecture](architecture.md)
-- [Python API reference](reference/python.md)
-- [C++ API reference](reference/cpp.md)
+- [Python API reference](reference/python.rst)
+- [C++ API reference](reference/cpp.rst)
 
 :::{toctree}
 :hidden:

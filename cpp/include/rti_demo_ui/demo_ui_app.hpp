@@ -217,45 +217,97 @@ class TimerState {
 
 }  // namespace detail
 
+/// Bound server address published after DemoUiApp::run starts listening.
 struct ReadyInfo {
-    std::string host;
-    int port;
-    std::string url;
+    std::string host;  ///< Configured bind host.
+    int port;          ///< Selected TCP port.
+    std::string url;   ///< HTTP base URL without a trailing slash.
 };
 
+/// Browser confirmation text displayed before invoking a command.
 struct CommandConfirmation {
-    std::string title;
-    std::string message;
+    std::string title;    ///< Confirmation dialog title.
+    std::string message;  ///< Confirmation dialog message.
 };
 
+/**
+ * Restricted JSON schema used to validate command request bodies.
+ *
+ * Supported keywords are `type`, `properties`, `required`, `items`, `enum`,
+ * `minimum`, `maximum`, `minLength`, `maxLength`, and
+ * `additionalProperties`.
+ */
 class CommandSchema {
    public:
+    /**
+     * Validate and retain a schema definition.
+     * @throws std::invalid_argument if the definition uses invalid or
+     * unsupported schema constructs.
+     */
     explicit CommandSchema(Json schema);
+
+    /// Return the validated schema definition.
     const Json& value() const { return schema_; }
+
+    /**
+     * Validate one JSON value.
+     * @return Validation details; an empty vector means the value is valid.
+     */
     std::vector<Json> validate(const Json& value) const;
 
    private:
     Json schema_;
 };
 
+/// Synchronous command callback returning a JSON-compatible result.
 using CommandHandler = std::function<Json(const Json&)>;
 
-// Cancelable reference to an SDK-owned periodic timer. DemoUiApp keeps the
-// underlying thread running independent of this handle's lifetime; call
-// cancel() explicitly to stop it early.
+/**
+ * Cancelable handle to an SDK-owned periodic timer.
+ *
+ * Dropping the handle does not stop the timer because DemoUiApp retains shared
+ * ownership. Cancellation is idempotent and joins the timer thread.
+ */
 class TimerHandle {
    public:
+    /// Construct an empty handle whose cancel operation is a no-op.
     TimerHandle() = default;
-    explicit TimerHandle(std::shared_ptr<detail::TimerState> state);
 
+    /** @cond INTERNAL */
+    explicit TimerHandle(std::shared_ptr<detail::TimerState> state);
+    /** @endcond */
+
+    /// Stop the timer and join its thread. Safe to call more than once.
     void cancel();
 
    private:
     std::shared_ptr<detail::TimerState> state_;
 };
 
+/**
+ * Local HTTP server and authoritative UI component model.
+ *
+ * Configure cards, components, state, and commands, then call run() to block
+ * while serving the browser UI. The app owns every returned Card and Component
+ * pointer; those non-owning handles remain valid until app destruction.
+ *
+ * C++ model operations are thread-safe. The app is single-use: run() can be
+ * called only once. stop() is idempotent and may be called from another thread.
+ */
 class DemoUiApp {
    public:
+    /**
+     * Construct an application without binding a socket.
+     *
+     * @param title Non-empty browser title.
+     * @param port TCP port from 0 through 65535; 0 selects an available port.
+     * @param host Bind host. Literal loopback is required for commands.
+     * @param static_root Optional custom-frontend directory containing a
+     * regular `index.html`; an empty path selects the built-in frontend.
+     * @param theme Initial built-in theme.
+     * @param layout Initial card layout.
+     * @throws std::invalid_argument if any argument is invalid.
+     */
     explicit DemoUiApp(std::string title, int port = 0,
                        std::string host = "127.0.0.1",
                        std::filesystem::path static_root = {},
@@ -266,20 +318,108 @@ class DemoUiApp {
     DemoUiApp(const DemoUiApp&) = delete;
     DemoUiApp& operator=(const DemoUiApp&) = delete;
 
+    /**
+     * Add a card to the application.
+     * @return A non-owning pointer valid until app destruction.
+     * @throws std::invalid_argument if the title, area, span, or sidebar
+     * constraints are invalid.
+     * @throws std::runtime_error if the app is stopped.
+     */
     Card* add_card(const std::string& title, CardArea area = CardArea::main,
                    int span = 1);
+
+    /**
+     * Change the built-in frontend theme.
+     *
+     * Setting the current value is a no-op and does not increment the revision.
+     *
+     * @throws std::invalid_argument if `theme` is invalid.
+     * @throws std::runtime_error if the app is stopped.
+     */
     void set_theme(Theme theme);
+
+    /**
+     * Change the card layout.
+     *
+     * `sidebar_main` requires exactly one sidebar card. Setting the current
+     * value is a no-op and does not increment the revision.
+     *
+     * @throws std::invalid_argument if the layout or sidebar state is invalid.
+     * @throws std::runtime_error if the app is stopped.
+     */
     void set_layout(Layout layout);
+
+    /**
+     * Replace the complete application-owned JSON state.
+     * @throws std::invalid_argument if `value` is not JSON-compatible.
+     * @throws std::runtime_error if the app is stopped.
+     */
     void set_data(Json value);
+
+    /**
+     * Replace a nested application-state value at `path`.
+     *
+     * An empty path replaces the complete value. Missing object keys are
+     * created only when `create_missing` is true; array elements cannot be
+     * created.
+     *
+     * @throws std::invalid_argument if the path or value is invalid.
+     * @throws std::runtime_error if the app is stopped.
+     */
     void update_data(const std::vector<std::string>& path, Json value,
                      bool create_missing = false);
+
+    /**
+     * Register a browser-invokable command before run() begins.
+     *
+     * Names match `[a-z][a-z0-9-]{0,62}`. Commands are available only when
+     * binding literal loopback (`127.0.0.1` or `::1`). Handlers execute
+     * synchronously on server worker threads.
+     *
+     * @throws std::invalid_argument if the name, host, handler, or uniqueness
+     * constraint is invalid.
+     * @throws std::runtime_error if run() has begun or the app is stopped.
+     */
     void register_command(
         const std::string& name, CommandSchema schema, CommandHandler handler,
         std::optional<CommandConfirmation> confirmation = std::nullopt);
+
+    /**
+     * Start an SDK-owned periodic callback thread.
+     *
+     * The first invocation occurs after one interval. An exception escaping the
+     * callback stops that timer. Dropping the returned handle does not cancel
+     * it; app shutdown cancels and joins every timer.
+     *
+     * @throws std::invalid_argument if `interval_ms` is not positive.
+     * @throws std::runtime_error if the app is stopped.
+     */
     TimerHandle add_timer(int interval_ms, std::function<void()> callback);
+
+    /**
+     * Bind, publish readiness, and block while serving requests.
+     *
+     * @throws std::invalid_argument if `sidebar_main` lacks exactly one
+     * sidebar.
+     * @throws std::runtime_error if called more than once or binding/listening
+     * fails.
+     */
     void run();
+
+    /**
+     * Stop serving and wait for active commands and timer threads.
+     *
+     * Safe to call before, during, or after run(), and safe to call repeatedly.
+     */
     void stop() noexcept;
+
+    /**
+     * Block until the server publishes ReadyInfo.
+     * @throws std::runtime_error if the app stops before becoming ready.
+     */
     void wait_until_ready();
+
+    /// Return bound address information, or `std::nullopt` before readiness.
     std::optional<ReadyInfo> ready_info() const;
     const std::string& title() const noexcept { return model_.title_; }
     const std::string& host() const noexcept { return host_; }

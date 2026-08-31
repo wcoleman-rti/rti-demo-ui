@@ -94,7 +94,10 @@ cmake --build build/docs --target docs
 
 Open `build/docs/html/index.html` to inspect the result. The documentation build
 generates C++ XML from the public headers before Sphinx renders the Markdown
-guides and Python/C++ API references.
+guides and Python/C++ API references. It then verifies that every exported
+Python name and directly defined public method has a docstring, rejects
+undocumented public C++ symbols, and confirms that the generated references do
+not expose selected implementation-only C++ symbols.
 
 Start product-facing implementation and planning sessions with
 `docs/development/product-use-cases.md`. It records the representative demo

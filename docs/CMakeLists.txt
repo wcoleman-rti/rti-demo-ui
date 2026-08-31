@@ -20,6 +20,7 @@ file(GLOB_RECURSE RTI_DEMO_UI_PYTHON_SOURCES CONFIGURE_DEPENDS
 file(GLOB_RECURSE RTI_DEMO_UI_DOC_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.md"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.rst"
 )
 
 set(RTI_DEMO_UI_DOXYGEN_INDEX
@@ -47,6 +48,10 @@ add_custom_target(docs
         --keep-going
         -b html
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${RTI_DEMO_UI_SPHINX_OUTPUT}"
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/check_api_reference.py"
         "${RTI_DEMO_UI_SPHINX_OUTPUT}"
     DEPENDS
         doxygen_xml

@@ -36,10 +36,33 @@ SCHEMA_KEYWORDS = {
 
 
 class CommandSchema:
+    """Validated JSON-schema subset for browser-invoked command payloads."""
+
     def __init__(self, schema: dict):
+        """Create a schema definition copy for command registration.
+
+        Args:
+            schema: A JSON-compatible schema object using the supported subset of
+                ``type``, ``properties``, ``required``, ``items``, ``enum``,
+                numeric bounds, string-length bounds, and
+                ``additionalProperties``.
+
+        Raises:
+            ValueError: If the schema is not an object, uses unsupported
+                keywords, or contains invalid constraint values.
+        """
         self.schema = _validate_schema_definition(schema)
 
     def validate(self, value: Any) -> list[dict]:
+        """Validate a payload and return root-relative error details.
+
+        Args:
+            value: Candidate command payload value.
+
+        Returns:
+            A list of ``{"path", "message"}`` dictionaries. The list is empty
+            when the payload satisfies the schema.
+        """
         details: list[dict] = []
         _validate_instance(self.schema, value, "$", details)
         return details
@@ -47,12 +70,28 @@ class CommandSchema:
 
 @dataclass(frozen=True)
 class CommandConfirmation:
+    """Browser confirmation copy shown before a command is submitted.
+
+    Attributes:
+        title: Short dialog title.
+        message: Explanatory text displayed in the dialog body.
+    """
+
     title: str
     message: str
 
 
 @dataclass(frozen=True)
 class Command:
+    """Registered command definition returned by ``DemoUiApp.register_command``.
+
+    Attributes:
+        name: Stable command name exposed at ``/api/commands/<name>``.
+        schema: Payload validator applied before the handler runs.
+        handler: Sync or async callable invoked with the validated payload.
+        confirmation: Optional browser confirmation metadata.
+    """
+
     name: str
     schema: CommandSchema
     handler: Callable[[Any], Any | Awaitable[Any]]
