@@ -2,10 +2,10 @@
 
 ## Status
 
-Technology spike re-evaluated on 2026-08-31. Linux Python and C++ now pass the
-available local real-engine, lifecycle, profile, navigation, and headless
-conformance gates, and both manual Linux checks passed. Do not promote to
-`feature/native-webview` until the added Ubuntu 22.04 hosted job passes.
+Technology spike completed on 2026-08-31. Linux Python and C++ pass the local
+real-engine, lifecycle, profile, navigation, and headless conformance gates,
+both manual Linux checks, and the Ubuntu 22.04 hosted job. Phase 1 may proceed
+as Linux-first work; macOS and Windows remain unsupported.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -447,11 +447,11 @@ unchanged.
 
 ### Recommendation
 
-**Do not begin Phase 1 yet.** The persistent-profile revision and installed
-WebKitGTK development dependencies allowed both selected Linux hosts to complete
-the real-engine conformance cycle. The selected dependencies are viable for a
-Linux-first release. The remaining Linux gates are execution of the checked-in
-Ubuntu 22.04 hosted job.
+**Advance to Phase 1 as Linux-first work.** The persistent-profile revision and
+installed WebKitGTK development dependencies allowed both selected Linux hosts
+to complete the real-engine conformance cycle. The selected dependencies are
+viable for a Linux-first release, and the checked-in Ubuntu 22.04 hosted job
+passed in GitHub Actions run `33436766073`.
 
 The SSE implementation from `develop` commit `5647f40` passed both embedded
 Linux engines. The C++ readiness race was fixed in the core contract rather
@@ -480,16 +480,15 @@ that the underlying operating-system engine can never be supported.
 
 | Backend | Platform gate | Classification | Reproducible evidence tied to a fixed gate |
 | --- | --- | --- | --- |
-| Python 3.11+ / pywebview 6.2.1 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported pending hosted gate | Real `gtkwebkit2` cycles passed on Ubuntu 26.04.1 with GTK 3.24.52 and WebKitGTK 2.52.6. Across three dynamic ports, a same-profile persistent cookie survived and a distinct profile remained isolated. Snapshot, SSE, command Origin, imports, worker, theme, Canvas, WebGL, focus, resize, external-navigation blocking, normal close, signal, port teardown, and owner-loop join passed. The identical sequence passed locally under Xvfb/D-Bus/Mesa. Manual chrome, resizing, rendering, focus/input, DPI, and navigation checks passed. The Ubuntu 22.04 hosted job remains. |
-| C++17 / webview 0.12.0 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Unsupported pending hosted gate | The real pinned webview host built and passed the full cycle on WebKitGTK 2.52.6. A supported native-handle adapter configured a profile cookie database and `decide-policy` callback before navigation. Same-profile reuse, distinct-profile isolation, dynamic ports, SSE, exact Origin, imports, worker, theme, Canvas, WebGL, focus, resize, blocked external navigation, normal close, signal, server join, and fixed readiness passed, including the local Xvfb/D-Bus/Mesa sequence. Manual chrome, resizing, rendering, focus/input, DPI, and navigation checks passed. The Ubuntu 22.04 hosted job remains. |
+| Python 3.11+ / pywebview 6.2.1 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Supported | Real `gtkwebkit2` cycles passed on Ubuntu 26.04.1 with GTK 3.24.52 and WebKitGTK 2.52.6. Across three dynamic ports, a same-profile persistent cookie survived and a distinct profile remained isolated. Snapshot, SSE, command Origin, imports, worker, theme, Canvas, WebGL, focus, resize, external-navigation blocking, normal close, signal, port teardown, and owner-loop join passed. The identical sequence passed locally and in the Ubuntu 22.04 hosted job under Xvfb/D-Bus/Mesa. Manual chrome, resizing, rendering, focus/input, DPI, and navigation checks passed. |
+| C++17 / webview 0.12.0 | Ubuntu 22.04+ / GTK 3 / WebKitGTK 4.1 | Supported | The real pinned webview host built and passed the full cycle on WebKitGTK 2.52.6. A supported native-handle adapter configured a profile cookie database and `decide-policy` callback before navigation. Same-profile reuse, distinct-profile isolation, dynamic ports, SSE, exact Origin, imports, worker, theme, Canvas, WebGL, focus, resize, blocked external navigation, normal close, signal, server join, and fixed readiness passed locally and in the Ubuntu 22.04 hosted job under Xvfb/D-Bus/Mesa. Manual chrome, resizing, rendering, focus/input, DPI, and navigation checks passed. |
 | Python 3.11+ / pywebview 6.2.1 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Running pywebview with persistence enabled selects WKWebView's default persistent data store, which is compatible with the revised policy in principle; application identity and isolation remain unverified. |
 | C++17 / webview 0.12.0 | macOS 12+ / WKWebView | Unsupported | No matching macOS host or real-engine job was available. Pinned webview's default `WKWebViewConfiguration` selects the persistent data store, which is no longer a failed gate; packaged-application identity and isolation remain unverified. |
 | Python 3.11+ / pywebview 6.2.1 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available, so neither runtime-version detection nor the non-skippable startup/render/close gate was executed. |
 | C++17 / webview 0.12.0 | Windows 10+ / Evergreen WebView2 | Unsupported | No matching Windows host or real-engine job was available. Pinned webview's persistent `%APPDATA%/<executable>` WebView2 user-data folder aligns with same-executable reuse, but distinct executable identity, collisions, and real-engine behavior remain unverified. |
 
 At least one Python and one C++ combination must be supported to advance. Both
-Linux combinations are local candidates but remain formally unsupported until
-their shared hosted gate passes.
+Linux combinations satisfy that rule.
 
 ### Prototype and Lifecycle Evidence
 
@@ -544,12 +543,12 @@ remains application-owned.
 | Exit criterion | Result |
 | --- | --- |
 | Six combinations complete a leak-free real cycle or receive a failed-gate classification | Pass: all six are classified above; unavailable platforms were not conditionally skipped or claimed supported. |
-| At least one Python and one C++ combination supported | **Pending:** both Linux combinations pass local automation and manual checks but await the hosted Ubuntu 22.04 gate. |
+| At least one Python and one C++ combination supported | Pass: the Linux Python and C++ combinations pass local automation, manual checks, and the hosted Ubuntu 22.04 gate. |
 | Main-thread and owner-loop rules documented and represented | Pass for prototype shape: both hosts put the GUI loop on the main thread and server ownership on a managed, joined background context. |
 | Origin, SSE, adapter loading, navigation policy, and WebGL verified | **Partial:** all pass in both Linux real engines; macOS and Windows did not run. |
 | Same-application persistence and distinct-profile isolation verified | **Partial:** both pass across dynamic ports for Linux Python and C++; macOS, Windows, simultaneous-instance, and relocation behavior remain unverified. |
 | Optional packaging leaves core unaffected | Pass for spike scope: core manifests have no native dependency/probe, core CMake tests and Python tests pass, and the native dependency exists only in the spike directory. |
-| Every supported combination has repeatable prerequisites, CI smoke, and manual checklist | **Pending:** prerequisites and manual Linux checks pass; the Ubuntu 22.04 job is checked in but has not executed on GitHub. |
+| Every supported combination has repeatable prerequisites, CI smoke, and manual checklist | Pass for the two supported Linux combinations: prerequisites and manual checks pass, and the checked-in Ubuntu 22.04 job passed in GitHub Actions. |
 
 The user manually accepted native chrome, responsive resizing, readable visual
 quality, keyboard focus/input, DPI behavior, and absence of unexpected external
@@ -563,13 +562,12 @@ in that run.
 
 ### Phase 0 Conclusion
 
-Phase 0 has positive local evidence but is not yet complete under its fixed
-hosted gate. Linux Python and C++ satisfy every available automated local
-criterion, including real rendering, dynamic-port persistence, isolation,
-navigation policy, signals, and lifecycle. Promotion is blocked only by
-execution of the new Ubuntu 22.04 CI job. If it passes, the minimum
-one-Python/one-C++ rule is met and Phase 1 may begin as Linux-first work; macOS
-and Windows remain unsupported until separately qualified.
+Phase 0 is complete. Linux Python and C++ satisfy every fixed criterion,
+including real rendering, dynamic-port persistence, isolation, navigation
+policy, signals, lifecycle, manual acceptance, and Ubuntu 22.04 hosted
+execution. The minimum one-Python/one-C++ rule is met and Phase 1 may begin as
+Linux-first work; macOS and Windows remain unsupported until separately
+qualified.
 
 ### Exact Verification Commands and Results
 
@@ -720,7 +718,7 @@ timeout --kill-after=5s --preserve-status --signal=INT 4s "$cpp_host" \
 
 # The exact Xvfb/D-Bus/Mesa sequence is the
 # native-webview-spike job's "Run real native engine conformance" block.
-# The complete block exited 0 locally; GitHub execution remains pending.
+# The complete block exited 0 locally and in GitHub Actions run 33436766073.
 
 cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build --parallel
