@@ -2,6 +2,7 @@
 // See docs/architecture.md §11.1.
 #include <rti_demo_ui/rti_demo_ui.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -36,6 +37,17 @@ static int g_failures = 0;
             threw = true;                        \
         }                                        \
         CHECK(threw);                            \
+    } while (0)
+
+#define EXPECT_RUNTIME_ERROR(expr)         \
+    do {                                   \
+        bool threw = false;                \
+        try {                              \
+            expr;                          \
+        } catch (const std::runtime_error&) { \
+            threw = true;                  \
+        }                                  \
+        CHECK(threw);                      \
     } while (0)
 
 void test_revision_increments_once_per_mutation() {
@@ -92,6 +104,80 @@ void test_dirty_targets_coalesce_to_latest_fixture_state() {
         CHECK(Json::parse(model.snapshot_json_locked()) ==
               vectors["snapshots"]["backend_latest"]);
         CHECK(!model.flush_dirty_targets_locked().has_value());
+    }
+}
+
+void test_dirty_target_removal_precedence_and_id_reuse_rejection() {
+    std::ifstream input(std::string(SOURCE_ROOT) +
+                        "/tests/fixtures/sse_event_contract.json");
+    const Json vectors = Json::parse(input)["dirty_target_removal"];
+
+    DemoUiApp card_app("Contract");
+    Card* card = card_app.add_card("Card");
+    auto& card_model = detail::ModelTestAccess::model(card_app);
+    {
+        std::lock_guard<std::mutex> guard(card_model.lock());
+        card_model.start_dirty_tracking_locked();
+        card_model.commit_card_locked(card->id());
+        card_model.commit_card_removal_locked(card->id());
+        const auto patch = card_model.flush_dirty_targets_locked();
+        CHECK(patch == vectors["card_patch"]);
+        CHECK(patch->dump() == vectors["serialized_card_patch"]);
+        const long revision = card_model.revision_;
+        EXPECT_RUNTIME_ERROR(card_model.commit_card_locked(card->id()));
+        CHECK(card_model.revision_ == revision);
+    }
+
+    DemoUiApp component_app("Contract");
+    Card* component_card = component_app.add_card("Card");
+    Metric* metric = component_card->add_metric("Rate", 1);
+    auto& component_model = detail::ModelTestAccess::model(component_app);
+    {
+        std::lock_guard<std::mutex> guard(component_model.lock());
+        component_model.start_dirty_tracking_locked();
+        component_model.commit_component_locked(component_card->id(),
+                                                metric->id());
+        component_model.commit_component_removal_locked(component_card->id(),
+                                                        metric->id());
+        const auto patch = component_model.flush_dirty_targets_locked();
+        CHECK(patch == vectors["component_patch"]);
+        CHECK(patch->dump() == vectors["serialized_component_patch"]);
+        const long revision = component_model.revision_;
+        EXPECT_RUNTIME_ERROR(component_model.commit_component_locked(
+            component_card->id(), metric->id()));
+        CHECK(component_model.revision_ == revision);
+    }
+}
+
+void test_structural_component_order_matches_shared_bytes() {
+    std::ifstream input(std::string(SOURCE_ROOT) +
+                        "/tests/fixtures/sse_event_contract.json");
+    const Json vectors = Json::parse(input)["operation_vectors"]["valid"];
+    const auto vector = std::find_if(
+        vectors.begin(), vectors.end(), [](const Json& item) {
+            return item["name"] ==
+                   "whole card upsert preserves component insertion order";
+        });
+    CHECK(vector != vectors.end());
+    if (vector == vectors.end()) return;
+
+    DemoUiApp app("Contract");
+    auto& model = detail::ModelTestAccess::model(app);
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        model.start_dirty_tracking_locked();
+    }
+    Card* card = app.add_card("Card");
+    card->add_custom_component("custom-z", Json::object(), "custom-z");
+    card->add_custom_component("custom-a", Json::object(), "custom-a");
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        const auto patch = model.flush_dirty_targets_locked();
+        CHECK(patch.has_value());
+        if (!patch.has_value()) return;
+        CHECK(*patch == (*vector)["patch"]);
+        CHECK(patch->dump() == (*vector)["serialized"]);
+        CHECK(Json::parse(model.snapshot_json_locked()) == (*vector)["expected"]);
     }
 }
 
@@ -173,6 +259,8 @@ int main() {
     test_revision_increments_once_per_mutation();
     test_failed_mutation_does_not_change_revision();
     test_dirty_targets_coalesce_to_latest_fixture_state();
+    test_dirty_target_removal_precedence_and_id_reuse_rejection();
+    test_structural_component_order_matches_shared_bytes();
     test_entity_removal_removes_links();
     test_validation_errors();
     test_scene3d_contract();

@@ -108,12 +108,17 @@ class _Subscriber:
 
 
 class _DirtyTargets:
+    _UPSERT = "upsert"
+    _REMOVE = "remove"
+
     def __init__(self) -> None:
         self.active = False
         self.base_revision = 0
         self.app_data = False
-        self.cards = set()
-        self.components = set()
+        self.cards = {}
+        self.components = {}
+        self.removed_cards = set()
+        self.removed_components = set()
 
     def start(self, revision: int) -> None:
         self.active = True
@@ -136,15 +141,54 @@ class _DirtyTargets:
         was_empty = self.empty()
         if not self.active:
             return False
-        self.cards.add(card_id)
-        self.components = {target for target in self.components if target[0] != card_id}
+        if card_id in self.removed_cards:
+            raise RuntimeError(f"cannot upsert removed card target: {card_id}")
+        self.cards[card_id] = self._UPSERT
+        self.components = {
+            target: operation
+            for target, operation in self.components.items()
+            if target[0] != card_id
+        }
+        return was_empty
+
+    def mark_card_removed(self, card_id: str) -> bool:
+        was_empty = self.empty()
+        self.removed_cards.add(card_id)
+        if not self.active:
+            return False
+        self.cards[card_id] = self._REMOVE
+        self.components = {
+            target: operation
+            for target, operation in self.components.items()
+            if target[0] != card_id
+        }
         return was_empty
 
     def mark_component(self, card_id: str, component_id: str) -> bool:
         was_empty = self.empty()
-        if self.active and card_id not in self.cards:
-            self.components.add((card_id, component_id))
+        if not self.active:
+            return False
+        if card_id in self.removed_cards:
+            raise RuntimeError(
+                f"cannot upsert component in removed card target: {card_id}"
+            )
+        target = (card_id, component_id)
+        if target in self.removed_components:
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        if card_id not in self.cards:
+            self.components[target] = self._UPSERT
         return self.active and was_empty and not self.empty()
+
+    def mark_component_removed(self, card_id: str, component_id: str) -> bool:
+        was_empty = self.empty()
+        self.removed_components.add((card_id, component_id))
+        if not self.active:
+            return False
+        if card_id not in self.cards:
+            self.components[(card_id, component_id)] = self._REMOVE
+        return was_empty and not self.empty()
 
     def flush(self, model) -> Optional[dict]:
         if not self.active or not (self.app_data or self.cards or self.components):
@@ -158,14 +202,26 @@ class _DirtyTargets:
                 }
             )
         cards_by_id = {card.id: card for card in model.cards}
-        for card_id in sorted(self.cards):
-            changes.append(
-                {
-                    "op": "upsert-card",
-                    "value": cards_by_id[card_id].to_dict(),
-                }
-            )
-        for card_id, component_id in sorted(self.components):
+        for card_id, operation in sorted(self.cards.items()):
+            if operation == self._REMOVE:
+                changes.append({"op": "remove-card", "card_id": card_id})
+            else:
+                changes.append(
+                    {
+                        "op": "upsert-card",
+                        "value": cards_by_id[card_id].to_dict(),
+                    }
+                )
+        for (card_id, component_id), operation in sorted(self.components.items()):
+            if operation == self._REMOVE:
+                changes.append(
+                    {
+                        "op": "remove-component",
+                        "card_id": card_id,
+                        "component_id": component_id,
+                    }
+                )
+                continue
             card = cards_by_id[card_id]
             component = next(
                 item for item in card._components if item.id == component_id
@@ -405,14 +461,43 @@ class _Model:
             self._dirty_callback()
 
     def commit_card_locked(self, card_id: str) -> None:
+        if card_id in self._dirty_targets.removed_cards:
+            raise RuntimeError(f"cannot upsert removed card target: {card_id}")
         self.revision += 1
         if self._dirty_targets.mark_card(card_id) and self._dirty_callback is not None:
             self._dirty_callback()
 
+    def commit_card_removal_locked(self, card_id: str) -> None:
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_card_removed(card_id)
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
     def commit_component_locked(self, card_id: str, component_id: str) -> None:
+        if (
+            card_id in self._dirty_targets.removed_cards
+            or (
+                card_id,
+                component_id,
+            )
+            in self._dirty_targets.removed_components
+        ):
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
         self.revision += 1
         if (
             self._dirty_targets.mark_component(card_id, component_id)
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
+    def commit_component_removal_locked(self, card_id: str, component_id: str) -> None:
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_component_removed(card_id, component_id)
             and self._dirty_callback is not None
         ):
             self._dirty_callback()

@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -55,8 +56,11 @@ class Model {
     void start_dirty_tracking_locked();
     void commit_app_data_locked();
     void commit_card_locked(const std::string& card_id);
+    void commit_card_removal_locked(const std::string& card_id);
     void commit_component_locked(const std::string& card_id,
                                  const std::string& component_id);
+    void commit_component_removal_locked(const std::string& card_id,
+                                         const std::string& component_id);
     std::optional<Json> flush_dirty_targets_locked();
 
     std::string next_card_id() {
@@ -82,6 +86,8 @@ class Model {
    private:
     friend class SseManager;
 
+    enum class DirtyOperation { upsert, remove };
+
     std::mutex mutex_;
     bool running_ = true;
     int next_card_id_ = 1;
@@ -89,8 +95,11 @@ class Model {
     bool dirty_tracking_ = false;
     long published_revision_ = 0;
     bool app_data_dirty_ = false;
-    std::set<std::string> dirty_cards_;
-    std::set<std::pair<std::string, std::string>> dirty_components_;
+    std::map<std::string, DirtyOperation> dirty_cards_;
+    std::map<std::pair<std::string, std::string>, DirtyOperation>
+        dirty_components_;
+    std::set<std::string> removed_card_ids_;
+    std::set<std::pair<std::string, std::string>> removed_component_ids_;
     SseManager* sse_manager_ = nullptr;
 };
 

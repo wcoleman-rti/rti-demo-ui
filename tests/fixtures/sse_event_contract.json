@@ -95,6 +95,22 @@
     "payload": {"label": "München ☕"},
     "serialized": "{\"label\":\"München ☕\"}"
   },
+  "dirty_target_removal": {
+    "card_patch": {
+      "schema_version": 1,
+      "base_revision": 1,
+      "revision": 3,
+      "changes": [{"op": "remove-card", "card_id": "card-1"}]
+    },
+    "serialized_card_patch": "{\"base_revision\":1,\"changes\":[{\"card_id\":\"card-1\",\"op\":\"remove-card\"}],\"revision\":3,\"schema_version\":1}",
+    "component_patch": {
+      "schema_version": 1,
+      "base_revision": 2,
+      "revision": 4,
+      "changes": [{"op": "remove-component", "card_id": "card-1", "component_id": "metric-1"}]
+    },
+    "serialized_component_patch": "{\"base_revision\":2,\"changes\":[{\"card_id\":\"card-1\",\"component_id\":\"metric-1\",\"op\":\"remove-component\"}],\"revision\":4,\"schema_version\":1}"
+  },
   "revision_gap": {
     "snapshot": {
       "schema_version": 2,
@@ -141,6 +157,13 @@
         "snapshot": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": [{"id": "metric-1", "type": "metric", "revision": 1, "data": {"label": "Rate", "value": 1, "severity": null}}]}]},
         "patch": {"schema_version": 1, "base_revision": 1, "revision": 2, "changes": [{"op": "remove-component", "card_id": "card-1", "component_id": "metric-1"}]},
         "expected": {"schema_version": 2, "revision": 2, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": []}]}
+      },
+      {
+        "name": "whole card upsert preserves component insertion order",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 3, "changes": [{"op": "upsert-card", "value": {"id": "card-1", "title": "Card", "components": [{"id": "custom-z", "type": "custom-z", "revision": 2, "data": {}}, {"id": "custom-a", "type": "custom-a", "revision": 3, "data": {}}]}}]},
+        "serialized": "{\"base_revision\":0,\"changes\":[{\"op\":\"upsert-card\",\"value\":{\"components\":[{\"data\":{},\"id\":\"custom-z\",\"revision\":2,\"type\":\"custom-z\"},{\"data\":{},\"id\":\"custom-a\",\"revision\":3,\"type\":\"custom-a\"}],\"id\":\"card-1\",\"title\":\"Card\"}}],\"revision\":3,\"schema_version\":1}",
+        "expected": {"schema_version": 2, "revision": 3, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": [{"id": "custom-z", "type": "custom-z", "revision": 2, "data": {}}, {"id": "custom-a", "type": "custom-a", "revision": 3, "data": {}}]}]}
       },
       {
         "name": "preserve generated card order across lexical boundary",

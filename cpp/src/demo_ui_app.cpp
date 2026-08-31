@@ -425,14 +425,36 @@ void Model::commit_app_data_locked() {
 }
 
 void Model::commit_card_locked(const std::string& card_id) {
+    if (removed_card_ids_.count(card_id) != 0) {
+        throw std::runtime_error("cannot upsert removed card target: " +
+                                 card_id);
+    }
     const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
                           dirty_cards_.empty() && dirty_components_.empty();
     ++revision_;
     if (!dirty_tracking_) return;
-    dirty_cards_.insert(card_id);
+    dirty_cards_[card_id] = DirtyOperation::upsert;
     for (auto target = dirty_components_.begin();
          target != dirty_components_.end();) {
-        if (target->first == card_id) {
+        if (target->first.first == card_id) {
+            target = dirty_components_.erase(target);
+        } else {
+            ++target;
+        }
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_card_removal_locked(const std::string& card_id) {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          dirty_cards_.empty() && dirty_components_.empty();
+    ++revision_;
+    removed_card_ids_.insert(card_id);
+    if (!dirty_tracking_) return;
+    dirty_cards_[card_id] = DirtyOperation::remove;
+    for (auto target = dirty_components_.begin();
+         target != dirty_components_.end();) {
+        if (target->first.first == card_id) {
             target = dirty_components_.erase(target);
         } else {
             ++target;
@@ -443,11 +465,29 @@ void Model::commit_card_locked(const std::string& card_id) {
 
 void Model::commit_component_locked(const std::string& card_id,
                                     const std::string& component_id) {
+    const auto target = std::make_pair(card_id, component_id);
+    if (removed_card_ids_.count(card_id) != 0 ||
+        removed_component_ids_.count(target) != 0) {
+        throw std::runtime_error("cannot upsert removed component target: " +
+                                 card_id + ":" + component_id);
+    }
     const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
                           dirty_cards_.empty() && dirty_components_.empty();
     ++revision_;
     if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
-        dirty_components_.emplace(card_id, component_id);
+        dirty_components_[target] = DirtyOperation::upsert;
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_component_removal_locked(const std::string& card_id,
+                                            const std::string& component_id) {
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          dirty_cards_.empty() && dirty_components_.empty();
+    ++revision_;
+    removed_component_ids_.emplace(card_id, component_id);
+    if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
+        dirty_components_[{card_id, component_id}] = DirtyOperation::remove;
     }
     if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
@@ -462,14 +502,25 @@ std::optional<Json> Model::flush_dirty_targets_locked() {
     if (app_data_dirty_) {
         changes.push_back({{"op", "replace-app-data"}, {"value", data_}});
     }
-    for (const auto& card_id : dirty_cards_) {
+    for (const auto& [card_id, operation] : dirty_cards_) {
+        if (operation == DirtyOperation::remove) {
+            changes.push_back({{"op", "remove-card"}, {"card_id", card_id}});
+            continue;
+        }
         const auto card = std::find_if(
             cards_.begin(), cards_.end(),
             [&card_id](const auto& item) { return item->id_ == card_id; });
         changes.push_back(
             {{"op", "upsert-card"}, {"value", (*card)->to_json_locked()}});
     }
-    for (const auto& [card_id, component_id] : dirty_components_) {
+    for (const auto& [target, operation] : dirty_components_) {
+        const auto& [card_id, component_id] = target;
+        if (operation == DirtyOperation::remove) {
+            changes.push_back({{"op", "remove-component"},
+                               {"card_id", card_id},
+                               {"component_id", component_id}});
+            continue;
+        }
         const auto card = std::find_if(
             cards_.begin(), cards_.end(),
             [&card_id](const auto& item) { return item->id_ == card_id; });

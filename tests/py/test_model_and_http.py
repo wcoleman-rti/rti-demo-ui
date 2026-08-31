@@ -78,6 +78,57 @@ def test_dirty_targets_coalesce_to_latest_fixture_state():
     assert app._model.flush_dirty_targets_locked() is None
 
 
+def test_dirty_target_removal_precedence_and_id_reuse_rejection():
+    vectors = SSE_VECTORS["dirty_target_removal"]
+
+    app = DemoUiApp(title="Contract")
+    card = app.add_card("Card")
+    app._model.start_dirty_tracking_locked()
+    app._model.commit_card_locked(card.id)
+    app._model.commit_card_removal_locked(card.id)
+    card_patch = app._model.flush_dirty_targets_locked()
+    assert card_patch == vectors["card_patch"]
+    assert _json_bytes(card_patch).decode() == vectors["serialized_card_patch"]
+    revision = app._model.revision
+    with pytest.raises(RuntimeError):
+        app._model.commit_card_locked(card.id)
+    assert app._model.revision == revision
+
+    app = DemoUiApp(title="Contract")
+    card = app.add_card("Card")
+    metric = card.add_metric("Rate", 1)
+    app._model.start_dirty_tracking_locked()
+    app._model.commit_component_locked(card.id, metric.id)
+    app._model.commit_component_removal_locked(card.id, metric.id)
+    component_patch = app._model.flush_dirty_targets_locked()
+    assert component_patch == vectors["component_patch"]
+    assert (
+        _json_bytes(component_patch).decode() == vectors["serialized_component_patch"]
+    )
+    revision = app._model.revision
+    with pytest.raises(RuntimeError):
+        app._model.commit_component_locked(card.id, metric.id)
+    assert app._model.revision == revision
+
+
+def test_structural_component_order_matches_shared_bytes():
+    vector = next(
+        item
+        for item in SSE_VECTORS["operation_vectors"]["valid"]
+        if item["name"] == "whole card upsert preserves component insertion order"
+    )
+    app = DemoUiApp(title="Contract")
+    app._model.start_dirty_tracking_locked()
+    card = app.add_card("Card")
+    card.add_custom_component("custom-z", {}, id="custom-z")
+    card.add_custom_component("custom-a", {}, id="custom-a")
+
+    patch = app._model.flush_dirty_targets_locked()
+    assert patch == vector["patch"]
+    assert _json_bytes(patch).decode() == vector["serialized"]
+    assert app._model.snapshot() == vector["expected"]
+
+
 def test_failed_mutation_does_not_change_revision():
     app = make_app(19081)
     _card, scene = configure_scene(app)
