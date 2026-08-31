@@ -2,11 +2,22 @@ import asyncio
 import json
 import socket
 import threading
+from pathlib import Path
 
 import pytest
 from aiohttp import ClientSession
 
 from rti_demo_ui import DemoUiApp, Severity
+from rti_demo_ui.demo_ui_app import _json_bytes
+
+SSE_VECTORS = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "sse_event_contract.json").read_text()
+)
+
+
+def test_canonical_json_serialization_matches_shared_vectors():
+    vector = SSE_VECTORS["unicode_serialization"]
+    assert _json_bytes(vector["payload"]).decode() == vector["serialized"]
 
 
 def make_app(port):
@@ -39,6 +50,32 @@ def test_revision_increments_once_per_mutation():
     scene.add_entity("v1", 0.0, 0.0)
     assert app._model.revision == 3
     assert card.title == "Fleet"
+
+
+def test_dirty_targets_coalesce_to_latest_fixture_state():
+    app = DemoUiApp(title="Contract")
+    primary = app.add_card("Primary")
+    rate = primary.add_metric("Rate", 10)
+    secondary = app.add_card("Secondary")
+    status = secondary.add_text("idle")
+
+    assert app._model.flush_dirty_targets_locked() is None
+    assert app._model.snapshot() == SSE_VECTORS["snapshots"]["backend_base"]
+    app._model.start_dirty_tracking_locked()
+
+    app.set_data({"site": "north", "mode": "active"})
+    rate.set_value(20)
+    rate.set_value(42, Severity.warning)
+    secondary.add_metric("Load", 5)
+    added = app.add_card("Added")
+    added.add_text("ready")
+    status.set_text("running", Severity.success)
+
+    patch = app._model.flush_dirty_targets_locked()
+    assert patch == SSE_VECTORS["coalesced_patch"]
+    assert _json_bytes(patch).decode() == SSE_VECTORS["serialized_coalesced_patch"]
+    assert app._model.snapshot() == SSE_VECTORS["snapshots"]["backend_latest"]
+    assert app._model.flush_dirty_targets_locked() is None
 
 
 def test_failed_mutation_does_not_change_revision():

@@ -1,0 +1,200 @@
+{
+  "snapshots": {
+    "empty": {
+      "schema_version": 2,
+      "revision": 0,
+      "title": "Contract",
+      "data": {},
+      "cards": []
+    },
+    "backend_base": {
+      "schema_version": 2,
+      "revision": 4,
+      "title": "Contract",
+      "data": {},
+      "cards": [
+        {
+          "id": "card-1",
+          "title": "Primary",
+          "components": [
+            {"id": "metric-1", "type": "metric", "revision": 2, "data": {"label": "Rate", "value": 10, "severity": null}}
+          ]
+        },
+        {
+          "id": "card-2",
+          "title": "Secondary",
+          "components": [
+            {"id": "text-1", "type": "text", "revision": 4, "data": {"text": "idle", "severity": null}}
+          ]
+        }
+      ]
+    },
+    "backend_latest": {
+      "schema_version": 2,
+      "revision": 11,
+      "title": "Contract",
+      "data": {"site": "north", "mode": "active"},
+      "cards": [
+        {
+          "id": "card-1",
+          "title": "Primary",
+          "components": [
+            {"id": "metric-1", "type": "metric", "revision": 7, "data": {"label": "Rate", "value": 42, "severity": "warning"}}
+          ]
+        },
+        {
+          "id": "card-2",
+          "title": "Secondary",
+          "components": [
+            {"id": "text-1", "type": "text", "revision": 11, "data": {"text": "running", "severity": "success"}},
+            {"id": "metric-2", "type": "metric", "revision": 8, "data": {"label": "Load", "value": 5, "severity": null}}
+          ]
+        },
+        {
+          "id": "card-3",
+          "title": "Added",
+          "components": [
+            {"id": "text-2", "type": "text", "revision": 10, "data": {"text": "ready", "severity": null}}
+          ]
+        }
+      ]
+    }
+  },
+  "coalesced_patch": {
+    "schema_version": 1,
+    "base_revision": 4,
+    "revision": 11,
+    "changes": [
+      {"op": "replace-app-data", "value": {"site": "north", "mode": "active"}},
+      {
+        "op": "upsert-card",
+        "value": {
+          "id": "card-2",
+          "title": "Secondary",
+          "components": [
+            {"id": "text-1", "type": "text", "revision": 11, "data": {"text": "running", "severity": "success"}},
+            {"id": "metric-2", "type": "metric", "revision": 8, "data": {"label": "Load", "value": 5, "severity": null}}
+          ]
+        }
+      },
+      {
+        "op": "upsert-card",
+        "value": {
+          "id": "card-3",
+          "title": "Added",
+          "components": [
+            {"id": "text-2", "type": "text", "revision": 10, "data": {"text": "ready", "severity": null}}
+          ]
+        }
+      },
+      {"op": "upsert-component", "card_id": "card-1", "value": {"id": "metric-1", "type": "metric", "revision": 7, "data": {"label": "Rate", "value": 42, "severity": "warning"}}}
+    ]
+  },
+  "serialized_coalesced_patch": "{\"base_revision\":4,\"changes\":[{\"op\":\"replace-app-data\",\"value\":{\"mode\":\"active\",\"site\":\"north\"}},{\"op\":\"upsert-card\",\"value\":{\"components\":[{\"data\":{\"severity\":\"success\",\"text\":\"running\"},\"id\":\"text-1\",\"revision\":11,\"type\":\"text\"},{\"data\":{\"label\":\"Load\",\"severity\":null,\"value\":5},\"id\":\"metric-2\",\"revision\":8,\"type\":\"metric\"}],\"id\":\"card-2\",\"title\":\"Secondary\"}},{\"op\":\"upsert-card\",\"value\":{\"components\":[{\"data\":{\"severity\":null,\"text\":\"ready\"},\"id\":\"text-2\",\"revision\":10,\"type\":\"text\"}],\"id\":\"card-3\",\"title\":\"Added\"}},{\"card_id\":\"card-1\",\"op\":\"upsert-component\",\"value\":{\"data\":{\"label\":\"Rate\",\"severity\":\"warning\",\"value\":42},\"id\":\"metric-1\",\"revision\":7,\"type\":\"metric\"}}],\"revision\":11,\"schema_version\":1}",
+  "unicode_serialization": {
+    "payload": {"label": "München ☕"},
+    "serialized": "{\"label\":\"München ☕\"}"
+  },
+  "revision_gap": {
+    "snapshot": {
+      "schema_version": 2,
+      "revision": 4,
+      "title": "Contract",
+      "data": {},
+      "cards": []
+    },
+    "patch": {
+      "schema_version": 1,
+      "base_revision": 5,
+      "revision": 6,
+      "changes": [{"op": "replace-app-data", "value": {"gap": true}}]
+    }
+  },
+  "operation_vectors": {
+    "valid": [
+      {
+        "name": "replace application data",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "replace-app-data", "value": {"mode": "live"}}]},
+        "expected": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {"mode": "live"}, "cards": []}
+      },
+      {
+        "name": "upsert card",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "upsert-card", "value": {"id": "card-1", "title": "Card", "components": []}}]},
+        "expected": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": []}]}
+      },
+      {
+        "name": "remove card",
+        "snapshot": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": []}]},
+        "patch": {"schema_version": 1, "base_revision": 1, "revision": 2, "changes": [{"op": "remove-card", "card_id": "card-1"}]},
+        "expected": {"schema_version": 2, "revision": 2, "title": "Contract", "data": {}, "cards": []}
+      },
+      {
+        "name": "upsert component",
+        "snapshot": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": []}]},
+        "patch": {"schema_version": 1, "base_revision": 1, "revision": 2, "changes": [{"op": "upsert-component", "card_id": "card-1", "value": {"id": "metric-1", "type": "metric", "revision": 2, "data": {"label": "Rate", "value": 1, "severity": null}}}]},
+        "expected": {"schema_version": 2, "revision": 2, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": [{"id": "metric-1", "type": "metric", "revision": 2, "data": {"label": "Rate", "value": 1, "severity": null}}]}]}
+      },
+      {
+        "name": "remove component",
+        "snapshot": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": [{"id": "metric-1", "type": "metric", "revision": 1, "data": {"label": "Rate", "value": 1, "severity": null}}]}]},
+        "patch": {"schema_version": 1, "base_revision": 1, "revision": 2, "changes": [{"op": "remove-component", "card_id": "card-1", "component_id": "metric-1"}]},
+        "expected": {"schema_version": 2, "revision": 2, "title": "Contract", "data": {}, "cards": [{"id": "card-1", "title": "Card", "components": []}]}
+      },
+      {
+        "name": "preserve generated card order across lexical boundary",
+        "snapshot": {"schema_version": 2, "revision": 8, "title": "Contract", "data": {}, "cards": [{"id": "card-8", "title": "Eight", "components": []}]},
+        "patch": {"schema_version": 1, "base_revision": 8, "revision": 10, "changes": [{"op": "upsert-card", "value": {"id": "card-10", "title": "Ten", "components": []}}, {"op": "upsert-card", "value": {"id": "card-9", "title": "Nine", "components": []}}]},
+        "expected": {"schema_version": 2, "revision": 10, "title": "Contract", "data": {}, "cards": [{"id": "card-8", "title": "Eight", "components": []}, {"id": "card-9", "title": "Nine", "components": []}, {"id": "card-10", "title": "Ten", "components": []}]}
+      }
+    ],
+    "invalid": [
+      {
+        "name": "unsupported patch schema",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 2, "base_revision": 0, "revision": 1, "changes": [{"op": "replace-app-data", "value": {}}]}
+      },
+      {
+        "name": "empty changes",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": []}
+      },
+      {
+        "name": "non-increasing revision",
+        "snapshot": {"schema_version": 2, "revision": 1, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 1, "revision": 1, "changes": [{"op": "replace-app-data", "value": {}}]}
+      },
+      {
+        "name": "unknown operation",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "merge", "value": {}}]}
+      },
+      {
+        "name": "non-canonical operation order",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "upsert-card", "value": {"id": "card-1", "title": "Card", "components": []}}, {"op": "replace-app-data", "value": {}}]}
+      },
+      {
+        "name": "duplicate target",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "replace-app-data", "value": {}}, {"op": "replace-app-data", "value": {"again": true}}]}
+      },
+      {
+        "name": "card supersedes component",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "upsert-card", "value": {"id": "card-1", "title": "Card", "components": []}}, {"op": "upsert-component", "card_id": "card-1", "value": {"id": "metric-1", "type": "metric", "revision": 1, "data": {}}}]}
+      },
+      {
+        "name": "missing component parent",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "upsert-component", "card_id": "missing", "value": {"id": "metric-1", "type": "metric", "revision": 1, "data": {}}}]}
+      },
+      {
+        "name": "future component revision",
+        "snapshot": {"schema_version": 2, "revision": 0, "title": "Contract", "data": {}, "cards": []},
+        "patch": {"schema_version": 1, "base_revision": 0, "revision": 1, "changes": [{"op": "upsert-card", "value": {"id": "card-1", "title": "Card", "components": [{"id": "metric-1", "type": "metric", "revision": 2, "data": {}}]}}]}
+      }
+    ]
+  }
+}

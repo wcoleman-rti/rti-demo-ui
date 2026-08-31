@@ -5,9 +5,17 @@
 #include <cassert>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
 #include <thread>
 
 using namespace rti::demo::ui;
+
+namespace rti::demo::ui::detail {
+class ModelTestAccess {
+   public:
+    static Model& model(DemoUiApp& app) { return app.model_; }
+};
+}  // namespace rti::demo::ui::detail
 
 static int g_failures = 0;
 
@@ -44,6 +52,47 @@ void test_failed_mutation_does_not_change_revision() {
     Scene2DViewport* scene = card->add_scene_2d(600, 400, {-100.0, 100.0, -100.0, 100.0});
     scene->add_entity("v1", 0.0, 0.0);
     EXPECT_THROWS(scene->add_entity("v1", 1.0, 1.0));
+}
+
+void test_dirty_targets_coalesce_to_latest_fixture_state() {
+    std::ifstream input(std::string(SOURCE_ROOT) +
+                        "/tests/fixtures/sse_event_contract.json");
+    const Json vectors = Json::parse(input);
+    CHECK(vectors["unicode_serialization"]["payload"].dump() ==
+          vectors["unicode_serialization"]["serialized"]);
+    DemoUiApp app("Contract", 19186);
+    Card* primary = app.add_card("Primary");
+    Metric* rate = primary->add_metric("Rate", 10);
+    Card* secondary = app.add_card("Secondary");
+    Text* status = secondary->add_text("idle");
+    auto& model = detail::ModelTestAccess::model(app);
+
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        CHECK(!model.flush_dirty_targets_locked().has_value());
+        CHECK(Json::parse(model.snapshot_json_locked()) ==
+              vectors["snapshots"]["backend_base"]);
+        model.start_dirty_tracking_locked();
+    }
+
+    app.set_data({{"site", "north"}, {"mode", "active"}});
+    rate->set_value(20);
+    rate->set_value(42, Severity::warning);
+    secondary->add_metric("Load", 5);
+    Card* added = app.add_card("Added");
+    added->add_text("ready");
+    status->set_text("running", Severity::success);
+
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        const auto patch = model.flush_dirty_targets_locked();
+        CHECK(patch.has_value());
+        CHECK(*patch == vectors["coalesced_patch"]);
+        CHECK(patch->dump() == vectors["serialized_coalesced_patch"]);
+        CHECK(Json::parse(model.snapshot_json_locked()) ==
+              vectors["snapshots"]["backend_latest"]);
+        CHECK(!model.flush_dirty_targets_locked().has_value());
+    }
 }
 
 void test_entity_removal_removes_links() {
@@ -123,6 +172,7 @@ void test_scene3d_contract() {
 int main() {
     test_revision_increments_once_per_mutation();
     test_failed_mutation_does_not_change_revision();
+    test_dirty_targets_coalesce_to_latest_fixture_state();
     test_entity_removal_removes_links();
     test_validation_errors();
     test_scene3d_contract();

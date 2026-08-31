@@ -86,11 +86,19 @@ Component::Component(detail::Model& model, std::string id, std::string type)
     : model_(model), id_(std::move(id)), type_(std::move(type)) {}
 
 void Component::mutated_locked() {
-    model_.bump_revision_locked();
+    if (card_id_.empty()) {
+        throw std::runtime_error(
+            "Component: component is not attached to a card");
+    }
+    model_.commit_component_locked(card_id_, id_);
     revision_ = model_.revision_;
 }
 
-void Component::added_locked() { mutated_locked(); }
+void Component::added_locked(const std::string& card_id) {
+    card_id_ = card_id;
+    model_.commit_card_locked(card_id_);
+    revision_ = model_.revision_;
+}
 
 Scene2DViewport::Scene2DViewport(detail::Model& model, std::string id,
                                  int width, int height, GridBounds bounds)
@@ -761,7 +769,7 @@ Scene2DViewport* Card::add_scene_2d(int width, int height, GridBounds bounds) {
         model_, model_.next_component_id("scene"), width, height, bounds);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Scene3DViewport* Card::add_scene_3d(const std::string& asset, Json camera,
@@ -773,7 +781,7 @@ Scene3DViewport* Card::add_scene_3d(const std::string& asset, Json camera,
         std::move(background), grid);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Table* Card::add_table(Json columns, Json rows, std::string empty_state) {
@@ -784,7 +792,7 @@ Table* Card::add_table(Json columns, Json rows, std::string empty_state) {
         std::move(rows), std::move(empty_state));
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Metric* Card::add_metric(const std::string& label, Json value,
@@ -796,7 +804,7 @@ Metric* Card::add_metric(const std::string& label, Json value,
                                  label, std::move(value), severity);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Text* Card::add_text(const std::string& text,
@@ -807,7 +815,7 @@ Text* Card::add_text(const std::string& text,
         model_, model_.next_component_id("text"), text, severity);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Badge* Card::add_badge(const std::string& text, Severity severity) {
@@ -817,7 +825,7 @@ Badge* Card::add_badge(const std::string& text, Severity severity) {
         model_, model_.next_component_id("badge"), text, severity);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Log* Card::add_log(Json entries, std::string empty_state, int max_entries) {
@@ -828,7 +836,7 @@ Log* Card::add_log(Json entries, std::string empty_state, int max_entries) {
         std::move(empty_state), max_entries);
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 CustomComponent* Card::add_custom_component(const std::string& type, Json data,
@@ -840,7 +848,7 @@ CustomComponent* Card::add_custom_component(const std::string& type, Json data,
                                                        type, std::move(data));
     auto* result = component.get();
     components_.push_back(std::move(component));
-    result->added_locked();
+    result->added_locked(id_);
     return result;
 }
 Json Card::to_json_locked() const {

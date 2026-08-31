@@ -27,9 +27,12 @@ class _Component:
         self.id = component_id
         self.type = component_type
         self.revision = 0
+        self._card_id = None
 
     def _mutated(self) -> None:
-        self._model.bump_revision_locked()
+        if self._card_id is None:
+            raise RuntimeError("Component: component is not attached to a card")
+        self._model.commit_component_locked(self._card_id, self.id)
         self.revision = self._model.revision
 
     def _envelope(self, data: dict) -> dict:
@@ -53,7 +56,8 @@ class Card:
 
     def _add_component(self, component: _Component) -> _Component:
         self._components.append(component)
-        self._model.bump_revision_locked()
+        component._card_id = self.id
+        self._model.commit_card_locked(self.id)
         component.revision = self._model.revision
         return component
 

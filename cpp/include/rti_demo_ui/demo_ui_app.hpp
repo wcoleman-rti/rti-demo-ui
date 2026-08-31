@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -48,13 +49,20 @@ class Model {
         running_ = false;
     }
 
-    void bump_revision_locked() { ++revision_; }
+    void start_dirty_tracking_locked();
+    void commit_app_data_locked();
+    void commit_card_locked(const std::string& card_id);
+    void commit_component_locked(const std::string& card_id,
+                                 const std::string& component_id);
+    std::optional<Json> flush_dirty_targets_locked();
 
     std::string next_card_id() {
         return "card-" + std::to_string(next_card_id_++);
     }
     std::string next_component_id(const std::string& type) {
-        return type + "-" + std::to_string(next_component_ids_[type]++);
+        int& next_id = next_component_ids_[type];
+        if (next_id == 0) next_id = 1;
+        return type + "-" + std::to_string(next_id++);
     }
 
     Json update_value(const Json& current, const std::vector<std::string>& path,
@@ -73,7 +81,14 @@ class Model {
     bool running_ = true;
     int next_card_id_ = 1;
     std::unordered_map<std::string, int> next_component_ids_;
+    bool dirty_tracking_ = false;
+    long published_revision_ = 0;
+    bool app_data_dirty_ = false;
+    std::set<std::string> dirty_cards_;
+    std::set<std::pair<std::string, std::string>> dirty_components_;
 };
+
+class ModelTestAccess;
 
 // Thread + synchronization state for one SDK-owned periodic timer. Shared
 // between DemoUiApp (which keeps the timer alive/cancels it at stop()) and any
@@ -157,6 +172,8 @@ class DemoUiApp {
     std::optional<ReadyInfo> ready_info() const;
 
    private:
+    friend class detail::ModelTestAccess;
+
     struct RegisteredCommand {
         CommandSchema schema;
         CommandHandler handler;

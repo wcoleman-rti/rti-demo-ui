@@ -395,6 +395,80 @@ std::string Model::snapshot_json_locked() const {
         .dump();
 }
 
+void Model::start_dirty_tracking_locked() {
+    dirty_tracking_ = true;
+    published_revision_ = revision_;
+    app_data_dirty_ = false;
+    dirty_cards_.clear();
+    dirty_components_.clear();
+}
+
+void Model::commit_app_data_locked() {
+    ++revision_;
+    if (dirty_tracking_) app_data_dirty_ = true;
+}
+
+void Model::commit_card_locked(const std::string& card_id) {
+    ++revision_;
+    if (!dirty_tracking_) return;
+    dirty_cards_.insert(card_id);
+    for (auto target = dirty_components_.begin();
+         target != dirty_components_.end();) {
+        if (target->first == card_id) {
+            target = dirty_components_.erase(target);
+        } else {
+            ++target;
+        }
+    }
+}
+
+void Model::commit_component_locked(const std::string& card_id,
+                                    const std::string& component_id) {
+    ++revision_;
+    if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
+        dirty_components_.emplace(card_id, component_id);
+    }
+}
+
+std::optional<Json> Model::flush_dirty_targets_locked() {
+    if (!dirty_tracking_ || (!app_data_dirty_ && dirty_cards_.empty() &&
+                             dirty_components_.empty())) {
+        return std::nullopt;
+    }
+
+    Json changes = Json::array();
+    if (app_data_dirty_) {
+        changes.push_back({{"op", "replace-app-data"}, {"value", data_}});
+    }
+    for (const auto& card_id : dirty_cards_) {
+        const auto card = std::find_if(
+            cards_.begin(), cards_.end(),
+            [&card_id](const auto& item) { return item->id_ == card_id; });
+        changes.push_back(
+            {{"op", "upsert-card"}, {"value", (*card)->to_json_locked()}});
+    }
+    for (const auto& [card_id, component_id] : dirty_components_) {
+        const auto card = std::find_if(
+            cards_.begin(), cards_.end(),
+            [&card_id](const auto& item) { return item->id_ == card_id; });
+        const auto component = std::find_if(
+            (*card)->components_.begin(), (*card)->components_.end(),
+            [&component_id](const auto& item) {
+                return item->id() == component_id;
+            });
+        changes.push_back({{"op", "upsert-component"},
+                           {"card_id", card_id},
+                           {"value", (*component)->to_json_locked()}});
+    }
+
+    Json patch{{"schema_version", 1},
+               {"base_revision", published_revision_},
+               {"revision", revision_},
+               {"changes", std::move(changes)}};
+    start_dirty_tracking_locked();
+    return patch;
+}
+
 TimerState::TimerState(std::thread thread,
                        std::shared_ptr<std::atomic<bool>> stop_flag,
                        std::shared_ptr<std::condition_variable> cv,
@@ -476,7 +550,7 @@ Card* DemoUiApp::add_card(const std::string& title) {
     auto card = std::make_unique<Card>(model_, card_id, title);
     Card* card_ptr = card.get();
     model_.cards_.push_back(std::move(card));
-    model_.bump_revision_locked();
+    model_.commit_card_locked(card_id);
     return card_ptr;
 }
 
@@ -485,7 +559,7 @@ void DemoUiApp::set_data(Json value) {
     std::lock_guard<std::mutex> guard(model_.lock());
     model_.ensure_running();
     model_.data_ = std::move(value);
-    model_.bump_revision_locked();
+    model_.commit_app_data_locked();
 }
 
 void DemoUiApp::update_data(const std::vector<std::string>& path, Json value,
@@ -495,7 +569,7 @@ void DemoUiApp::update_data(const std::vector<std::string>& path, Json value,
     model_.ensure_running();
     model_.data_ = model_.update_value(model_.data_, path, std::move(value),
                                        create_missing);
-    model_.bump_revision_locked();
+    model_.commit_app_data_locked();
 }
 
 void DemoUiApp::register_command(
@@ -844,6 +918,10 @@ void DemoUiApp::run() {
     const ReadyInfo info{
         host_, bound_port,
         "http://" + display_host + ":" + std::to_string(bound_port)};
+    {
+        std::lock_guard<std::mutex> guard(model_.lock());
+        model_.start_dirty_tracking_locked();
+    }
     {
         std::lock_guard<std::mutex> guard(readiness_mutex_);
         ready_info_ = info;

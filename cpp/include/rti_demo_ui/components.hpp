@@ -23,13 +23,14 @@ class Component {
     virtual Json to_json_locked() const = 0;
     const std::string& id() const { return id_; }
     const std::string& type() const { return type_; }
-    void added_locked();
+    void added_locked(const std::string& card_id);
 
    protected:
     void mutated_locked();
     detail::Model& model_;
     std::string id_;
     std::string type_;
+    std::string card_id_;
     long revision_ = 0;
 };
 
@@ -227,6 +228,7 @@ class Card {
     const std::string& id() const { return id_; }
 
    private:
+    friend class detail::Model;
     detail::Model& model_;
     std::string id_;
     std::string title_;
