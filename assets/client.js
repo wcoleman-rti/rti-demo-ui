@@ -33,6 +33,16 @@ function assertKeys(value, expected, kind) {
     }
 }
 
+function assertRequiredAndOptionalKeys(value, required, optional, kind) {
+    required.forEach((key) => {
+        if (!Object.hasOwn(value, key)) throw new Error(`${kind} is missing ${key}`);
+    });
+    const allowed = new Set([...required, ...optional]);
+    if (Object.keys(value).some((key) => !allowed.has(key))) {
+        throw new Error(`${kind} has invalid fields`);
+    }
+}
+
 function assertId(value, kind) {
     if (typeof value !== 'string' || value.length === 0) throw new Error(`${kind} ID must be a non-empty string`);
 }
@@ -53,7 +63,7 @@ function validateComponent(component, snapshotRevision) {
 
 function validateCard(card, snapshotRevision) {
     if (!isObject(card)) throw new Error('card must be an object');
-    assertKeys(card, ['id', 'title', 'components'], 'card');
+    assertRequiredAndOptionalKeys(card, ['id', 'title', 'components'], ['area', 'span'], 'card');
     assertId(card.id, 'card');
     if (typeof card.title !== 'string' || card.title.length === 0) throw new Error('card title must be a non-empty string');
     if (!Array.isArray(card.components)) throw new Error('card components must be an array');
@@ -69,7 +79,12 @@ export function validateSnapshot(snapshot) {
     if (!isObject(snapshot) || snapshot.schema_version !== 2) {
         throw new Error(`Unsupported snapshot schema version: ${snapshot && snapshot.schema_version}`);
     }
-    assertKeys(snapshot, ['schema_version', 'revision', 'title', 'data', 'cards'], 'snapshot');
+    assertRequiredAndOptionalKeys(
+        snapshot,
+        ['schema_version', 'revision', 'title', 'data', 'cards'],
+        ['theme', 'layout'],
+        'snapshot',
+    );
     assertRevision(snapshot.revision, 'snapshot');
     if (typeof snapshot.title !== 'string' || snapshot.title.length === 0) throw new Error('snapshot title must be a non-empty string');
     assertJson(snapshot.data);
@@ -134,18 +149,26 @@ function validatePatch(snapshot, patch) {
             target = 'app-data';
             order = [0, '', ''];
             break;
+        case 'replace-presentation':
+            assertKeys(change, ['op', 'theme', 'layout'], 'replace-presentation operation');
+            if (typeof change.theme !== 'string' || typeof change.layout !== 'string') {
+                throw new Error('replace-presentation operation has invalid values');
+            }
+            target = 'presentation';
+            order = [1, '', ''];
+            break;
         case 'upsert-card':
             assertKeys(change, ['op', 'value'], 'upsert-card operation');
             validateCard(change.value, patch.revision);
             target = `card:${change.value.id}`;
-            order = [1, change.value.id, ''];
+            order = [2, change.value.id, ''];
             cardTargets.add(change.value.id);
             break;
         case 'remove-card':
             assertKeys(change, ['op', 'card_id'], 'remove-card operation');
             assertId(change.card_id, 'card');
             target = `card:${change.card_id}`;
-            order = [1, change.card_id, ''];
+            order = [2, change.card_id, ''];
             cardTargets.add(change.card_id);
             break;
         case 'upsert-component':
@@ -153,14 +176,14 @@ function validatePatch(snapshot, patch) {
             assertId(change.card_id, 'card');
             validateComponent(change.value, patch.revision);
             target = `component:${change.card_id}:${change.value.id}`;
-            order = [2, change.card_id, change.value.id];
+            order = [3, change.card_id, change.value.id];
             break;
         case 'remove-component':
             assertKeys(change, ['op', 'card_id', 'component_id'], 'remove-component operation');
             assertId(change.card_id, 'card');
             assertId(change.component_id, 'component');
             target = `component:${change.card_id}:${change.component_id}`;
-            order = [2, change.card_id, change.component_id];
+            order = [3, change.card_id, change.component_id];
             break;
         default:
             throw new Error(`unknown patch operation: ${change.op}`);
@@ -192,6 +215,10 @@ export function applyPatch(snapshot, patch) {
         switch (change.op) {
         case 'replace-app-data':
             next.data = cloneJson(change.value);
+            break;
+        case 'replace-presentation':
+            next.theme = change.theme;
+            next.layout = change.layout;
             break;
         case 'upsert-card': {
             const card = cloneJson(change.value);

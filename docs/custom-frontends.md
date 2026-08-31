@@ -111,10 +111,40 @@ Load the SDK theme without copying it:
 
 Stable custom properties include `--sdk-bg`, `--sdk-surface`, `--sdk-card-bg`,
 `--sdk-text`, `--sdk-muted`, `--sdk-border`, `--sdk-accent`,
-`--sdk-success`, `--sdk-warning`, and `--sdk-danger`. Stable component classes
-include `sdk-app`, `sdk-card`, `sdk-card-title`, `sdk-metric`, `sdk-table`,
-`sdk-button`, `sdk-slider`, `sdk-connection-banner`, `sdk-scene2d`, and the
-Scene3D host/listbox classes.
+`--sdk-accent-hover`, `--sdk-success`, `--sdk-warning`, and `--sdk-danger`.
+Both governed palettes provide every token. Set `data-sdk-theme="dark"` or
+`data-sdk-theme="light"` on `<html>`; missing or malformed values must use
+`dark`. Do not replace `document.documentElement.className`, because it may
+contain application-owned classes.
+
+Custom frontends that consume presentation metadata use the same closed values
+and compatibility defaults as the built-in renderer:
+
+```js
+const themes = new Set(["dark", "light"]);
+const layouts = new Set(["auto", "grid-2", "grid-3", "sidebar-main"]);
+
+client.subscribe((snapshot) => {
+  const theme = themes.has(snapshot.theme) ? snapshot.theme : "dark";
+  const layout = layouts.has(snapshot.layout) ? snapshot.layout : "auto";
+  document.documentElement.dataset.sdkTheme = theme;
+  document.querySelector("#dashboard").dataset.sdkLayout = layout;
+});
+```
+
+Card `area` defaults to `main`; `span` defaults to `1` and must be an integer
+from `1` through `3`. A malformed field falls back independently rather than
+retaining its previously applied value. Applications must use closed-value
+attributes rather than constructing arbitrary classes, selectors, or
+`style.cssText` from snapshot strings.
+
+The built-in layout rules target `#sdk-cards`, `.sdk-card`,
+`data-sdk-layout`, `data-sdk-area`, and `data-sdk-span`. A custom frontend may
+opt into that markup or implement its own responsive organization; loading the
+theme does not require using the built-in layout classes. Stable component
+classes include `sdk-app`, `sdk-card`, `sdk-card-title`, `sdk-metric`,
+`sdk-table`, `sdk-button`, `sdk-slider`, `sdk-connection-banner`,
+`sdk-scene2d`, and the Scene3D host/listbox classes.
 
 ## Scene3D
 
@@ -142,6 +172,9 @@ The gallery is an application-owned frontend at
 `examples/web/gallery/index.html`. It loads `/sdk/theme.css`, uses semantic
 HTML, and serves at `/` when launched through either gallery example. Its
 button and slider update browser-only text; no custom server route is needed.
+Both launchers accept `--theme dark|light` and
+`--layout auto|grid-2|grid-3|sidebar-main`, so every governed presentation can
+be exercised without application CSS overrides.
 
 The v2 snapshot has top-level `schema_version`, `revision`, `title`, `data`, and
 `cards`; every component has `id`, `type`, `revision`, and `data`. The browser

@@ -21,7 +21,17 @@ from aiohttp import ClientConnectionError, web
 
 from .components import Card
 from .commands import COMMAND_NAME, Command, CommandConfirmation, CommandSchema
-from .types import copy_json_value, require_non_empty
+from .types import (
+    CardArea,
+    Layout,
+    Theme,
+    coerce_card_area,
+    coerce_layout,
+    coerce_theme,
+    copy_json_value,
+    require_card_span,
+    require_non_empty,
+)
 
 _COMMAND_BODY_LIMIT = 64 * 1024
 _COMMAND_CAPABILITY_HEADER = "X-RTI-Demo-Command-Capability"
@@ -115,6 +125,7 @@ class _DirtyTargets:
         self.active = False
         self.base_revision = 0
         self.app_data = False
+        self.presentation = False
         self.cards = {}
         self.components = {}
         self.removed_cards = set()
@@ -124,17 +135,25 @@ class _DirtyTargets:
         self.active = True
         self.base_revision = revision
         self.app_data = False
+        self.presentation = False
         self.cards.clear()
         self.components.clear()
 
     def empty(self) -> bool:
-        return not (self.app_data or self.cards or self.components)
+        return not (self.app_data or self.presentation or self.cards or self.components)
 
     def mark_app_data(self) -> bool:
         was_empty = self.empty()
         if not self.active:
             return False
         self.app_data = True
+        return was_empty
+
+    def mark_presentation(self) -> bool:
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        self.presentation = True
         return was_empty
 
     def mark_card(self, card_id: str) -> bool:
@@ -191,7 +210,9 @@ class _DirtyTargets:
         return was_empty and not self.empty()
 
     def flush(self, model) -> Optional[dict]:
-        if not self.active or not (self.app_data or self.cards or self.components):
+        if not self.active or not (
+            self.app_data or self.presentation or self.cards or self.components
+        ):
             return None
         changes = []
         if self.app_data:
@@ -199,6 +220,14 @@ class _DirtyTargets:
                 {
                     "op": "replace-app-data",
                     "value": copy_json_value(model.data, "DemoUiApp: "),
+                }
+            )
+        if self.presentation:
+            changes.append(
+                {
+                    "op": "replace-presentation",
+                    "theme": model.theme.value,
+                    "layout": model.layout.value,
                 }
             )
         cards_by_id = {card.id: card for card in model.cards}
@@ -408,9 +437,17 @@ def _static_not_found_response() -> web.Response:
 class _Model:
     """Internal model state shared by DemoUiApp, Card, and Scene2DViewport."""
 
-    def __init__(self, title: str, static_root: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        static_root: Optional[Path] = None,
+        theme=Theme.dark,
+        layout=Layout.auto,
+    ) -> None:
         self.title = title
         self.static_root = static_root
+        self.theme = theme
+        self.layout = layout
         self.revision = 0
         self.cards = []
         self._running = True
@@ -458,6 +495,11 @@ class _Model:
     def commit_app_data_locked(self) -> None:
         self.revision += 1
         if self._dirty_targets.mark_app_data() and self._dirty_callback is not None:
+            self._dirty_callback()
+
+    def commit_presentation_locked(self) -> None:
+        self.revision += 1
+        if self._dirty_targets.mark_presentation() and self._dirty_callback is not None:
             self._dirty_callback()
 
     def commit_card_locked(self, card_id: str) -> None:
@@ -553,6 +595,8 @@ class _Model:
             "schema_version": 2,
             "revision": self.revision,
             "title": self.title,
+            "theme": self.theme.value,
+            "layout": self.layout.value,
             "data": copy_json_value(self.data, "DemoUiApp: "),
             "cards": [card.to_dict() for card in self.cards],
         }
@@ -573,13 +617,18 @@ class DemoUiApp:
         port: int = 0,
         host: str = "127.0.0.1",
         static_root: str | os.PathLike[str] | None = None,
+        *,
+        theme=Theme.dark,
+        layout=Layout.auto,
     ) -> None:
         require_non_empty(title, "title", "DemoUiApp: ")
         require_non_empty(host, "host", "DemoUiApp: ")
+        theme = coerce_theme(theme)
+        layout = coerce_layout(layout)
         if not (0 <= port <= 65535):
             raise ValueError("DemoUiApp: port must be between 0 and 65535")
         self._static_root = self._canonical_static_root(static_root)
-        self._model = _Model(title, self._static_root)
+        self._model = _Model(title, self._static_root, theme, layout)
         self._assets = _load_assets()
         self._host = host
         self._port = port
@@ -944,14 +993,45 @@ class DemoUiApp:
         if self._cleanup_complete is not None and self._state != self._STOPPED:
             await self._cleanup_complete.wait()
 
-    def add_card(self, title: str) -> Card:
+    def add_card(self, title: str, area=CardArea.main, span: int = 1) -> Card:
+        area = coerce_card_area(area)
+        require_card_span(span)
         self._model.check_owner()
         self._model.ensure_running()
+        if area == CardArea.sidebar and any(
+            card.area == CardArea.sidebar for card in self._model.cards
+        ):
+            raise ValueError("DemoUiApp: at most one sidebar card is permitted")
         card_id = self._model.next_card_id()
-        card = Card(self._model, card_id, title)
+        card = Card(self._model, card_id, title, area, span)
         self._model.cards.append(card)
         self._model.commit_card_locked(card_id)
         return card
+
+    def set_theme(self, theme) -> None:
+        theme = coerce_theme(theme)
+        self._model.check_owner()
+        self._model.ensure_running()
+        if theme == self._model.theme:
+            return
+        self._model.theme = theme
+        self._model.commit_presentation_locked()
+
+    def set_layout(self, layout) -> None:
+        layout = coerce_layout(layout)
+        self._model.check_owner()
+        self._model.ensure_running()
+        if layout == self._model.layout:
+            return
+        if (
+            layout == Layout.sidebar_main
+            and sum(card.area == CardArea.sidebar for card in self._model.cards) != 1
+        ):
+            raise ValueError(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card"
+            )
+        self._model.layout = layout
+        self._model.commit_presentation_locked()
 
     def set_data(self, value) -> None:
         self._model.check_owner()
@@ -1003,9 +1083,17 @@ class DemoUiApp:
         loop = asyncio.get_running_loop()
         if self._run_started:
             raise RuntimeError("DemoUiApp: run() may only be called once")
-        self._run_started = True
         if self._state == self._STOPPED:
+            self._run_started = True
             return
+        if (
+            self._model.layout == Layout.sidebar_main
+            and sum(card.area == CardArea.sidebar for card in self._model.cards) != 1
+        ):
+            raise ValueError(
+                "DemoUiApp: sidebar-main requires exactly one sidebar card"
+            )
+        self._run_started = True
         self._owner_loop = loop
         self._owner_thread_id = threading.get_ident()
         self._model.set_owner(loop)

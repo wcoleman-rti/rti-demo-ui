@@ -13,7 +13,7 @@ from .components import (
     Text,
 )
 from .commands import Command, CommandConfirmation, CommandSchema
-from .types import Freshness, Severity
+from .types import CardArea, Freshness, Layout, Severity, Theme
 
 __all__ = [
     "DemoUiApp",
@@ -31,4 +31,7 @@ __all__ = [
     "CommandConfirmation",
     "Severity",
     "Freshness",
+    "Theme",
+    "Layout",
+    "CardArea",
 ]

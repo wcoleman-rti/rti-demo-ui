@@ -2,6 +2,7 @@ import asyncio
 import json
 import socket
 import threading
+from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,16 @@ def test_canonical_json_serialization_matches_shared_vectors():
 
 def make_app(port):
     return DemoUiApp(title="Test App", port=port, host="127.0.0.1")
+
+
+def test_canonical_and_packaged_presentation_assets_match():
+    asset_package = resources.files("rti_demo_ui").joinpath("_assets")
+    asset_root = Path(__file__).parents[2] / "assets"
+    for filename in ("runtime.js", "theme.css"):
+        assert (
+            asset_package.joinpath(filename).read_bytes()
+            == (asset_root / filename).read_bytes()
+        )
 
 
 def configure_scene(app):

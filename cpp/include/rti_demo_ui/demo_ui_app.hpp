@@ -33,8 +33,12 @@ class SseManager;
 // Internal model state shared by DemoUiApp, Card, and Scene2DViewport.
 class Model {
    public:
-    explicit Model(std::string title, std::filesystem::path static_root = {})
-        : title_(std::move(title)), static_root_(std::move(static_root)) {}
+    explicit Model(std::string title, std::filesystem::path static_root = {},
+                   Theme theme = Theme::dark, Layout layout = Layout::automatic)
+        : title_(std::move(title)),
+          static_root_(std::move(static_root)),
+          theme_(theme),
+          layout_(layout) {}
 
     std::mutex& lock() { return mutex_; }
     const std::filesystem::path& static_root() const { return static_root_; }
@@ -55,6 +59,7 @@ class Model {
 
     void start_dirty_tracking_locked();
     void commit_app_data_locked();
+    void commit_presentation_locked();
     void commit_card_locked(const std::string& card_id);
     void commit_card_removal_locked(const std::string& card_id);
     void commit_component_locked(const std::string& card_id,
@@ -79,6 +84,8 @@ class Model {
 
     std::string title_;
     std::filesystem::path static_root_;
+    Theme theme_;
+    Layout layout_;
     long revision_ = 0;
     std::vector<std::unique_ptr<Card>> cards_;
     Json data_ = Json::object();
@@ -95,6 +102,7 @@ class Model {
     bool dirty_tracking_ = false;
     long published_revision_ = 0;
     bool app_data_dirty_ = false;
+    bool presentation_dirty_ = false;
     std::map<std::string, DirtyOperation> dirty_cards_;
     std::map<std::pair<std::string, std::string>, DirtyOperation>
         dirty_components_;
@@ -238,13 +246,18 @@ class DemoUiApp {
    public:
     explicit DemoUiApp(std::string title, int port = 0,
                        std::string host = "127.0.0.1",
-                       std::filesystem::path static_root = {});
+                       std::filesystem::path static_root = {},
+                       Theme theme = Theme::dark,
+                       Layout layout = Layout::automatic);
     ~DemoUiApp();
 
     DemoUiApp(const DemoUiApp&) = delete;
     DemoUiApp& operator=(const DemoUiApp&) = delete;
 
-    Card* add_card(const std::string& title);
+    Card* add_card(const std::string& title, CardArea area = CardArea::main,
+                   int span = 1);
+    void set_theme(Theme theme);
+    void set_layout(Layout layout);
     void set_data(Json value);
     void update_data(const std::vector<std::string>& path, Json value,
                      bool create_missing = false);

@@ -17,6 +17,9 @@ using GridBounds = std::array<double, 4>;
 
 enum class Severity { success, warning, danger };
 enum class Freshness { fresh, aging, stale };
+enum class Theme { dark, light };
+enum class Layout { automatic, grid_2, grid_3, sidebar_main };
+enum class CardArea { main, sidebar };
 
 inline const char* to_string(Severity value) {
     switch (value) {
@@ -40,6 +43,40 @@ inline const char* to_string(Freshness value) {
             return "stale";
     }
     return "fresh";
+}
+
+inline const char* to_string(Theme value) {
+    switch (value) {
+        case Theme::dark:
+            return "dark";
+        case Theme::light:
+            return "light";
+    }
+    throw std::invalid_argument("DemoUiApp: invalid theme");
+}
+
+inline const char* to_string(Layout value) {
+    switch (value) {
+        case Layout::automatic:
+            return "auto";
+        case Layout::grid_2:
+            return "grid-2";
+        case Layout::grid_3:
+            return "grid-3";
+        case Layout::sidebar_main:
+            return "sidebar-main";
+    }
+    throw std::invalid_argument("DemoUiApp: invalid layout");
+}
+
+inline const char* to_string(CardArea value) {
+    switch (value) {
+        case CardArea::main:
+            return "main";
+        case CardArea::sidebar:
+            return "sidebar";
+    }
+    throw std::invalid_argument("Card: invalid area");
 }
 
 inline double freshness_opacity(Freshness value) {
@@ -68,6 +105,13 @@ inline void require_positive(int value, const std::string& name,
     if (value <= 0) {
         throw std::invalid_argument(error_prefix + name +
                                     " must be a positive integer");
+    }
+}
+
+inline void require_card_span(int value) {
+    if (value < 1 || value > 3) {
+        throw std::invalid_argument(
+            "Card: span must be an integer from 1 to 3");
     }
 }
 

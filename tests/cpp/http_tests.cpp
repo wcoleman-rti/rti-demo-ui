@@ -134,6 +134,13 @@ int main() {
     CHECK(theme_response != nullptr);
     if (theme_response) CHECK(theme_response->body == theme_contents.str());
 
+    std::ifstream runtime_file(SOURCE_ROOT "/assets/runtime.js", std::ios::binary);
+    std::ostringstream runtime_contents;
+    runtime_contents << runtime_file.rdbuf();
+    auto runtime_response = client.Get("/sdk/runtime.js");
+    CHECK(runtime_response != nullptr);
+    if (runtime_response) CHECK(runtime_response->body == runtime_contents.str());
+
     std::ifstream runtime3d_file(SOURCE_ROOT "/assets/runtime3d.js",
                                  std::ios::binary);
     std::ostringstream runtime3d_contents;

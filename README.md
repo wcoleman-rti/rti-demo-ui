@@ -44,6 +44,10 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+The built-in page supports governed `dark`/`light` themes and `auto`, `grid-2`,
+`grid-3`, and `sidebar-main` layouts. See the language API guides for
+constructor and live mutation examples.
+
 C++:
 
 ```cpp
@@ -64,6 +68,13 @@ int main() {
 See [examples/py/simple.py](examples/py/simple.py) and
 [examples/cpp/simple.cpp](examples/cpp/simple.cpp) for animation and graceful
 interactive shutdown.
+
+Run the application-owned gallery in any governed presentation:
+
+```bash
+PYTHONPATH=python python examples/py/gallery.py --theme light --layout grid-3
+./build/cpp/examples/rti_demo_ui_gallery --theme dark --layout sidebar-main
+```
 
 ## Arm 3D pilot
 

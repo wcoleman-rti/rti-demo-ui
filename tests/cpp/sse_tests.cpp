@@ -224,7 +224,8 @@ std::string read_event_chunk(RawStream& stream, const std::string& prefix) {
 
 void test_snapshot_patch_heartbeat_and_disconnect() {
     DemoUiApp app("C++ Events");
-    Metric* metric = app.add_card("Status")->add_metric("Rate", 1);
+    Card* card = app.add_card("Status");
+    Metric* metric = card->add_metric("Rate", 1);
     std::thread server([&app]() { app.run(); });
     app.wait_until_ready();
     detail::SseTestAccess::set_heartbeat(app, std::chrono::milliseconds(20));
@@ -257,6 +258,20 @@ void test_snapshot_patch_heartbeat_and_disconnect() {
     CHECK(patch["changes"][1]["op"] == "upsert-component");
     CHECK(patch["changes"][1]["value"]["data"]["value"] == 42);
 
+    app.set_theme(Theme::light);
+    app.set_layout(Layout::grid_2);
+    card->set_span(2);
+    const Json presentation_patch =
+        event_data(read_event_chunk(stream, "event: patch"));
+    CHECK(presentation_patch["revision"] == 8);
+    CHECK(presentation_patch["changes"].size() == 2);
+    CHECK((presentation_patch["changes"][0] ==
+           Json{{"op", "replace-presentation"},
+                {"theme", "light"},
+                {"layout", "grid-2"}}));
+    CHECK(presentation_patch["changes"][1]["op"] == "upsert-card");
+    CHECK(presentation_patch["changes"][1]["value"]["span"] == 2);
+
     detail::SseTestAccess::delay_next_publication(
         app, std::chrono::milliseconds(100));
     const auto previous_publication = std::chrono::steady_clock::now();
@@ -264,7 +279,7 @@ void test_snapshot_patch_heartbeat_and_disconnect() {
     metric->set_value(100);
     const Json next_patch =
         event_data(read_event_chunk(stream, "event: patch"));
-    CHECK(next_patch["revision"] == 7);
+    CHECK(next_patch["revision"] == 10);
     CHECK(next_patch["changes"][0]["value"]["data"]["value"] == 100);
     CHECK(std::chrono::steady_clock::now() - previous_publication >=
           std::chrono::milliseconds(80));

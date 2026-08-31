@@ -29,6 +29,23 @@ class Freshness(str, Enum):
     stale = "stale"
 
 
+class Theme(str, Enum):
+    dark = "dark"
+    light = "light"
+
+
+class Layout(str, Enum):
+    auto = "auto"
+    grid_2 = "grid-2"
+    grid_3 = "grid-3"
+    sidebar_main = "sidebar-main"
+
+
+class CardArea(str, Enum):
+    main = "main"
+    sidebar = "sidebar"
+
+
 FRESHNESS_OPACITY = {
     Freshness.fresh: 1.0,
     Freshness.aging: 0.65,
@@ -85,6 +102,35 @@ def coerce_severity(value) -> Severity:
 
 def coerce_freshness(value) -> Freshness:
     return value if isinstance(value, Freshness) else Freshness(value)
+
+
+def coerce_theme(value) -> Theme:
+    if isinstance(value, Theme):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("DemoUiApp: invalid theme")
+    return Theme(value)
+
+
+def coerce_layout(value) -> Layout:
+    if isinstance(value, Layout):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("DemoUiApp: invalid layout")
+    return Layout(value)
+
+
+def coerce_card_area(value) -> CardArea:
+    if isinstance(value, CardArea):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("Card: invalid area")
+    return CardArea(value)
+
+
+def require_card_span(value) -> None:
+    if type(value) is not int or value not in (1, 2, 3):
+        raise ValueError("Card: span must be an integer from 1 to 3")
 
 
 def copy_json_value(value: Any, error_prefix: str = "") -> Any:
