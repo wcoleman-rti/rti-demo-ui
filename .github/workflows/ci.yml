@@ -81,9 +81,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install \
             -e . \
+            -e native/python \
+            pytest==8.4.2 \
             -r tools/native_webview_spike/requirements.txt
       - name: Build C++ native host
         run: |
+          cmake -S native/cpp \
+            -B build/native-phase1 \
+            -DBUILD_TESTING=ON \
+            -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
+          cmake --build build/native-phase1 --parallel
           cmake -S tools/native_webview_spike \
             -B build/native-webview-spike-real \
             -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
@@ -93,6 +100,11 @@ jobs:
             --parallel
       - name: Run native lifecycle tests
         run: |
+          PYTHONPATH=python:native/python/src \
+            python -m pytest native/python/tests -q
+          ctest --test-dir build/native-phase1 \
+            --output-on-failure \
+            -LE real_engine
           PYTHONPATH=tools/native_webview_spike \
             python -m unittest -v \
             tools/native_webview_spike/test_python_lifecycle.py \
@@ -116,6 +128,27 @@ jobs:
           cpp_host="./build/native-webview-spike-real/native_webview_cpp_host"
           rm -rf "$work"
           mkdir -p "$work"
+
+          XDG_DATA_HOME="$work/phase1-python-profile" \
+            timeout 40s python - <<'PY'
+          import asyncio
+
+          from rti_demo_ui import DemoUiApp
+          from rti_demo_ui_native import run_native
+
+          async def close_after_start(_app):
+              await asyncio.sleep(0.5)
+
+          run_native(
+              DemoUiApp("Native Phase 1 Python smoke"),
+              application_id="org.rti.phase1-smoke",
+              async_main=close_after_start,
+          )
+          PY
+          XDG_DATA_HOME="$work/phase1-cpp-profile" \
+            ctest --test-dir build/native-phase1 \
+              --output-on-failure \
+              -L real_engine
 
           timeout 40s python tools/native_webview_spike/python_host.py \
             --timeout 20 \

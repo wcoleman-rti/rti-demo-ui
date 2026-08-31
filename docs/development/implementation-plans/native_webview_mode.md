@@ -2,10 +2,10 @@
 
 ## Status
 
-Technology spike completed on 2026-08-31. Linux Python and C++ pass the local
-real-engine, lifecycle, profile, navigation, and headless conformance gates,
-both manual Linux checks, and the Ubuntu 22.04 hosted job. Phase 1 may proceed
-as Linux-first work; macOS and Windows remain unsupported.
+Phase 0 and Phase 1 completed on 2026-08-31. Linux Python and C++ passed the
+technology gates, and the independently packaged runner cores now provide the
+planned synchronous APIs with managed server ownership and failure cleanup.
+Phase 2 may proceed as Linux-first work; macOS and Windows remain unsupported.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -183,7 +183,10 @@ target_link_libraries(my_demo PRIVATE
 ```cpp
 #include <rti_demo_ui_native/native_webview.hpp>
 
-rti::demo::ui::native::run(app, {.width = 1280, .height = 800});
+rti::demo::ui::native::NativeWindowOptions options;
+options.width = 1280;
+options.height = 800;
+rti::demo::ui::native::run(app, options);
 ```
 
 The native target contains webview 0.12.0 and platform link flags. Its package
@@ -359,6 +362,68 @@ never imported or linked unless the application opts in.
 - Add the C++ native target, generated dependency integration, and platform
   link configuration.
 - Implement server-thread ownership and all startup/cleanup guards.
+
+#### Phase 1 Result (2026-08-31)
+
+Phase 1 is complete for the supported Linux combinations:
+
+- `native/python/` is an independently versioned `rti-demo-ui-native`
+  distribution. It pins the compatible core `0.4.x` line and pywebview 6.2.1,
+  imports pywebview only when `run_native()` is called, validates its options
+  and app state, creates an application-ID-scoped profile, and keeps the core
+  package manifest unchanged.
+- `run_native()` owns the app's asyncio loop on a joined worker thread while
+  pywebview creation and execution remain on the calling main thread.
+  `async_main` runs on the owner loop; normal return, exception, window
+  initialization failure, window close, independent server stop, and bind
+  failure all converge on app stop and owner-thread join. Application exceptions
+  are re-raised after cleanup and native/lifecycle failures use
+  `NativeWebviewError`.
+- `native/cpp/` is an independently versioned opt-in CMake project exporting
+  `rti_demo_ui_native::native_webview`. It fetches pinned webview 0.12.0 only
+  when configured, requires an existing or source-provided core target, retains
+  C++17, and leaves the root/core CMake graph free of GTK and WebKitGTK probes.
+- C++ `native::run()` starts `DemoUiApp::run()` on one joined server thread,
+  races readiness against early server completion so bind failure cannot hang,
+  creates and runs webview on the calling thread, closes the window when the
+  server ends independently, and stops and joins the server after every window
+  exit or initialization failure.
+- Fake-host suites cover validation, early bind failure, after-bind window
+  failure, normal close, independent server stop, `async_main` completion,
+  exception and cancellation, single-use app enforcement, released ports, and
+  joined execution contexts. Real Python and C++ production API smoke tests pass
+  under Xvfb/D-Bus/WebKitGTK, and the Ubuntu 22.04 native job is configured to
+  run both suites.
+
+The C++ host uses the public Linux native window handle for initial resizable
+dimensions because webview 0.12.0 performs the GTK resize but incorrectly
+returns `WEBVIEW_ERROR_INVALID_ARGUMENT` from `set_size()`. This bounded
+adapter avoids ignoring a reported error or patching the dependency.
+
+Navigation restriction, C++ persistent-cookie configuration, signal
+coordination, examples, and full frontend conformance remain Phase 2 work.
+Installation and release documentation remain Phase 3 work.
+
+Phase 1 verification commands:
+
+```bash
+PYTHONPATH=python:native/python/src \
+  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  -m pytest native/python/tests -q
+
+/tmp/rti-demo-ui-native-spike-venv/bin/python -m pip wheel \
+  --no-deps --wheel-dir /tmp/rti-native-phase1-wheel native/python
+
+cmake -S native/cpp -B build/native-phase1 \
+  -DBUILD_TESTING=ON \
+  -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
+cmake --build build/native-phase1 --parallel
+ctest --test-dir build/native-phase1 --output-on-failure -LE real_engine
+
+LIBGL_ALWAYS_SOFTWARE=1 dbus-run-session -- \
+  xvfb-run -a -s "-screen 0 1440x900x24" \
+  ctest --test-dir build/native-phase1 --output-on-failure -L real_engine
+```
 
 ### Phase 2: Platform Integration
 

@@ -1053,6 +1053,18 @@ class DemoUiApp:
     def ready_info(self) -> Optional[ReadyInfo]:
         return self._ready_info
 
+    @property
+    def title(self) -> str:
+        return self._model.title
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def run_started(self) -> bool:
+        return self._run_started
+
     def register_command(
         self,
         name: str,

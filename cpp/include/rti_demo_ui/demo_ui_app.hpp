@@ -269,6 +269,9 @@ class DemoUiApp {
     void stop() noexcept;
     void wait_until_ready();
     std::optional<ReadyInfo> ready_info() const;
+    const std::string& title() const noexcept { return model_.title_; }
+    const std::string& host() const noexcept { return host_; }
+    bool run_started() const noexcept { return run_started_.load(); }
 
    private:
     friend class detail::ModelTestAccess;

@@ -63,6 +63,7 @@ add_library(rti_demo_ui_core STATIC
     src/demo_ui_app.cpp
     src/components.cpp
 )
+set_target_properties(rti_demo_ui_core PROPERTIES VERSION 0.4.0)
 
 target_include_directories(rti_demo_ui_core
     PUBLIC

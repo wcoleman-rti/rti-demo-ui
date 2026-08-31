@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rti-demo-ui-native"
+version = "0.4.0"
+description = "Optional native webview runner for RTI Demo UI"
+requires-python = ">=3.11"
+dependencies = [
+    "rti-demo-ui>=0.4,<0.5",
+    "pywebview[gtk]==6.2.1; sys_platform == 'linux'",
+    "pywebview==6.2.1; sys_platform != 'linux'",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
