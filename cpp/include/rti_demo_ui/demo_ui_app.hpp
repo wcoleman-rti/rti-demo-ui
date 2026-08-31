@@ -122,6 +122,8 @@ class SseManager {
     };
 
     enum class DeliveryKind { state, heartbeat, stopped };
+    enum class WriteResult { written, unwritable, failed, timed_out };
+    using Writer = std::function<WriteResult(const char*, size_t)>;
 
     struct Delivery {
         DeliveryKind kind;
@@ -140,6 +142,9 @@ class SseManager {
     Delivery next(const std::shared_ptr<Subscriber>& subscriber);
     void delivered(const std::shared_ptr<Subscriber>& subscriber,
                    const Delivery& delivery, bool success);
+    bool write(const std::shared_ptr<Subscriber>& subscriber,
+               const Delivery* delivery, const char* data, size_t size,
+               const Writer& writer);
 
    private:
     friend class SseTestAccess;

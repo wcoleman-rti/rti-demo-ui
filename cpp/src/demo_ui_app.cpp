@@ -545,7 +545,7 @@ std::optional<Json> Model::flush_dirty_targets_locked() {
 SseManager::SseManager(Model& model)
     : model_(model),
       publication_interval_(
-          std::chrono::duration_cast<Clock::duration>(kSsePublicationInterval)),
+          std::chrono::ceil<Clock::duration>(kSsePublicationInterval)),
       heartbeat_interval_(kSseHeartbeatInterval) {}
 
 SseManager::~SseManager() { stop(); }
@@ -669,6 +669,18 @@ void SseManager::delivered(const std::shared_ptr<Subscriber>& subscriber,
     } else if (delivery.reset) {
         subscriber->reset_pending = false;
     }
+}
+
+bool SseManager::write(const std::shared_ptr<Subscriber>& subscriber,
+                       const Delivery* delivery, const char* data, size_t size,
+                       const Writer& writer) {
+    const bool success = writer(data, size) == WriteResult::written;
+    if (delivery) {
+        delivered(subscriber, *delivery, success);
+    } else if (!success) {
+        unsubscribe(subscriber);
+    }
+    return success;
 }
 
 void SseManager::run() {
@@ -985,15 +997,19 @@ void DemoUiApp::run() {
         res.set_chunked_content_provider(
             "text/event-stream",
             [manager, subscriber, retry_sent](size_t, httplib::DataSink& sink) {
+                const detail::SseManager::Writer writer =
+                    [&sink](const char* data, size_t size) {
+                        if (!sink.is_writable()) {
+                            return detail::SseManager::WriteResult::unwritable;
+                        }
+                        return sink.write(data, size)
+                                   ? detail::SseManager::WriteResult::written
+                                   : detail::SseManager::WriteResult::failed;
+                    };
                 if (!*retry_sent) {
                     *retry_sent = true;
-                    const bool written =
-                        sink.is_writable() &&
-                        sink.write(kSseRetry, sizeof(kSseRetry) - 1);
-                    if (!written) {
-                        manager->unsubscribe(subscriber);
-                    }
-                    return written;
+                    return manager->write(subscriber, nullptr, kSseRetry,
+                                          sizeof(kSseRetry) - 1, writer);
                 }
                 const auto delivery = manager->next(subscriber);
                 if (delivery.kind ==
@@ -1003,19 +1019,12 @@ void DemoUiApp::run() {
                 }
                 if (delivery.kind ==
                     detail::SseManager::DeliveryKind::heartbeat) {
-                    const bool written =
-                        sink.is_writable() &&
-                        sink.write(kSseHeartbeat, sizeof(kSseHeartbeat) - 1);
-                    if (!written) {
-                        manager->unsubscribe(subscriber);
-                    }
-                    return written;
+                    return manager->write(subscriber, nullptr, kSseHeartbeat,
+                                          sizeof(kSseHeartbeat) - 1, writer);
                 }
                 const auto& body = *delivery.event->body;
-                const bool written =
-                    sink.is_writable() && sink.write(body.data(), body.size());
-                manager->delivered(subscriber, delivery, written);
-                return written;
+                return manager->write(subscriber, &delivery, body.data(),
+                                      body.size(), writer);
             },
             [manager, subscriber](bool) { manager->unsubscribe(subscriber); });
     });

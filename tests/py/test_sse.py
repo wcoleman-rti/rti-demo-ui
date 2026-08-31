@@ -166,6 +166,56 @@ async def test_publication_is_live_and_limited_to_thirty_hertz():
 
 
 @pytest.mark.asyncio
+async def test_sustained_burst_is_bounded_and_converges_to_latest_state():
+    app = DemoUiApp("Events")
+    metric = app.add_card("Status").add_metric("Rate", 0)
+    run_task = await start_app(app)
+    subscriber = app._events.subscribe()
+    subscriber.queue.get_nowait()
+    loop = asyncio.get_running_loop()
+    publication_times = []
+    publications = []
+    max_queue_size = 0
+    original_publish = app._events._publish
+
+    def record_publish(patch):
+        nonlocal max_queue_size
+        original_publish(patch)
+        publication_times.append(loop.time())
+        publications.append(patch)
+        max_queue_size = max(max_queue_size, subscriber.queue.qsize())
+        subscriber.queue.get_nowait()
+
+    app._events._publish = record_publish
+    try:
+        last_value = 0
+        burst_end = loop.time() + 1.05
+        while loop.time() < burst_end:
+            last_value += 1
+            metric.set_value(last_value)
+            await asyncio.sleep(0.001)
+
+        deadline = loop.time() + 0.2
+        while (
+            not publications or publications[-1]["revision"] != app._model.revision
+        ) and loop.time() < deadline:
+            await asyncio.sleep(0.001)
+
+        assert publications[-1]["revision"] == app._model.revision
+        assert publications[-1]["changes"][0]["value"]["data"]["value"] == last_value
+        for start in publication_times:
+            assert (
+                sum(start <= value < start + 1.0 for value in publication_times) <= 30
+            )
+        assert subscriber.queue.maxsize == 1
+        assert max_queue_size == 1
+        assert not subscriber.closed
+    finally:
+        await app.stop()
+        await run_task
+
+
+@pytest.mark.asyncio
 async def test_event_stream_admission_is_bounded_at_sixteen():
     app = DemoUiApp("Events")
     run_task = await start_app(app)

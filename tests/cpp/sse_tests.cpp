@@ -6,9 +6,11 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -73,6 +75,27 @@ class SseTestAccess {
         std::unique_lock<std::mutex> lock(manager.mutex_);
         return manager.cv_.wait_for(lock, std::chrono::seconds(1),
                                     [&]() { return subscriber->closed; });
+    }
+
+    static void set_tail_revision(
+        DemoUiApp& app, const std::shared_ptr<SseManager::Subscriber>& subscriber,
+        long revision) {
+        auto& manager = *app.sse_manager_;
+        std::lock_guard<std::mutex> guard(manager.mutex_);
+        subscriber->tail_revision = revision;
+    }
+
+    static size_t pending_slot_count(
+        DemoUiApp& app,
+        const std::shared_ptr<SseManager::Subscriber>& subscriber) {
+        auto& manager = *app.sse_manager_;
+        std::lock_guard<std::mutex> guard(manager.mutex_);
+        return subscriber->pending ? 1 : 0;
+    }
+
+    static long model_revision(DemoUiApp& app) {
+        std::lock_guard<std::mutex> guard(app.model_.lock());
+        return app.model_.revision_;
     }
 };
 }  // namespace rti::demo::ui::detail
@@ -325,6 +348,246 @@ void test_slow_subscriber_snapshot_reset_and_close() {
     server.join();
 }
 
+void test_multi_client_publication_order_and_tail_reset() {
+    DemoUiApp app("C++ Ordering");
+    Metric* metric = app.add_card("Status")->add_metric("Rate", 0);
+    std::thread server([&app]() { app.run(); });
+    app.wait_until_ready();
+    auto& manager = detail::SseTestAccess::manager(app);
+    auto first = manager.subscribe();
+    auto second = manager.subscribe();
+    auto mismatch = manager.subscribe();
+    for (const auto& subscriber : {first, second, mismatch}) {
+        const auto initial = manager.next(subscriber);
+        CHECK(initial.event->snapshot);
+        manager.delivered(subscriber, initial, true);
+    }
+    detail::SseTestAccess::set_tail_revision(app, mismatch, 99);
+    detail::SseTestAccess::delay_next_publication(
+        app, std::chrono::milliseconds(50));
+
+    app.set_data(Json{{"mode", "live"}});
+    metric->set_value(1);
+    metric->set_value(2);
+    CHECK(detail::SseTestAccess::wait_for_pending(app, first, false));
+    CHECK(detail::SseTestAccess::wait_for_pending(app, second, false));
+    CHECK(detail::SseTestAccess::wait_for_pending(app, mismatch, true));
+    const auto first_patch = manager.next(first);
+    const auto second_patch = manager.next(second);
+    const auto reset = manager.next(mismatch);
+    CHECK(first_patch.event->body == second_patch.event->body);
+    CHECK(first_patch.event->revision == second_patch.event->revision);
+    CHECK(reset.event->revision == first_patch.event->revision);
+    CHECK(event_data(*first_patch.event->body)["revision"] ==
+          first_patch.event->revision);
+    CHECK(event_data(*reset.event->body)["revision"] == reset.event->revision);
+    manager.delivered(first, first_patch, true);
+    manager.delivered(second, second_patch, true);
+    manager.delivered(mismatch, reset, true);
+
+    metric->set_value(3);
+    CHECK(detail::SseTestAccess::wait_for_pending(app, first, false));
+    CHECK(detail::SseTestAccess::wait_for_pending(app, second, false));
+    CHECK(detail::SseTestAccess::wait_for_pending(app, mismatch, false));
+    const auto next_first = manager.next(first);
+    const auto next_second = manager.next(second);
+    const auto next_mismatch = manager.next(mismatch);
+    CHECK(next_first.event->revision > first_patch.event->revision);
+    CHECK(next_first.event->body == next_second.event->body);
+    CHECK(next_first.event->body == next_mismatch.event->body);
+    manager.delivered(first, next_first, true);
+    manager.delivered(second, next_second, true);
+    manager.delivered(mismatch, next_mismatch, true);
+
+    manager.unsubscribe(first);
+    manager.unsubscribe(second);
+    manager.unsubscribe(mismatch);
+    app.stop();
+    server.join();
+}
+
+void test_provider_writer_failure_outcomes_close_subscribers() {
+    DemoUiApp app("C++ Writer");
+    std::thread server([&app]() { app.run(); });
+    app.wait_until_ready();
+    auto& manager = detail::SseTestAccess::manager(app);
+    const detail::SseManager::WriteResult outcomes[] = {
+        detail::SseManager::WriteResult::timed_out,
+        detail::SseManager::WriteResult::failed,
+        detail::SseManager::WriteResult::unwritable};
+
+    for (const auto outcome : outcomes) {
+        auto subscriber = manager.subscribe();
+        const auto delivery = manager.next(subscriber);
+        bool called = false;
+        const bool written = manager.write(
+            subscriber, &delivery, delivery.event->body->data(),
+            delivery.event->body->size(),
+            [&called, outcome](const char*, size_t) {
+                called = true;
+                return outcome;
+            });
+        CHECK(called);
+        CHECK(!written);
+        CHECK(detail::SseTestAccess::subscriber_count(app) == 0);
+    }
+
+    app.stop();
+    server.join();
+}
+
+void test_sustained_burst_is_bounded_and_converges_to_latest_state() {
+    DemoUiApp app("C++ Burst");
+    Metric* metric = app.add_card("Status")->add_metric("Rate", 0);
+    std::thread server([&app]() { app.run(); });
+    app.wait_until_ready();
+    auto& manager = detail::SseTestAccess::manager(app);
+    auto subscriber = manager.subscribe();
+    const auto initial = manager.next(subscriber);
+    manager.delivered(subscriber, initial, true);
+
+    std::mutex publications_mutex;
+    std::condition_variable publications_cv;
+    std::vector<std::chrono::steady_clock::time_point> publication_times;
+    std::vector<Json> publications;
+    std::thread consumer([&]() {
+        while (true) {
+            const auto delivery = manager.next(subscriber);
+            if (delivery.kind == detail::SseManager::DeliveryKind::stopped) {
+                return;
+            }
+            if (delivery.kind == detail::SseManager::DeliveryKind::heartbeat) {
+                continue;
+            }
+            const Json publication = event_data(*delivery.event->body);
+            manager.delivered(subscriber, delivery, true);
+            {
+                std::lock_guard<std::mutex> guard(publications_mutex);
+                publication_times.push_back(std::chrono::steady_clock::now());
+                publications.push_back(publication);
+            }
+            publications_cv.notify_all();
+        }
+    });
+
+    int last_value = 0;
+    const auto burst_end =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(1050);
+    while (std::chrono::steady_clock::now() < burst_end) {
+        metric->set_value(++last_value);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const long final_revision = detail::SseTestAccess::model_revision(app);
+    {
+        std::unique_lock<std::mutex> lock(publications_mutex);
+        CHECK(publications_cv.wait_for(
+            lock, std::chrono::milliseconds(250), [&]() {
+                return !publications.empty() &&
+                       publications.back()["revision"] == final_revision;
+            }));
+        if (publications.empty()) {
+            manager.unsubscribe(subscriber);
+            lock.unlock();
+            consumer.join();
+            app.stop();
+            server.join();
+            return;
+        }
+        CHECK(publications.back()["changes"][0]["value"]["data"]["value"] ==
+              last_value);
+        for (const auto start : publication_times) {
+            size_t count = 0;
+            for (const auto value : publication_times) {
+                if (value >= start && value < start + std::chrono::seconds(1)) {
+                    ++count;
+                }
+            }
+            CHECK(count <= 30);
+        }
+    }
+    CHECK(detail::SseTestAccess::pending_slot_count(app, subscriber) <= 1);
+
+    manager.unsubscribe(subscriber);
+    consumer.join();
+    app.stop();
+    server.join();
+}
+
+void test_four_workers_remain_available_with_sixteen_streams() {
+    DemoUiApp app("C++ Worker Barrier");
+    std::mutex barrier_mutex;
+    std::condition_variable barrier_cv;
+    int entered = 0;
+    bool released = false;
+    for (const std::string name : {"worker-a", "worker-b", "worker-c",
+                                   "worker-d"}) {
+        app.register_command(
+            name,
+            CommandSchema(Json{{"type", "object"},
+                               {"additionalProperties", false}}),
+            [&](const Json&) {
+                std::unique_lock<std::mutex> lock(barrier_mutex);
+                ++entered;
+                barrier_cv.notify_all();
+                barrier_cv.wait(lock, [&]() { return released; });
+                return Json::object();
+            });
+    }
+    std::thread server([&app]() { app.run(); });
+    app.wait_until_ready();
+    const ReadyInfo info = *app.ready_info();
+    std::vector<std::unique_ptr<RawStream>> streams;
+    for (int index = 0; index < 16; ++index) {
+        auto stream = std::make_unique<RawStream>(info);
+        stream->read_headers();
+        stream->read_chunk();
+        stream->read_chunk();
+        streams.push_back(std::move(stream));
+    }
+
+    httplib::Client capability_client(info.host, info.port);
+    httplib::Headers origin{{"Origin", info.url}};
+    const auto capability =
+        capability_client.Get("/api/command-capability", origin);
+    CHECK(capability != nullptr && capability->status == 200);
+    if (!capability || capability->status != 200) {
+        app.stop();
+        server.join();
+        return;
+    }
+    const std::string token =
+        Json::parse(capability->body)["capability"].get<std::string>();
+    std::vector<int> statuses(4, 0);
+    std::vector<std::thread> requests;
+    const std::string names[] = {"worker-a", "worker-b", "worker-c",
+                                 "worker-d"};
+    for (int index = 0; index < 4; ++index) {
+        requests.emplace_back([&, index]() {
+            httplib::Client client(info.host, info.port);
+            client.set_read_timeout(3, 0);
+            httplib::Headers headers{
+                {"Origin", info.url},
+                {"X-RTI-Demo-Command-Capability", token}};
+            const auto response = client.Post(
+                "/api/commands/" + names[index], headers, "{}",
+                "application/json");
+            statuses[index] = response ? response->status : 0;
+        });
+    }
+    {
+        std::unique_lock<std::mutex> lock(barrier_mutex);
+        CHECK(barrier_cv.wait_for(lock, std::chrono::seconds(2),
+                                  [&]() { return entered == 4; }));
+        released = true;
+        barrier_cv.notify_all();
+    }
+    for (auto& request : requests) request.join();
+    for (const int status : statuses) CHECK(status == 200);
+
+    app.stop();
+    server.join();
+}
+
 void test_concurrent_mutation_and_subscription_lock_order() {
     DemoUiApp app("C++ Lock Order");
     std::thread server([&app]() { app.run(); });
@@ -356,6 +619,10 @@ int main() {
     test_snapshot_patch_heartbeat_and_disconnect();
     test_admission_reserves_ordinary_workers();
     test_slow_subscriber_snapshot_reset_and_close();
+    test_multi_client_publication_order_and_tail_reset();
+    test_provider_writer_failure_outcomes_close_subscribers();
+    test_sustained_burst_is_bounded_and_converges_to_latest_state();
+    test_four_workers_remain_available_with_sixteen_streams();
     test_concurrent_mutation_and_subscription_lock_order();
     if (g_failures == 0) {
         std::printf("All SSE tests passed\n");
