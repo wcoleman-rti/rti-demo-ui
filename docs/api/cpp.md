@@ -40,6 +40,12 @@ state uses `set_data()` and `update_data()`. Commands use `register_command()`
 with the shared schema subset and are available only for literal loopback
 hosts.
 
+Both `GET /api/state` and `GET /api/events` are served by the C++ backend.
+Browser transport selection is not a `DemoUiApp` constructor option: custom
+JavaScript calls `createClient({transport: "sse"})` to opt into SSE or omits the
+option to retain polling. See
+[Custom Frontends](../custom-frontends.md#browser-transport).
+
 For complete signatures and validation semantics, use the public headers and
 [architecture](../architecture.md) as the source of truth.
 

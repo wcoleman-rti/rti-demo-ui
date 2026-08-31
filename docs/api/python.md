@@ -79,6 +79,12 @@ The SDK serves `/sdk/...` assets and reserves `/api/...`; other files come from
 the validated root. See [Custom Frontends](../custom-frontends.md) for the
 route and security contract.
 
+Both `GET /api/state` and `GET /api/events` are available in built-in and custom
+frontend modes. Browser transport selection is not a `DemoUiApp` constructor
+option: custom JavaScript calls `createClient({transport: "sse"})` to opt into
+SSE or omits the option to retain polling. See
+[Custom Frontends](../custom-frontends.md#browser-transport).
+
 For complete signatures and validation semantics, use the Python type hints,
 docstrings, and [architecture](../architecture.md) as the source of truth.
 

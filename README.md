@@ -11,8 +11,10 @@ in [docs/third-party.md](docs/third-party.md).
 Each backend owns the authoritative component model (`DemoUiApp`, `Card`,
 `Scene2DViewport`, `Scene3DViewport`, generic state components, and custom
 components) and serves
-an identical v2 JSON snapshot; the browser owns DOM/SVG rendering via the
-supported `/sdk/client.js` transport and shared `runtime.js`. Scene3D is an
+an identical v2 JSON snapshot and SSE stream; the browser owns DOM/SVG rendering
+via the supported `/sdk/client.js` transport and shared `runtime.js`. Polling is
+the compatibility default, while custom frontends may explicitly select SSE.
+Scene3D is an
 opt-in dynamic import of the bundled `/sdk/runtime3d.js`; ordinary pages never
 load Three.js. There is no Node.js process or DDS dependency at runtime.
 
@@ -133,17 +135,32 @@ passes its own `examples/web/gallery` directory as `static_root` and serves at
 
 Pass an application-owned directory containing `index.html` as `static_root`.
 The SDK keeps `/sdk/index.html`, `/sdk/runtime.js`, `/sdk/runtime3d.js`,
-`/sdk/client.js`, `/sdk/theme.css`,
-`/api/health`, and `/api/state` reserved in both modes. Other paths resolve
-under the validated static root; traversal, absolute paths, directories, and
-symlinks escaping the root are rejected. Unknown `/api/` paths return JSON 404;
-unknown `/sdk/` paths return static 404. See
+`/sdk/client.js`, `/sdk/theme.css`, `/api/health`, `/api/state`, and
+`/api/events` reserved in both modes. Other paths resolve under the validated
+static root; traversal, absolute paths, directories, and symlinks escaping the
+root are rejected. Unknown `/api/` paths return JSON 404; unknown `/sdk/` paths
+return static 404. See
 [docs/custom-frontends.md](docs/custom-frontends.md) for the complete route,
 MIME, security, and CSS compatibility contract.
 
 The canonical CSS is always available at `/sdk/theme.css`; application pages
 should load it rather than copy `assets/theme.css`. The built-in HTML and
 gallery use `/sdk/runtime.js` and `/sdk/theme.css`.
+
+Custom JavaScript can opt into streaming without changing backend setup:
+
+```js
+import {createClient} from "/sdk/client.js";
+
+const client = createClient({transport: "sse"});
+client.subscribe((snapshot) => render(snapshot));
+client.start();
+```
+
+Omit `transport` (or select `"poll"`) for compatibility polling. Explicit SSE
+never falls back to polling; it requires a same-origin, unbuffered streaming
+path. See [docs/custom-frontends.md](docs/custom-frontends.md#browser-transport)
+for recovery, cleanup, and reverse-proxy constraints.
 
 ## Packaging and CMake consumption
 
