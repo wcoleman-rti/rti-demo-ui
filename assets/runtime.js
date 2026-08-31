@@ -17,6 +17,7 @@ import { createClient } from './client.js';
 
     var sceneStates = Object.create(null); // scene id -> { entities: Map, links, boundsEl, config }
     var scene3dStates = Object.create(null);
+    var componentSnapshots = Object.create(null);
     var scene3dModulePromise = null;
     var scene3dModule = null;
 
@@ -120,6 +121,14 @@ import { createClient } from './client.js';
         var seenIds = Object.create(null);
         components.forEach(function (component) {
             seenIds[component.id] = true;
+            var snapshot = JSON.stringify(component);
+            var existing = document.getElementById(component.id);
+            if (
+                existing && existing.parentNode === container &&
+                componentSnapshots[component.id] === snapshot
+            ) {
+                return;
+            }
             if (component.type === 'scene2d') {
                 reconcileScene2d(container, component);
             } else if (component.type === 'scene3d') {
@@ -131,6 +140,7 @@ import { createClient } from './client.js';
             } else {
                 renderUnsupported(container, component);
             }
+            componentSnapshots[component.id] = snapshot;
         });
         Array.prototype.slice.call(container.children).forEach(function (child) {
             if (!seenIds[child.dataset.componentId]) {
@@ -140,6 +150,7 @@ import { createClient } from './client.js';
                 }
                 container.removeChild(child);
                 delete sceneStates[child.dataset.componentId];
+                delete componentSnapshots[child.dataset.componentId];
             }
         });
     }

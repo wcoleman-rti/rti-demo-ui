@@ -11,7 +11,7 @@ import re
 import signal
 import subprocess
 import threading
-from itertools import product
+from itertools import combinations, product
 from pathlib import Path
 from shutil import copy2
 from urllib.request import urlopen
@@ -336,6 +336,25 @@ def _contrast_ratio(page, foreground_selector, background_selector):
     )
 
 
+def _assert_no_overlaps(boxes):
+    for left, right in combinations(boxes, 2):
+        separated = (
+            left["x"] + left["width"] <= right["x"]
+            or right["x"] + right["width"] <= left["x"]
+            or left["y"] + left["height"] <= right["y"]
+            or right["y"] + right["height"] <= left["y"]
+        )
+        assert separated
+
+
+def _capture_viewport_screenshot(page, path, width, height):
+    png = page.screenshot(path=path)
+    assert path.read_bytes() == png
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert int.from_bytes(png[16:20], "big") == width
+    assert int.from_bytes(png[20:24], "big") == height
+
+
 def test_arm3d_renders_for_both_backends(running_arm_server):
     _backend, base_url = running_arm_server
     with sync_playwright() as playwright:
@@ -511,6 +530,72 @@ def test_presentation_live_updates_preserve_nodes_and_source_order(running_app):
         browser.close()
 
 
+def test_presentation_updates_preserve_table_sort_and_focus_order(running_app):
+    _app, base_url = running_app
+    snapshot = _presentation_snapshot()
+    table = snapshot["cards"][2]["components"][1]
+    table["data"]["columns"] = [{"id": "event", "label": "Event"}]
+    table["data"]["rows"] = [
+        {"id": "event-a", "cells": {"event": "Alpha"}},
+        {"id": "event-b", "cells": {"event": "Bravo"}},
+    ]
+    state = {"snapshot": snapshot}
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        _route_snapshot(page, base_url, state)
+        page.goto(base_url + "/")
+        page.wait_for_selector("#table-c tr")
+        page.evaluate(
+            """() => {
+                const rows = document.querySelectorAll('#table-c tr');
+                document.querySelector('#table-c').append(rows[2], rows[1]);
+                window.sortedRows = Array.from(
+                    document.querySelectorAll('#table-c tr')
+                );
+                for (const card of document.querySelectorAll('.sdk-card')) {
+                    card.tabIndex = 0;
+                }
+                const start = document.createElement('button');
+                start.id = 'focus-start';
+                document.querySelector('#sdk-cards').before(start);
+            }"""
+        )
+
+        updated = json.loads(json.dumps(snapshot))
+        updated["revision"] = 2
+        updated["theme"] = "light"
+        updated["layout"] = "grid-3"
+        updated["cards"] = [
+            updated["cards"][1],
+            updated["cards"][0],
+            updated["cards"][2],
+        ]
+        updated["cards"][0]["span"] = 2
+        state["snapshot"] = updated
+        page.wait_for_function(
+            "document.documentElement.dataset.sdkTheme === 'light' && "
+            "document.querySelector('#sdk-cards').dataset.sdkLayout === 'grid-3'"
+        )
+
+        assert page.locator("#table-c tr").evaluate_all(
+            "rows => rows.slice(1).map(row => row.textContent)"
+        ) == ["Bravo", "Alpha"]
+        assert page.evaluate(
+            """() => window.sortedRows.every(
+                (row, index) => row === document.querySelectorAll('#table-c tr')[index]
+            )"""
+        )
+        page.locator("#focus-start").focus()
+        focused_cards = []
+        for _ in range(3):
+            page.keyboard.press("Tab")
+            focused_cards.append(page.evaluate("document.activeElement.id"))
+        assert focused_cards == ["card-b", "card-a", "card-c"]
+        browser.close()
+
+
 def test_malformed_presentation_fields_report_and_use_defaults(running_app):
     _app, base_url = running_app
     state = {"snapshot": _presentation_snapshot(theme="light", layout="grid-3")}
@@ -572,7 +657,7 @@ def test_malformed_presentation_fields_report_and_use_defaults(running_app):
 @pytest.mark.parametrize("theme", ["dark", "light"])
 @pytest.mark.parametrize("layout", ["auto", "grid-2", "grid-3", "sidebar-main"])
 def test_every_presentation_preset_is_responsive_and_readable(
-    running_app, theme, layout
+    running_app, tmp_path, theme, layout
 ):
     _app, base_url = running_app
     state = {"snapshot": _presentation_snapshot(theme=theme, layout=layout)}
@@ -586,10 +671,16 @@ def test_every_presentation_preset_is_responsive_and_readable(
         desktop_boxes = [
             page.locator(f"#card-{suffix}").bounding_box() for suffix in ("a", "b", "c")
         ]
+        _assert_no_overlaps(desktop_boxes)
         assert page.evaluate(
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         )
-        assert len(page.screenshot()) > 1000
+        _capture_viewport_screenshot(
+            page,
+            tmp_path / f"{theme}-{layout}-desktop.png",
+            1280,
+            900,
+        )
         assert _contrast_ratio(page, "#sdk-app-title", "body") >= 4.5
         assert (
             page.evaluate(
@@ -647,6 +738,7 @@ def test_every_presentation_preset_is_responsive_and_readable(
         mobile_boxes = [
             page.locator(f"#card-{suffix}").bounding_box() for suffix in ("a", "b", "c")
         ]
+        _assert_no_overlaps(mobile_boxes)
         assert len({box["x"] for box in mobile_boxes}) == 1
         assert [box["y"] for box in mobile_boxes] == sorted(
             box["y"] for box in mobile_boxes
@@ -654,7 +746,12 @@ def test_every_presentation_preset_is_responsive_and_readable(
         assert page.evaluate(
             "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
         )
-        assert len(page.screenshot()) > 1000
+        _capture_viewport_screenshot(
+            page,
+            tmp_path / f"{theme}-{layout}-mobile.png",
+            390,
+            844,
+        )
         browser.close()
 
 

@@ -7,6 +7,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace fs = std::filesystem;
 using namespace rti::demo::ui;
@@ -119,6 +120,30 @@ int main() {
     CHECK(std::string(to_string(Layout::sidebar_main)) == "sidebar-main");
     CHECK(std::string(to_string(CardArea::main)) == "main");
     CHECK(std::string(to_string(CardArea::sidebar)) == "sidebar");
+
+    const std::pair<Theme, const char*> constructor_themes[] = {
+        {Theme::dark, "dark"},
+        {Theme::light, "light"},
+    };
+    const std::pair<Layout, const char*> constructor_layouts[] = {
+        {Layout::automatic, "auto"},
+        {Layout::grid_2, "grid-2"},
+        {Layout::grid_3, "grid-3"},
+        {Layout::sidebar_main, "sidebar-main"},
+    };
+    for (const auto& [theme, expected_theme] : constructor_themes) {
+        for (const auto& [layout, expected_layout] : constructor_layouts) {
+            DemoUiApp app("Constructor Values", 0, "127.0.0.1", {}, theme,
+                          layout);
+            app.add_card("Telemetry",
+                         layout == Layout::sidebar_main ? CardArea::sidebar
+                                                       : CardArea::main);
+            RunningApp running(app);
+            const Json snapshot = running.snapshot();
+            CHECK(snapshot["theme"] == expected_theme);
+            CHECK(snapshot["layout"] == expected_layout);
+        }
+    }
 
     const Json expected_defaults = {
         {"schema_version", 2},
