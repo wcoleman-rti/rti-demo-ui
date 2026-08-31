@@ -7,6 +7,9 @@ import { createClient } from './client.js';
     'use strict';
 
     var SVG_NS = 'http://www.w3.org/2000/svg';
+    var THEMES = { dark: true, light: true };
+    var LAYOUTS = { auto: true, 'grid-2': true, 'grid-3': true, 'sidebar-main': true };
+    var CARD_AREAS = { main: true, sidebar: true };
 
     var reducedMotion = window.matchMedia
         ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -27,6 +30,36 @@ import { createClient } from './client.js';
         banner.classList.toggle('sdk-visible', visible);
     }
 
+    function presentationValue(value, allowed, fallback, field, context) {
+        if (typeof value === 'string' && allowed[value]) return value;
+        if (value !== undefined) {
+            console.warn(
+                'RTI Demo UI: invalid presentation ' + field + ' for ' + context +
+                '; using ' + fallback
+            );
+        }
+        return fallback;
+    }
+
+    function cardSpan(value, cardId) {
+        if (Number.isInteger(value) && value >= 1 && value <= 3) return value;
+        if (value !== undefined) {
+            console.warn(
+                'RTI Demo UI: invalid presentation span for card ' + cardId +
+                '; using 1'
+            );
+        }
+        return 1;
+    }
+
+    function applyPresentation(snapshot) {
+        var theme = presentationValue(snapshot.theme, THEMES, 'dark', 'theme', 'application');
+        var layout = presentationValue(snapshot.layout, LAYOUTS, 'auto', 'layout', 'application');
+        document.documentElement.dataset.sdkTheme = theme;
+        var cardsEl = byId('sdk-cards');
+        if (cardsEl) cardsEl.dataset.sdkLayout = layout;
+    }
+
     function applySnapshot(snapshot) {
         if (snapshot.schema_version !== 2) {
             var cardsEl = byId('sdk-cards');
@@ -38,6 +71,7 @@ import { createClient } from './client.js';
         var titleEl = byId('sdk-app-title');
         if (titleEl) titleEl.textContent = snapshot.title || '';
 
+        applyPresentation(snapshot);
         reconcileCards(snapshot.cards || []);
     }
 
@@ -45,6 +79,7 @@ import { createClient } from './client.js';
         var container = byId('sdk-cards');
         if (!container) return;
         var seenCardIds = Object.create(null);
+        var nextCardEl = container.firstElementChild;
 
         cards.forEach(function (card) {
             seenCardIds[card.id] = true;
@@ -59,8 +94,15 @@ import { createClient } from './client.js';
                 var bodyEl = document.createElement('div');
                 bodyEl.className = 'sdk-card-body';
                 cardEl.appendChild(bodyEl);
-                container.appendChild(cardEl);
             }
+            var area = presentationValue(
+                card.area, CARD_AREAS, 'main', 'area', 'card ' + card.id
+            );
+            var span = cardSpan(card.span, card.id);
+            cardEl.dataset.sdkArea = area;
+            cardEl.dataset.sdkSpan = String(span);
+            if (cardEl !== nextCardEl) container.insertBefore(cardEl, nextCardEl);
+            nextCardEl = cardEl.nextElementSibling;
             var titleNode = cardEl.querySelector('.sdk-card-title');
             if (titleNode.textContent !== card.title) titleNode.textContent = card.title;
             reconcileComponents(cardEl.querySelector('.sdk-card-body'), card.components || []);

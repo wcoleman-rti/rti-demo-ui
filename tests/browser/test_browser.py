@@ -4,6 +4,7 @@ Run explicitly: `pytest tests/browser/test_browser.py`.
 """
 
 import asyncio
+import json
 import os
 import queue
 import re
@@ -11,6 +12,8 @@ import signal
 import subprocess
 import threading
 from pathlib import Path
+from shutil import copy2
+from urllib.request import urlopen
 
 import pytest
 from playwright.sync_api import sync_playwright
@@ -57,6 +60,38 @@ def running_app():
 def running_gallery_app():
     static_root = Path(__file__).parents[2] / "examples" / "web" / "gallery"
     app = DemoUiApp(title="Gallery", static_root=static_root)
+    loop, thread = _start_app_on_thread(app)
+    try:
+        yield app, app.ready_info.url
+    finally:
+        asyncio.run_coroutine_threadsafe(app.stop(), loop).result(2)
+        thread.join(2)
+        assert not thread.is_alive()
+        loop.close()
+
+
+@pytest.fixture
+def running_builtin_scene3d_app(tmp_path):
+    repository_root = Path(__file__).parents[2]
+    copy2(repository_root / "assets" / "index.html", tmp_path / "index.html")
+    model_root = tmp_path / "models"
+    model_root.mkdir()
+    copy2(
+        repository_root / "examples/web/arm3d/models/scene3d-fixture.glb",
+        model_root / "scene3d-fixture.glb",
+    )
+    app = DemoUiApp(title="Built-In Scene3D", static_root=tmp_path)
+    scene = app.add_card("Arm monitor").add_scene_3d(
+        "/models/scene3d-fixture.glb"
+    )
+    for index, path in enumerate(
+        ["Arm/Base", "Arm/Shoulder", "Arm/Elbow", "Arm/Wrist", "Arm/Tool"]
+    ):
+        scene.add_node(
+            f"joint-{index}",
+            path,
+            position=(0.0, 0.25 + index * 0.6, 0.0),
+        )
     loop, thread = _start_app_on_thread(app)
     try:
         yield app, app.ready_info.url
@@ -172,6 +207,118 @@ def _assert_arm_page(page, base_url):
     assert errors == []
 
 
+def _presentation_snapshot(revision=1, theme="dark", layout="auto"):
+    return {
+        "schema_version": 2,
+        "revision": revision,
+        "title": "Presentation Browser Test",
+        "theme": theme,
+        "layout": layout,
+        "data": {},
+        "cards": [
+            {
+                "id": "card-a",
+                "title": "Controls",
+                "area": "sidebar" if layout == "sidebar-main" else "main",
+                "span": 1,
+                "components": [
+                    {
+                        "id": "text-a",
+                        "type": "text",
+                        "revision": revision,
+                        "data": {"text": "Controls ready", "severity": "success"},
+                    }
+                ],
+            },
+            {
+                "id": "card-b",
+                "title": "Telemetry",
+                "area": "main",
+                "span": 1,
+                "components": [
+                    {
+                        "id": "text-b",
+                        "type": "text",
+                        "revision": revision,
+                        "data": {"text": "Telemetry ready", "severity": "warning"},
+                    }
+                ],
+            },
+            {
+                "id": "card-c",
+                "title": "Events",
+                "area": "main",
+                "span": 1,
+                "components": [
+                    {
+                        "id": "text-c",
+                        "type": "text",
+                        "revision": revision,
+                        "data": {
+                            "text": "event-" + ("x" * 500),
+                            "severity": "danger",
+                        },
+                    },
+                    {
+                        "id": "table-c",
+                        "type": "table",
+                        "revision": revision,
+                        "data": {
+                            "columns": [{"key": "event", "label": "Event"}],
+                            "rows": [
+                                {
+                                    "id": "event-1",
+                                    "event": "table-" + ("y" * 500),
+                                }
+                            ],
+                            "empty_state": "",
+                        },
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def _route_snapshot(page, base_url, state):
+    page.route(
+        base_url + "/api/state",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(state["snapshot"]),
+        ),
+    )
+
+
+def _contrast_ratio(page, foreground_selector, background_selector):
+    return page.evaluate(
+        """([foregroundSelector, backgroundSelector]) => {
+            const parse = value => value.match(/[\\d.]+/g).slice(0, 3).map(Number);
+            const luminance = value => {
+                const channels = parse(value).map(channel => {
+                    const normalized = channel / 255;
+                    return normalized <= 0.04045
+                        ? normalized / 12.92
+                        : Math.pow((normalized + 0.055) / 1.055, 2.4);
+                });
+                return 0.2126 * channels[0] + 0.7152 * channels[1] +
+                    0.0722 * channels[2];
+            };
+            const foreground = getComputedStyle(
+                document.querySelector(foregroundSelector)
+            ).color;
+            const background = getComputedStyle(
+                document.querySelector(backgroundSelector)
+            ).backgroundColor;
+            const lighter = Math.max(luminance(foreground), luminance(background));
+            const darker = Math.min(luminance(foreground), luminance(background));
+            return (lighter + 0.05) / (darker + 0.05);
+        }""",
+        [foreground_selector, background_selector],
+    )
+
+
 def test_arm3d_renders_for_both_backends(running_arm_server):
     _backend, base_url = running_arm_server
     with sync_playwright() as playwright:
@@ -207,6 +354,55 @@ def test_arm3d_fallback_preserves_accessibility(running_arm_server):
         browser.close()
 
 
+def test_presentation_update_preserves_scene3d_selection(
+    running_builtin_scene3d_app,
+):
+    _app, base_url = running_builtin_scene3d_app
+    with urlopen(base_url + "/api/state") as response:
+        state = {"snapshot": json.load(response)}
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        _route_snapshot(page, base_url, state)
+        page.goto(base_url + "/")
+        page.wait_for_function(
+            "document.querySelectorAll('#scene3d-1 [role=option]').length === 5"
+        )
+        page.locator("#scene3d-1 [role=option]").first.click()
+        page.evaluate(
+            """window.scenePresentationNodes = {
+                card: document.querySelector('#card-1'),
+                host: document.querySelector('#scene3d-1'),
+                canvas: document.querySelector('#scene3d-1 canvas')
+            }"""
+        )
+
+        updated = dict(state["snapshot"])
+        updated["revision"] += 1
+        updated["theme"] = "light"
+        updated["layout"] = "grid-2"
+        updated["cards"] = [dict(card) for card in updated["cards"]]
+        updated["cards"][0]["span"] = 2
+        state["snapshot"] = updated
+        page.wait_for_function(
+            "document.documentElement.dataset.sdkTheme === 'light' && "
+            "document.querySelector('#card-1').dataset.sdkSpan === '2'"
+        )
+
+        assert page.locator(
+            "#scene3d-1 [role=option][aria-selected=true]"
+        ).count() == 1
+        assert page.evaluate(
+            """window.scenePresentationNodes.card ===
+                   document.querySelector('#card-1') &&
+               window.scenePresentationNodes.host ===
+                   document.querySelector('#scene3d-1') &&
+               window.scenePresentationNodes.canvas ===
+                   document.querySelector('#scene3d-1 canvas')"""
+        )
+        browser.close()
+
+
 def test_scene_renders_without_console_errors(running_app):
     app, base_url = running_app
     errors = []
@@ -239,4 +435,246 @@ def test_gallery_page_controls(running_gallery_app):
         assert page.locator("#gallery-button").is_visible()
         page.click("#gallery-button")
         assert page.inner_text("#gallery-metric") == "43"
+        browser.close()
+
+
+def test_presentation_live_updates_preserve_nodes_and_source_order(running_app):
+    _app, base_url = running_app
+    state = {"snapshot": _presentation_snapshot()}
+    warnings = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page.on(
+            "console",
+            lambda message: warnings.append(message.text)
+            if message.type == "warning"
+            else None,
+        )
+        _route_snapshot(page, base_url, state)
+        page.goto(base_url + "/")
+        page.wait_for_selector("#text-c")
+        page.evaluate(
+            """window.presentationNodes = {
+                cardA: document.querySelector('#card-a'),
+                cardB: document.querySelector('#card-b'),
+                textA: document.querySelector('#text-a'),
+                textB: document.querySelector('#text-b')
+            }"""
+        )
+
+        updated = _presentation_snapshot(2, "light", "grid-3")
+        updated["cards"] = [updated["cards"][1], updated["cards"][0]]
+        updated["cards"][0]["span"] = 3
+        updated["cards"][1]["area"] = "sidebar"
+        updated["cards"][1]["span"] = 2
+        state["snapshot"] = updated
+
+        page.wait_for_function(
+            "document.documentElement.dataset.sdkTheme === 'light' && "
+            "document.querySelector('#sdk-cards').dataset.sdkLayout === 'grid-3'"
+        )
+        assert page.locator("#sdk-cards > .sdk-card").evaluate_all(
+            "cards => cards.map(card => card.id)"
+        ) == ["card-b", "card-a"]
+        assert page.locator("#card-b").get_attribute("data-sdk-span") == "3"
+        assert page.locator("#card-a").get_attribute("data-sdk-area") == "sidebar"
+        assert page.evaluate(
+            """window.presentationNodes.cardA === document.querySelector('#card-a') &&
+               window.presentationNodes.cardB === document.querySelector('#card-b') &&
+               window.presentationNodes.textA === document.querySelector('#text-a') &&
+               window.presentationNodes.textB === document.querySelector('#text-b')"""
+        )
+        assert warnings == []
+        browser.close()
+
+
+def test_malformed_presentation_fields_report_and_use_defaults(running_app):
+    _app, base_url = running_app
+    state = {"snapshot": _presentation_snapshot(theme="light", layout="grid-3")}
+    warnings = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page()
+        page.on(
+            "console",
+            lambda message: warnings.append(message.text)
+            if message.type == "warning"
+            else None,
+        )
+        _route_snapshot(page, base_url, state)
+        page.goto(base_url + "/")
+        page.wait_for_selector("#card-a")
+        assert page.locator("html").get_attribute("data-sdk-theme") == "light"
+        assert page.locator("#sdk-cards").get_attribute("data-sdk-layout") == "grid-3"
+
+        malformed = _presentation_snapshot(revision=2)
+        malformed["title"] = "Malformed Presentation"
+        malformed["theme"] = "neon<script>"
+        malformed["layout"] = {"columns": "arbitrary"}
+        malformed["cards"][0]["area"] = "floating"
+        malformed["cards"][0]["span"] = True
+        state["snapshot"] = malformed
+        page.wait_for_function(
+            "document.querySelector('#sdk-app-title').textContent === "
+            "'Malformed Presentation'"
+        )
+
+        assert page.locator("html").get_attribute("data-sdk-theme") == "dark"
+        assert page.locator("#sdk-cards").get_attribute("data-sdk-layout") == "auto"
+        assert page.locator("#card-a").get_attribute("data-sdk-area") == "main"
+        assert page.locator("#card-a").get_attribute("data-sdk-span") == "1"
+        assert len(warnings) == 4
+        assert all("invalid presentation" in warning for warning in warnings)
+        assert not page.locator("[class*='neon'], [style*='neon']").count()
+
+        compatible = _presentation_snapshot(revision=3)
+        compatible["title"] = "Compatible Presentation"
+        compatible.pop("theme")
+        compatible.pop("layout")
+        for card in compatible["cards"]:
+            card.pop("area")
+            card.pop("span")
+        state["snapshot"] = compatible
+        page.wait_for_function(
+            "document.querySelector('#sdk-app-title').textContent === "
+            "'Compatible Presentation'"
+        )
+        assert page.locator("html").get_attribute("data-sdk-theme") == "dark"
+        assert page.locator("#sdk-cards").get_attribute("data-sdk-layout") == "auto"
+        assert page.locator("#card-a").get_attribute("data-sdk-area") == "main"
+        assert page.locator("#card-a").get_attribute("data-sdk-span") == "1"
+        browser.close()
+
+
+@pytest.mark.parametrize("theme", ["dark", "light"])
+@pytest.mark.parametrize("layout", ["auto", "grid-2", "grid-3", "sidebar-main"])
+def test_every_presentation_preset_is_responsive_and_readable(
+    running_app, theme, layout
+):
+    _app, base_url = running_app
+    state = {"snapshot": _presentation_snapshot(theme=theme, layout=layout)}
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        _route_snapshot(page, base_url, state)
+        page.goto(base_url + "/")
+        page.wait_for_selector("#card-c")
+
+        desktop_boxes = [
+            page.locator(f"#card-{suffix}").bounding_box() for suffix in ("a", "b", "c")
+        ]
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        assert len(page.screenshot()) > 1000
+        assert _contrast_ratio(page, "#sdk-app-title", "body") >= 4.5
+        assert (
+            page.evaluate(
+                """() => {
+                    const probe = document.createElement('span');
+                    document.body.appendChild(probe);
+                    const resolve = name => {
+                        probe.style.color = `var(${name})`;
+                        return getComputedStyle(probe).color;
+                    };
+                    const parse = value => value.match(/[\\d.]+/g)
+                        .slice(0, 3).map(Number);
+                    const luminance = value => {
+                        const channels = parse(value).map(channel => {
+                            const normalized = channel / 255;
+                            return normalized <= 0.04045
+                                ? normalized / 12.92
+                                : Math.pow((normalized + 0.055) / 1.055, 2.4);
+                        });
+                        return 0.2126 * channels[0] + 0.7152 * channels[1] +
+                            0.0722 * channels[2];
+                    };
+                    const ratio = (left, right) => {
+                        const a = luminance(resolve(left));
+                        const b = luminance(resolve(right));
+                        return (Math.max(a, b) + 0.05) /
+                            (Math.min(a, b) + 0.05);
+                    };
+                    const pairs = [
+                        ['--sdk-text', '--sdk-bg'],
+                        ['--sdk-text', '--sdk-card-bg'],
+                        ['--sdk-muted', '--sdk-card-bg'],
+                        ['--sdk-success', '--sdk-card-bg'],
+                        ['--sdk-warning', '--sdk-card-bg'],
+                        ['--sdk-danger', '--sdk-card-bg'],
+                        ['--sdk-bg', '--sdk-accent'],
+                        ['--sdk-bg', '--sdk-accent-hover']
+                    ];
+                    const minimum = Math.min(...pairs.map(pair => ratio(...pair)));
+                    probe.remove();
+                    return minimum;
+                }"""
+            )
+            >= 4.5
+        )
+        if layout == "grid-2":
+            assert desktop_boxes[0]["x"] != desktop_boxes[1]["x"]
+        elif layout in {"grid-3", "auto"}:
+            assert len({box["x"] for box in desktop_boxes}) == 3
+        else:
+            assert desktop_boxes[0]["x"] != desktop_boxes[1]["x"]
+            assert desktop_boxes[1]["x"] == desktop_boxes[2]["x"]
+
+        page.set_viewport_size({"width": 390, "height": 844})
+        mobile_boxes = [
+            page.locator(f"#card-{suffix}").bounding_box() for suffix in ("a", "b", "c")
+        ]
+        assert len({box["x"] for box in mobile_boxes}) == 1
+        assert [box["y"] for box in mobile_boxes] == sorted(
+            box["y"] for box in mobile_boxes
+        )
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        assert len(page.screenshot()) > 1000
+        browser.close()
+
+
+def test_auto_span_is_capped_to_available_columns(running_app):
+    _app, base_url = running_app
+    snapshot = _presentation_snapshot(layout="auto")
+    snapshot["cards"][0]["span"] = 3
+    state = {"snapshot": snapshot}
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 800, "height": 700})
+        _route_snapshot(page, base_url, state)
+        page.goto(base_url + "/")
+        page.wait_for_selector("#card-c")
+        cards_width = page.locator("#sdk-cards").bounding_box()["width"]
+        assert page.locator("#card-a").bounding_box()["width"] <= cards_width
+        assert page.evaluate(
+            "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+        )
+        browser.close()
+
+
+def test_forced_colors_keeps_focus_and_borders_visible(running_app):
+    _app, base_url = running_app
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        context = browser.new_context(forced_colors="active")
+        page = context.new_page()
+        page.goto(base_url + "/")
+        page.wait_for_selector("#sdk-cards > .sdk-card")
+        page.evaluate(
+            """const button = document.createElement('button');
+               button.className = 'sdk-button';
+               button.textContent = 'Action';
+               document.querySelector('.sdk-card-body').appendChild(button);
+               button.focus();"""
+        )
+        assert page.locator(".sdk-button").evaluate(
+            "button => getComputedStyle(button).outlineStyle"
+        ) != "none"
+        assert page.locator(".sdk-card").evaluate(
+            "card => getComputedStyle(card).borderStyle"
+        ) != "none"
+        context.close()
         browser.close()
