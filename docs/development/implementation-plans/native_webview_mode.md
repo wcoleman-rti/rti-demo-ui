@@ -597,8 +597,11 @@ for each tagged release candidate.
 Hosted run `33443952099` passed all jobs for the Phase 3 commit. The Ubuntu
 22.04 native job built the downstream CMake consumer, built and installed the
 release wheels into a clean environment, ran both installed-artifact native
-smokes, and repeated the production/spike conformance gates under
-Xvfb/D-Bus/Mesa.
+smokes, and repeated the production and spike conformance gates under
+Xvfb/D-Bus/Mesa. The Phase 0 prototype remains as qualification evidence, but
+ongoing CI now uses the superseding production Python/C++ lifecycle, signal,
+storage, navigation, packaging, and downstream-consumer gates instead of
+rebuilding and rerunning both implementations.
 
 Phase 3 verification commands:
 

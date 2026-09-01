@@ -105,7 +105,6 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             native/python/pyproject.toml
-            tools/native_webview_spike/requirements.txt
       - name: Cache native CMake dependencies
         uses: actions/cache@v4
         with:
@@ -114,8 +113,7 @@ jobs:
             ${{ runner.os }}-native-cmake-deps-${{
             hashFiles(
               'cpp/CMakeLists.txt',
-              'native/cpp/CMakeLists.txt',
-              'tools/native_webview_spike/CMakeLists.txt'
+              'native/cpp/CMakeLists.txt'
             ) }}
       - name: Cache native C++ compilation
         uses: actions/cache@v4
@@ -139,15 +137,14 @@ jobs:
             libwebkit2gtk-4.1-dev \
             pkg-config \
             xvfb
-      - name: Install Python spike dependencies
+      - name: Install Python native dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install \
             -e . \
             -e native/python \
-            pytest==8.4.2 \
-            -r tools/native_webview_spike/requirements.txt
-      - name: Build C++ native host
+            pytest==8.4.2
+      - name: Build production C++ native host and consumer
         run: |
           cmake -S native/cpp \
             -B build/native-phase2 \
@@ -163,15 +160,6 @@ jobs:
             -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
             -DRTI_DEMO_UI_SOURCE_DIR="$PWD"
           cmake --build build/native-consumer --parallel
-          cmake -S tools/native_webview_spike \
-            -B build/native-webview-spike-real \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
-            -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
-            -DWEBVIEW_WEBKITGTK_API=4.1
-          cmake --build build/native-webview-spike-real \
-            --target native_webview_cpp_host \
-            --parallel
       - name: Run native lifecycle tests
         run: |
           PYTHONPATH=python:native/python/src \
@@ -179,29 +167,13 @@ jobs:
           ctest --test-dir build/native-phase2 \
             --output-on-failure \
             -LE real_engine
-          PYTHONPATH=tools/native_webview_spike \
-            python -m unittest -v \
-            tools/native_webview_spike/test_python_lifecycle.py \
-            tools/native_webview_spike/test_python_runner_prototype.py
-          cmake -S tools/native_webview_spike \
-            -B build/native-webview-spike-fake \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
-            -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=OFF
-          cmake --build build/native-webview-spike-fake \
-            --target native_webview_cpp_lifecycle \
-            --parallel
-          timeout 10s \
-            ./build/native-webview-spike-fake/native_webview_cpp_lifecycle \
-            --immediate-stop
       - name: Run real native engine conformance
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" \
             bash -euo pipefail <<'SCRIPT'
-          work="$RUNNER_TEMP/native-webview-spike"
-          cpp_host="./build/native-webview-spike-real/native_webview_cpp_host"
+          work="$RUNNER_TEMP/native-webview"
           production_cpp="./build/native-phase2/tests/rti_demo_ui_native_real_conformance"
           rm -rf "$work"
           mkdir -p "$work"
@@ -297,64 +269,6 @@ jobs:
           XDG_DATA_HOME="$work/production-cpp" \
             timeout 40s "$work/production_cpp_isolated" __absent__ isolated \
               | tee "$work/production-cpp-b1.log"
-
-          timeout 40s python tools/native_webview_spike/python_host.py \
-            --timeout 20 \
-            --storage-path "$work/python-a" \
-            --storage-key ci-python \
-            --storage-expected __absent__ \
-            --storage-write first \
-            | tee "$work/python-a1.log"
-          timeout 40s python tools/native_webview_spike/python_host.py \
-            --timeout 20 \
-            --storage-path "$work/python-a" \
-            --storage-key ci-python \
-            --storage-expected first \
-            --storage-write second \
-            | tee "$work/python-a2.log"
-          timeout 40s python tools/native_webview_spike/python_host.py \
-            --timeout 20 \
-            --storage-path "$work/python-b" \
-            --storage-key ci-python \
-            --storage-expected __absent__ \
-            --storage-write isolated \
-            | tee "$work/python-b1.log"
-          timeout 40s python tools/native_webview_spike/python_host.py \
-            --timeout 20 \
-            --signal-after 4 \
-            --storage-path "$work/python-signal" \
-            --storage-key ci-python-signal \
-            --storage-expected __absent__ \
-            --storage-write signal \
-            | tee "$work/python-signal.log"
-
-          timeout 40s "$cpp_host" \
-            --storage-path "$work/cpp-a" \
-            --storage-key ci-cpp \
-            --storage-expected __absent__ \
-            --storage-write first \
-            | tee "$work/cpp-a1.log"
-          timeout 40s "$cpp_host" \
-            --storage-path "$work/cpp-a" \
-            --storage-key ci-cpp \
-            --storage-expected first \
-            --storage-write second \
-            | tee "$work/cpp-a2.log"
-          timeout 40s "$cpp_host" \
-            --storage-path "$work/cpp-b" \
-            --storage-key ci-cpp \
-            --storage-expected __absent__ \
-            --storage-write isolated \
-            | tee "$work/cpp-b1.log"
-
-          timeout --kill-after=5s --preserve-status --signal=INT 4s \
-            "$cpp_host" \
-            --wait-for-signal true \
-            --storage-path "$work/cpp-signal" \
-            --storage-key ci-cpp-signal \
-            --storage-expected __absent__ \
-            --storage-write signal \
-            | tee "$work/cpp-signal.log"
           SCRIPT
       - name: Report native C++ cache statistics
         if: always()
@@ -363,5 +277,5 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: native-webview-spike-logs
-          path: ${{ runner.temp }}/native-webview-spike/*.log
+          name: native-webview-logs
+          path: ${{ runner.temp }}/native-webview/*.log
