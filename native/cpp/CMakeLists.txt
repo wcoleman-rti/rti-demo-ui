@@ -42,7 +42,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(webview)
 
 add_library(rti_demo_ui_native_webview STATIC
-    src/native_webview.cpp
+    src/control_posix.cpp
+    src/native_webview_linux.cpp
+    src/navigation.cpp
     src/runner.cpp
 )
 set_target_properties(

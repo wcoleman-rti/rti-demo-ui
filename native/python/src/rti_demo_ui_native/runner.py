@@ -31,8 +31,7 @@ from urllib.parse import urlsplit
 from rti_demo_ui import DemoUiApp
 
 _APPLICATION_ID = re.compile(
-    r"[a-z](?:[a-z0-9-]*[a-z0-9])?"
-    r"(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+"
+    r"[a-z](?:[a-z0-9-]*[a-z0-9])?" r"(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+"
 )
 _MAX_WINDOW_DIMENSION = 16384
 _STARTUP_TIMEOUT_SECONDS = 10.0
@@ -51,7 +50,7 @@ class _Options:
     width: int
     height: int
     devtools: bool
-    profile_path: Path
+    profile_path: Path | None
 
 
 class _WindowHost(Protocol):
@@ -175,7 +174,7 @@ def _same_origin(url: str, allowed_origin: str) -> bool:
         return False
 
 
-def _profile_path(application_id: str) -> Path:
+def _profile_path(application_id: str) -> Path | None:
     if sys.platform == "linux":
         data_root = os.environ.get("XDG_DATA_HOME")
         root = (
@@ -187,9 +186,32 @@ def _profile_path(application_id: str) -> Path:
             raise NativeWebviewError(
                 "XDG_DATA_HOME must be an absolute path for native profile storage"
             )
-        return root / "rti-demo-ui-native" / application_id
+    elif sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if not local_app_data:
+            raise NativeWebviewError(
+                "LOCALAPPDATA is required for native profile storage on Windows"
+            )
+        root = Path(local_app_data)
+        if not root.is_absolute():
+            raise NativeWebviewError(
+                "LOCALAPPDATA must be an absolute path for native profile storage"
+            )
+    elif sys.platform == "darwin":
+        return None
+    else:
+        raise NativeWebviewError(
+            f"native webview mode is not prepared for platform '{sys.platform}'"
+        )
+    return root / "rti-demo-ui-native" / application_id
+
+
+def _require_supported_production_platform() -> None:
+    if sys.platform == "linux":
+        return
     raise NativeWebviewError(
-        "native webview mode is supported only on Linux in this release"
+        "native webview mode is currently qualified only on Linux; Windows and "
+        "macOS support is prepared but requires real-host qualification"
     )
 
 
@@ -231,8 +253,7 @@ def _validate_options(
             or value > _MAX_WINDOW_DIMENSION
         ):
             raise NativeWebviewError(
-                f"{name} must be an integer between 1 and "
-                f"{_MAX_WINDOW_DIMENSION}"
+                f"{name} must be an integer between 1 and " f"{_MAX_WINDOW_DIMENSION}"
             )
     if not isinstance(devtools, bool):
         raise NativeWebviewError("devtools must be a bool")
@@ -248,13 +269,14 @@ def _validate_options(
             "DemoUiApp has already started; create a new app for run_native()"
         )
     profile_path = _profile_path(application_id)
-    try:
-        profile_path.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise NativeWebviewError(
-            f"cannot create native profile directory '{profile_path}'; "
-            "check application data directory permissions"
-        ) from error
+    if profile_path is not None:
+        try:
+            profile_path.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            raise NativeWebviewError(
+                f"cannot create native profile directory '{profile_path}'; "
+                "check application data directory permissions"
+            ) from error
     return _Options(application_id, width, height, devtools, profile_path)
 
 
@@ -444,8 +466,13 @@ def run_native(
     """Run one app in a Linux native webview until the window or app closes."""
 
     def create_host(options: _Options) -> _WindowHost:
+        if options.profile_path is None:
+            raise NativeWebviewError(
+                "the qualified Linux backend requires a native profile path"
+            )
         return _PyWebviewHost(_load_pywebview(), options.profile_path)
 
+    _require_supported_production_platform()
     _run_native(
         app,
         application_id=application_id,

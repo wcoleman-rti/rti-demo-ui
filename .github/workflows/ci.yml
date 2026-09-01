@@ -290,3 +290,24 @@ jobs:
         with:
           name: native-webview-logs
           path: ${{ runner.temp }}/native-webview/*.log
+
+  native-cross-platform-preparation:
+    name: Native preparation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install host-independent test dependencies
+        run: |
+          python -m pip install -e . pytest==8.4.2
+          python -m pip install --no-deps -e native/python
+      - name: Record preparation host
+        run: python -c "import platform; print(platform.platform(), platform.machine())"
+      - name: Run fake lifecycle and profile policy tests
+        run: python -m pytest native/python/tests -q

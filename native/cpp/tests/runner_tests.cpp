@@ -1,5 +1,3 @@
-#include <rti_demo_ui_native/native_webview.hpp>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -7,14 +5,16 @@
 
 #include <atomic>
 #include <chrono>
-#include <csignal>
 #include <condition_variable>
+#include <csignal>
 #include <cstdio>
 #include <mutex>
+#include <rti_demo_ui_native/native_webview.hpp>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
+#include "navigation.hpp"
 #include "runner.hpp"
 
 using namespace rti::demo::ui;
@@ -25,13 +25,13 @@ namespace {
 
 int failures = 0;
 
-#define CHECK(condition)                                                     \
-    do {                                                                      \
-        if (!(condition)) {                                                   \
-            std::fprintf(stderr, "FAILED: %s (line %d)\n", #condition,       \
-                         __LINE__);                                          \
-            ++failures;                                                       \
-        }                                                                     \
+#define CHECK(condition)                                               \
+    do {                                                               \
+        if (!(condition)) {                                            \
+            std::fprintf(stderr, "FAILED: %s (line %d)\n", #condition, \
+                         __LINE__);                                    \
+            ++failures;                                                \
+        }                                                              \
     } while (0)
 
 class FakeWindowHost final : public native_detail::WindowHost {
@@ -108,9 +108,8 @@ bool port_is_released(const std::string& url) {
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-    const bool released =
-        connect(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)) !=
-        0;
+    const bool released = connect(probe, reinterpret_cast<sockaddr*>(&address),
+                                  sizeof(address)) != 0;
     close(probe);
     return released;
 }
@@ -143,9 +142,8 @@ void test_window_failure_cleans_up() {
     DemoUiApp app("Window failure");
     FakeWindowHost host;
     host.fail_create = true;
-    CHECK(throws_native(
-        [&]() { native_detail::run_with_host(app, {}, host); },
-        "native window failed"));
+    CHECK(throws_native([&]() { native_detail::run_with_host(app, {}, host); },
+                        "native window failed"));
     CHECK(port_is_released(host.url));
 }
 
@@ -156,8 +154,8 @@ void test_bind_failure_does_not_create_window() {
     address.sin_family = AF_INET;
     address.sin_port = 0;
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-    CHECK(bind(blocker, reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
-          0);
+    CHECK(bind(blocker, reinterpret_cast<sockaddr*>(&address),
+               sizeof(address)) == 0);
     CHECK(listen(blocker, 1) == 0);
     socklen_t size = sizeof(address);
     CHECK(getsockname(blocker, reinterpret_cast<sockaddr*>(&address), &size) ==
@@ -165,9 +163,8 @@ void test_bind_failure_does_not_create_window() {
 
     DemoUiApp app("Bind failure", ntohs(address.sin_port));
     FakeWindowHost host;
-    CHECK(throws_native(
-        [&]() { native_detail::run_with_host(app, {}, host); },
-        "server failed"));
+    CHECK(throws_native([&]() { native_detail::run_with_host(app, {}, host); },
+                        "server failed"));
     CHECK(host.url.empty());
     close(blocker);
 }
@@ -217,8 +214,21 @@ void test_validation() {
         DemoUiApp app("Host", 0, "localhost");
         FakeWindowHost host;
         CHECK(throws_native(
-            [&]() { native_detail::run_with_host(app, {}, host); }, "loopback"));
+            [&]() { native_detail::run_with_host(app, {}, host); },
+            "loopback"));
     }
+}
+
+void test_navigation_origin_is_exact() {
+    const auto allowed = native_detail::origin("http://127.0.0.1:42000/");
+    CHECK(native_detail::same_origin("http://127.0.0.1:42000/dashboard",
+                                     allowed));
+    CHECK(native_detail::same_origin("http://127.0.0.1:42000/?view=main",
+                                     allowed));
+    CHECK(!native_detail::same_origin("http://127.0.0.1:42001/", allowed));
+    CHECK(!native_detail::same_origin("http://localhost:42000/", allowed));
+    CHECK(!native_detail::same_origin("https://example.invalid/", allowed));
+    CHECK(!native_detail::same_origin("about:blank", allowed));
 }
 
 void test_app_is_single_use() {
@@ -228,9 +238,9 @@ void test_app_is_single_use() {
     native_detail::run_with_host(app, {}, first);
 
     FakeWindowHost second;
-    CHECK(throws_native(
-        [&]() { native_detail::run_with_host(app, {}, second); },
-        "already started"));
+    CHECK(
+        throws_native([&]() { native_detail::run_with_host(app, {}, second); },
+                      "already started"));
 }
 
 }  // namespace
@@ -242,6 +252,7 @@ int main() {
     test_server_stop_closes_window();
     test_signal_closes_window();
     test_validation();
+    test_navigation_origin_is_exact();
     test_app_is_single_use();
     return failures == 0 ? 0 : 1;
 }

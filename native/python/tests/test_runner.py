@@ -98,7 +98,10 @@ def test_import_is_lazy_for_pywebview():
             "import sys; import rti_demo_ui_native; "
             "assert 'webview' not in sys.modules",
         ],
-        env={"PYTHONPATH": f"{source_root}:{core_root}"},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join((str(source_root), str(core_root))),
+        },
         check=False,
     )
     assert result.returncode == 0
@@ -145,10 +148,56 @@ def test_non_loopback_host_is_rejected():
         run_fake(DemoUiApp("remote", host="localhost"), FakeWindowHost())
 
 
-def test_unsupported_platform_is_actionable(monkeypatch):
+def test_unqualified_production_platform_is_actionable(monkeypatch):
     monkeypatch.setattr(runner.sys, "platform", "darwin")
-    with pytest.raises(NativeWebviewError, match="supported only on Linux"):
-        run_fake(DemoUiApp("unsupported"), FakeWindowHost())
+    with pytest.raises(NativeWebviewError, match="qualified only on Linux"):
+        runner.run_native(
+            DemoUiApp("unsupported"),
+            application_id="com.example.unsupported",
+        )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux path semantics")
+def test_linux_profile_path_is_application_scoped(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert runner._profile_path("com.example.demo") == (
+        tmp_path / "rti-demo-ui-native" / "com.example.demo"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux path semantics")
+def test_linux_profile_path_uses_xdg_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.setattr(runner.Path, "home", lambda: tmp_path)
+    assert runner._profile_path("com.example.demo") == (
+        tmp_path / ".local" / "share" / "rti-demo-ui-native" / "com.example.demo"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows path semantics")
+def test_windows_profile_path_is_application_scoped(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert runner._profile_path("com.example.demo") == (
+        tmp_path / "rti-demo-ui-native" / "com.example.demo"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS path semantics")
+def test_macos_does_not_claim_ignored_storage_path():
+    assert runner._profile_path("com.example.demo") is None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows environment")
+def test_windows_profile_requires_local_app_data(monkeypatch):
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    with pytest.raises(NativeWebviewError, match="LOCALAPPDATA"):
+        runner._profile_path("com.example.demo")
+
+
+def test_unknown_profile_platform_is_actionable(monkeypatch):
+    monkeypatch.setattr(runner.sys, "platform", "plan9")
+    with pytest.raises(NativeWebviewError, match="not prepared"):
+        runner._profile_path("com.example.demo")
 
 
 def test_missing_pywebview_is_actionable(monkeypatch):
@@ -299,6 +348,7 @@ def test_server_stop_dispatches_window_close():
     assert_port_released(host.options["url"])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
 def test_sigint_requests_window_close_and_restores_handler():
     host = FakeWindowHost()
     previous_handler = signal.getsignal(signal.SIGINT)
@@ -322,6 +372,7 @@ def test_app_instance_cannot_run_twice():
         run_fake(app, FakeWindowHost(close_immediately=True))
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux XDG validation")
 def test_relative_xdg_data_home_is_rejected(monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", "relative")
     with pytest.raises(NativeWebviewError, match="absolute path"):
@@ -329,7 +380,16 @@ def test_relative_xdg_data_home_is_rejected(monkeypatch):
 
 
 def test_profile_namespace_uses_application_id(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    if sys.platform == "linux":
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        root = tmp_path
+    elif sys.platform == "win32":
+        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+        root = tmp_path
+    elif sys.platform == "darwin":
+        root = None
+    else:
+        pytest.skip("native profile storage is not prepared")
     captured = []
     host = FakeWindowHost(close_immediately=True)
     _run_native(
@@ -341,9 +401,10 @@ def test_profile_namespace_uses_application_id(tmp_path, monkeypatch):
         devtools=False,
         host_factory=lambda options: captured.append(options) or host,
     )
-    assert captured[0].profile_path == (
-        tmp_path
-        / "rti-demo-ui-native"
-        / "com.example.factory-dashboard"
-    )
-    assert captured[0].profile_path.is_dir()
+    if root is None:
+        assert captured[0].profile_path is None
+    else:
+        assert captured[0].profile_path == (
+            root / "rti-demo-ui-native" / "com.example.factory-dashboard"
+        )
+        assert captured[0].profile_path.is_dir()
