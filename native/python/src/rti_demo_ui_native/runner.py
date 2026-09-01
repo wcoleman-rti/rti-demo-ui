@@ -100,7 +100,11 @@ class _PyWebviewHost:
             height=height,
             resizable=True,
         )
-        self._window.events.before_show += self._install_navigation_policy
+        policy_event = self._navigation_policy_event()
+        policy_event += self._install_navigation_policy
+
+    def _navigation_policy_event(self):
+        return self._window.events.before_show
 
     def _install_navigation_policy(self) -> None:
         def find_webview(widget):
@@ -167,6 +171,9 @@ class _WindowsPyWebviewHost(_PyWebviewHost):
         self._gui = "edgechromium"
         self._navigation_handler = None
         self._new_window_handler = None
+
+    def _navigation_policy_event(self):
+        return self._window.events.before_load
 
     def _install_navigation_policy(self) -> None:
         native = self._window.native

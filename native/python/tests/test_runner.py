@@ -284,7 +284,7 @@ def test_windows_pywebview_policy_blocks_navigation_and_new_windows(tmp_path):
     )
     before_show = BeforeShow()
     fake_window = SimpleNamespace(
-        events=SimpleNamespace(before_show=before_show),
+        events=SimpleNamespace(before_load=before_show),
         native=SimpleNamespace(
             webview=SimpleNamespace(CoreWebView2=browser),
         ),
