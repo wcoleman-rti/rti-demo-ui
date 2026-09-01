@@ -10,10 +10,4 @@
 # use or inability to use the software.
 #
 
-cmake_minimum_required(VERSION 3.16)
-include(cmake/rti-demo-ui-version.cmake)
-project(rti_demo_ui VERSION ${RTI_DEMO_UI_VERSION} LANGUAGES CXX)
-
-include(CTest)
-set(RTI_DEMO_TOP_LEVEL_BUILD ON)
-add_subdirectory(cpp)
+set(RTI_DEMO_UI_VERSION 0.4.0)

@@ -11,9 +11,18 @@
 #
 
 cmake_minimum_required(VERSION 3.16)
-include(cmake/rti-demo-ui-version.cmake)
-project(rti_demo_ui VERSION ${RTI_DEMO_UI_VERSION} LANGUAGES CXX)
+project(rti_demo_ui_parent_version_test VERSION 9.8.7 LANGUAGES CXX)
 
-include(CTest)
-set(RTI_DEMO_TOP_LEVEL_BUILD ON)
-add_subdirectory(cpp)
+if(NOT RTI_DEMO_UI_SOURCE_DIR)
+    message(FATAL_ERROR "RTI_DEMO_UI_SOURCE_DIR is required")
+endif()
+
+set(BUILD_TESTING OFF)
+add_subdirectory("${RTI_DEMO_UI_SOURCE_DIR}/cpp" core)
+
+get_target_property(RTI_DEMO_UI_ACTUAL_VERSION rti_demo_ui::core VERSION)
+if(NOT RTI_DEMO_UI_ACTUAL_VERSION STREQUAL "0.4.0")
+    message(FATAL_ERROR
+        "rti_demo_ui::core version is ${RTI_DEMO_UI_ACTUAL_VERSION}, expected 0.4.0"
+    )
+endif()
