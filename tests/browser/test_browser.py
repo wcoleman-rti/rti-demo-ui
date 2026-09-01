@@ -240,7 +240,10 @@ def _assert_arm_page(page, base_url):
     )
     page.locator("#arm3d-scene [role=option]").first.focus()
     page.keyboard.press("ArrowDown")
-    page.keyboard.press("Enter")
+    page.wait_for_function(
+        "document.activeElement?.dataset.nodeId === 'joint-1'"
+    )
+    page.locator("#arm3d-scene [role=option]").nth(1).press("Enter")
     page.wait_for_function(
         "document.querySelectorAll('[role=option][aria-selected=true]').length === 1"
         " && document.querySelector('.sdk-scene3d-live')"
