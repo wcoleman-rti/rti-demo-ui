@@ -1316,12 +1316,19 @@ void DemoUiApp::run() {
         "http://" + display_host + ":" + std::to_string(bound_port)};
     auto listener = std::async(
         std::launch::async, [this]() { return server_->listen_after_bind(); });
-    server_->wait_until_ready();
-    if (!server_->is_running()) {
-        listener.get();
-        if (stopped_) return;
-        throw std::runtime_error("DemoUiApp: failed to listen on " + host_ +
-                                 ":" + std::to_string(bound_port));
+    while (!server_->is_running()) {
+        if (stopped_) {
+            server_->stop();
+            listener.get();
+            return;
+        }
+        if (listener.wait_for(std::chrono::milliseconds(10)) ==
+            std::future_status::ready) {
+            listener.get();
+            if (stopped_) return;
+            throw std::runtime_error("DemoUiApp: failed to listen on " + host_ +
+                                     ":" + std::to_string(bound_port));
+        }
     }
     sse_manager_->start();
     bool publish_readiness = false;

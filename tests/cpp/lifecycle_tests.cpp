@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -78,6 +79,15 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         restart.stop();
         thread.join();
+    }
+
+    for (int index = 0; index < 10; ++index) {
+        DemoUiApp app("Immediate stop");
+        auto runner = std::async(std::launch::async, [&app]() { app.run(); });
+        app.stop();
+        CHECK(runner.wait_for(std::chrono::seconds(2)) ==
+              std::future_status::ready);
+        runner.get();
     }
 
     return failures == 0 ? 0 : 1;
