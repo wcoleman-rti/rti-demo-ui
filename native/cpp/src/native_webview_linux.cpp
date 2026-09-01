@@ -12,6 +12,13 @@
 #include "runner.hpp"
 
 namespace rti::demo::ui::native {
+namespace detail {
+
+const char* native_window_failure_guidance() noexcept {
+    return "native window failed; verify GTK 3 and WebKitGTK 4.1 are installed";
+}
+
+}  // namespace detail
 namespace {
 
 class WebviewHost final : public detail::WindowHost {

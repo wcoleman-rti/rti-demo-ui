@@ -311,3 +311,15 @@ jobs:
         run: python -c "import platform; print(platform.platform(), platform.machine())"
       - name: Run fake lifecycle and profile policy tests
         run: python -m pytest native/python/tests -q
+      - name: Configure native C++ companion
+        run: >
+          cmake -S native/cpp -B build/native-cross-platform
+          -DBUILD_TESTING=ON
+          -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=OFF
+      - name: Build native C++ companion
+        run: cmake --build build/native-cross-platform --config Release --parallel
+      - name: Run native C++ fake lifecycle tests
+        run: >
+          ctest --test-dir build/native-cross-platform
+          -C Release
+          --output-on-failure

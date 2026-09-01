@@ -106,9 +106,8 @@ void run_with_host(DemoUiApp& app, const NativeWindowOptions& options,
         } catch (const NativeWebviewError&) {
             throw;
         } catch (...) {
-            std::throw_with_nested(NativeWebviewError(
-                "native window failed; verify GTK 3 and WebKitGTK 4.1 are "
-                "installed"));
+            std::throw_with_nested(
+                NativeWebviewError(native_window_failure_guidance()));
         }
     }
 }

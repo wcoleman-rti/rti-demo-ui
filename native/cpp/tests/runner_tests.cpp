@@ -1,7 +1,12 @@
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -24,6 +29,33 @@ namespace native_detail = rti::demo::ui::native::detail;
 namespace {
 
 int failures = 0;
+
+#ifdef _WIN32
+using Socket = SOCKET;
+constexpr Socket kInvalidSocket = INVALID_SOCKET;
+using SocketLength = int;
+
+class SocketRuntime {
+   public:
+    SocketRuntime() {
+        WSADATA data{};
+        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+            throw std::runtime_error("WSAStartup failed");
+        }
+    }
+    ~SocketRuntime() { WSACleanup(); }
+};
+
+void close_socket(Socket socket) { closesocket(socket); }
+#else
+using Socket = int;
+constexpr Socket kInvalidSocket = -1;
+using SocketLength = socklen_t;
+
+class SocketRuntime {};
+
+void close_socket(Socket socket) { close(socket); }
+#endif
 
 #define CHECK(condition)                                               \
     do {                                                               \
@@ -103,14 +135,14 @@ bool port_is_released(const std::string& url) {
     const auto colon = url.rfind(':');
     const auto slash = url.find('/', colon);
     const int port = std::stoi(url.substr(colon + 1, slash - colon - 1));
-    int probe = socket(AF_INET, SOCK_STREAM, 0);
+    Socket probe = socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
     const bool released = connect(probe, reinterpret_cast<sockaddr*>(&address),
                                   sizeof(address)) != 0;
-    close(probe);
+    close_socket(probe);
     return released;
 }
 
@@ -148,8 +180,8 @@ void test_window_failure_cleans_up() {
 }
 
 void test_bind_failure_does_not_create_window() {
-    int blocker = socket(AF_INET, SOCK_STREAM, 0);
-    CHECK(blocker >= 0);
+    Socket blocker = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(blocker != kInvalidSocket);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = 0;
@@ -157,7 +189,7 @@ void test_bind_failure_does_not_create_window() {
     CHECK(bind(blocker, reinterpret_cast<sockaddr*>(&address),
                sizeof(address)) == 0);
     CHECK(listen(blocker, 1) == 0);
-    socklen_t size = sizeof(address);
+    SocketLength size = sizeof(address);
     CHECK(getsockname(blocker, reinterpret_cast<sockaddr*>(&address), &size) ==
           0);
 
@@ -166,7 +198,7 @@ void test_bind_failure_does_not_create_window() {
     CHECK(throws_native([&]() { native_detail::run_with_host(app, {}, host); },
                         "server failed"));
     CHECK(host.url.empty());
-    close(blocker);
+    close_socket(blocker);
 }
 
 void test_server_stop_closes_window() {
@@ -186,6 +218,7 @@ void test_server_stop_closes_window() {
 }
 
 void test_signal_closes_window() {
+#ifndef _WIN32
     DemoUiApp app("Signal close");
     FakeWindowHost host;
     std::thread interrupter([&]() {
@@ -197,6 +230,7 @@ void test_signal_closes_window() {
 
     CHECK(host.close_requested());
     CHECK(port_is_released(host.url));
+#endif
 }
 
 void test_validation() {
@@ -246,6 +280,7 @@ void test_app_is_single_use() {
 }  // namespace
 
 int main() {
+    SocketRuntime socket_runtime;
     test_normal_close();
     test_window_failure_cleans_up();
     test_bind_failure_does_not_create_window();
