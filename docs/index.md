@@ -9,6 +9,7 @@ frontend process or a runtime dependency on Connext.
 
 - [Python guide](api/python.md)
 - [C++ guide](api/cpp.md)
+- [Native webview mode](native-webview.md)
 
 ## Learn more
 
@@ -17,6 +18,7 @@ frontend process or a runtime dependency on Connext.
 - [Architecture](architecture.md)
 - [Python API reference](reference/python.rst)
 - [C++ API reference](reference/cpp.rst)
+- [Native Python API reference](reference/native-python.rst)
 
 :::{toctree}
 :hidden:
@@ -24,10 +26,12 @@ frontend process or a runtime dependency on Connext.
 
 api/python
 api/cpp
+native-webview
 custom-frontends
 lifecycle
 reference/python
 reference/cpp
+reference/native-python
 architecture
 third-party
 development/product-use-cases

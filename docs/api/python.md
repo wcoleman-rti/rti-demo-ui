@@ -101,7 +101,9 @@ run_native(
 closes the native window; an exception is re-raised after all managed work is
 joined. Browser mode remains the default and does not import pywebview. See
 [Native Webview Mode](../native-webview.md) for installation, profiles,
-platform support, and troubleshooting.
+platform support, and troubleshooting. The
+[native Python API reference](../reference/native-python.rst) documents the
+runner contract and validation errors.
 
 ## Themes and Layouts
 

@@ -13,9 +13,11 @@ configure_file(Doxyfile.in Doxyfile @ONLY)
 
 file(GLOB_RECURSE RTI_DEMO_UI_CPP_HEADERS CONFIGURE_DEPENDS
     "${RTI_DEMO_UI_ROOT}/cpp/include/rti_demo_ui/*.hpp"
+    "${RTI_DEMO_UI_ROOT}/native/cpp/include/rti_demo_ui_native/*.hpp"
 )
 file(GLOB_RECURSE RTI_DEMO_UI_PYTHON_SOURCES CONFIGURE_DEPENDS
     "${RTI_DEMO_UI_ROOT}/python/rti_demo_ui/*.py"
+    "${RTI_DEMO_UI_ROOT}/native/python/src/rti_demo_ui_native/*.py"
 )
 file(GLOB_RECURSE RTI_DEMO_UI_DOC_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.md"

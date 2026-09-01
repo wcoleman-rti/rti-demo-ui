@@ -31,15 +31,14 @@ from urllib.parse import urlsplit
 from rti_demo_ui import DemoUiApp
 
 _APPLICATION_ID = re.compile(
-    r"[a-z](?:[a-z0-9-]*[a-z0-9])?"
-    r"(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+"
+    r"[a-z](?:[a-z0-9-]*[a-z0-9])?" r"(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+"
 )
 _MAX_WINDOW_DIMENSION = 16384
 _STARTUP_TIMEOUT_SECONDS = 10.0
 
 
 class NativeWebviewError(RuntimeError):
-    """Native runner failure with an actionable correction."""
+    """Report invalid native options or a native host lifecycle failure."""
 
 
 AsyncMain = Callable[[DemoUiApp], Awaitable[None]]
@@ -231,8 +230,7 @@ def _validate_options(
             or value > _MAX_WINDOW_DIMENSION
         ):
             raise NativeWebviewError(
-                f"{name} must be an integer between 1 and "
-                f"{_MAX_WINDOW_DIMENSION}"
+                f"{name} must be an integer between 1 and " f"{_MAX_WINDOW_DIMENSION}"
             )
     if not isinstance(devtools, bool):
         raise NativeWebviewError("devtools must be a bool")
@@ -441,7 +439,30 @@ def run_native(
     height: int = 800,
     devtools: bool = False,
 ) -> None:
-    """Run one app in a Linux native webview until the window or app closes."""
+    """Run an application in a Linux native webview.
+
+    This synchronous main-thread entry point owns the native window loop and
+    runs the application's asyncio server on a managed background thread.
+    Closing the window, stopping the application, or receiving ``SIGINT`` or
+    ``SIGTERM`` initiates joined cleanup. The application must not have been
+    run previously.
+
+    Args:
+        app: Configured, single-use application to host.
+        application_id: Lowercase reverse-DNS identifier used to select the
+            persistent browser profile.
+        async_main: Optional application coroutine started on the application
+            owner loop after the server becomes ready. Returning from it closes
+            the window.
+        width: Initial window width in pixels, from 1 through 16384.
+        height: Initial window height in pixels, from 1 through 16384.
+        devtools: Whether to enable the embedded browser's developer tools.
+
+    Raises:
+        NativeWebviewError: If options, platform prerequisites, server startup,
+            or native window lifecycle handling fail.
+        BaseException: Re-raises an exception from ``async_main`` after cleanup.
+    """
 
     def create_host(options: _Options) -> _WindowHost:
         return _PyWebviewHost(_load_pywebview(), options.profile_path)

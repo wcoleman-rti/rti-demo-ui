@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import inspect
+import sys
 from collections.abc import Container
 from html.parser import HTMLParser
 from pathlib import Path
 
-import rti_demo_ui
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT / "python"))
+sys.path.insert(0, str(ROOT / "native" / "python" / "src"))
+
+rti_demo_ui = importlib.import_module("rti_demo_ui")
+rti_demo_ui_native = importlib.import_module("rti_demo_ui_native")
 
 
 CPP_PUBLIC_SYMBOLS = {
@@ -45,6 +52,12 @@ CPP_INTERNAL_SYMBOLS = {
     "added_locked",
     "sse_manager_",
     "to_json_locked",
+}
+
+NATIVE_CPP_PUBLIC_SYMBOLS = {
+    "NativeWebviewError",
+    "NativeWindowOptions",
+    "run",
 }
 
 
@@ -90,6 +103,16 @@ def _require_python_docstrings() -> None:
         )
 
 
+def _require_export_docstrings(kind: str, module) -> None:
+    missing = [
+        name for name in module.__all__ if not inspect.getdoc(getattr(module, name))
+    ]
+    if missing:
+        raise RuntimeError(
+            f"{kind} public API is missing docstrings: {', '.join(sorted(missing))}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("html_dir", type=Path)
@@ -103,6 +126,18 @@ def main() -> None:
     _require_symbols("Python", python_symbols, python_targets)
     _require_python_docstrings()
 
+    native_python_source, _ = _page_text(
+        args.html_dir / "reference" / "native-python.html"
+    )
+    native_python_symbols = set(rti_demo_ui_native.__all__)
+    native_python_targets = {
+        name
+        for name in native_python_symbols
+        if f'id="rti_demo_ui_native.{name}"' in native_python_source
+    }
+    _require_symbols("Native Python", native_python_symbols, native_python_targets)
+    _require_export_docstrings("Native Python", rti_demo_ui_native)
+
     cpp_source, cpp_text = _page_text(args.html_dir / "reference" / "cpp.html")
     _require_symbols("C++", CPP_PUBLIC_SYMBOLS, cpp_text)
     leaked = sorted(symbol for symbol in CPP_INTERNAL_SYMBOLS if symbol in cpp_source)
@@ -111,9 +146,13 @@ def main() -> None:
             f"C++ reference exposes internal symbols: {', '.join(leaked)}"
         )
 
+    _require_symbols("Native C++", NATIVE_CPP_PUBLIC_SYMBOLS, cpp_text)
+
     print(
         f"Verified {len(python_symbols)} Python exports and "
-        f"{len(CPP_PUBLIC_SYMBOLS)} C++ public symbols."
+        f"{len(CPP_PUBLIC_SYMBOLS)} C++ public symbols, plus "
+        f"{len(native_python_symbols)} native Python exports and "
+        f"{len(NATIVE_CPP_PUBLIC_SYMBOLS)} native C++ public symbols."
     )
 
 

@@ -85,7 +85,9 @@ rti::demo::ui::native::run(app, options);
 The call owns the native main-thread loop and a joined server thread. Browser
 targets remain core-only and call `app.run()`. See
 [Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
-profiles, platform support, and troubleshooting.
+profiles, platform support, and troubleshooting. The generated
+[C++ API reference](../reference/cpp.rst) also documents the public native
+runner types.
 
 Both `GET /api/state` and `GET /api/events` are served by the C++ backend.
 Browser transport selection is not a `DemoUiApp` constructor option: custom

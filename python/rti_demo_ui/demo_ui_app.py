@@ -1181,14 +1181,17 @@ class DemoUiApp:
 
     @property
     def title(self) -> str:
+        """Return the application title displayed by the frontend."""
         return self._model.title
 
     @property
     def host(self) -> str:
+        """Return the configured HTTP bind host."""
         return self._host
 
     @property
     def run_started(self) -> bool:
+        """Return whether this single-use application has started running."""
         return self._run_started
 
     def register_command(

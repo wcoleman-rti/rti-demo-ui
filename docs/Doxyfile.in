@@ -1,7 +1,8 @@
 PROJECT_NAME           = "RTI Demo UI"
 PROJECT_NUMBER         = "@PROJECT_VERSION@"
 OUTPUT_DIRECTORY       = "@RTI_DEMO_UI_DOXYGEN_OUTPUT@"
-INPUT                  = "@RTI_DEMO_UI_ROOT@/cpp/include/rti_demo_ui"
+INPUT                  = "@RTI_DEMO_UI_ROOT@/cpp/include/rti_demo_ui" \
+                         "@RTI_DEMO_UI_ROOT@/native/cpp/include/rti_demo_ui_native"
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp
 
