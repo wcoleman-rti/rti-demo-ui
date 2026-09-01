@@ -91,15 +91,44 @@ jobs:
 
   native-webview-spike:
     runs-on: ubuntu-22.04
+    env:
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 500M
+      CCACHE_NOHASHDIR: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            native/python/pyproject.toml
+            tools/native_webview_spike/requirements.txt
+      - name: Cache native CMake dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.FETCHCONTENT_BASE_DIR }}
+          key: >-
+            ${{ runner.os }}-native-cmake-deps-${{
+            hashFiles(
+              'cpp/CMakeLists.txt',
+              'native/cpp/CMakeLists.txt',
+              'tools/native_webview_spike/CMakeLists.txt'
+            ) }}
+      - name: Cache native C++ compilation
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-native-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-native-ccache-
       - name: Install native engine prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            ccache \
             dbus-x11 \
             gir1.2-gtk-3.0 \
             gir1.2-webkit2-4.1 \
@@ -123,15 +152,21 @@ jobs:
           cmake -S native/cpp \
             -B build/native-phase2 \
             -DBUILD_TESTING=ON \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
             -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON \
             -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
           cmake --build build/native-phase2 --parallel
           cmake -S native/cpp/tests/consumer \
             -B build/native-consumer \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
             -DRTI_DEMO_UI_SOURCE_DIR="$PWD"
           cmake --build build/native-consumer --parallel
           cmake -S tools/native_webview_spike \
             -B build/native-webview-spike-real \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
             -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
             -DWEBVIEW_WEBKITGTK_API=4.1
           cmake --build build/native-webview-spike-real \
@@ -150,6 +185,8 @@ jobs:
             tools/native_webview_spike/test_python_runner_prototype.py
           cmake -S tools/native_webview_spike \
             -B build/native-webview-spike-fake \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
             -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=OFF
           cmake --build build/native-webview-spike-fake \
             --target native_webview_cpp_lifecycle \
@@ -319,6 +356,9 @@ jobs:
             --storage-write signal \
             | tee "$work/cpp-signal.log"
           SCRIPT
+      - name: Report native C++ cache statistics
+        if: always()
+        run: ccache --show-stats
       - name: Retain native diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
