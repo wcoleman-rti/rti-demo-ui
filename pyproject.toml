@@ -16,7 +16,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rti-demo-ui"
-version = "0.4.0"
+version = "0.4.1"
 description = "RTI Demo UI for Python with an asyncio/aiohttp backend"
 readme = "README.md"
 requires-python = ">=3.11"

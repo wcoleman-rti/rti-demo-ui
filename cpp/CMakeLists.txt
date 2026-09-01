@@ -93,6 +93,7 @@ target_include_directories(rti_demo_ui_core
     PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
+target_compile_features(rti_demo_ui_core PUBLIC cxx_std_17)
 
 add_library(rti_demo_ui::core ALIAS rti_demo_ui_core)
 

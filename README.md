@@ -58,9 +58,9 @@ For C++, link `rti_demo_ui::core` from `cpp/` with `add_subdirectory()`, or use
 the Linux C++ development bundle attached to a matching GitHub Release:
 
 ```bash
-tar -xzf rti-demo-ui-cpp-0.4.0-linux-x86_64-gcc11.tar.gz
+tar -xzf rti-demo-ui-cpp-0.4.1-linux-x86_64-gcc11.tar.gz
 cmake -S . -B build \
-  -DCMAKE_PREFIX_PATH="$PWD/rti-demo-ui-cpp-0.4.0-linux-x86_64-gcc11"
+  -DCMAKE_PREFIX_PATH="$PWD/rti-demo-ui-cpp-0.4.1-linux-x86_64-gcc11"
 ```
 
 ```cmake

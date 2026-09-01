@@ -21,8 +21,8 @@ set(BUILD_TESTING OFF)
 add_subdirectory("${RTI_DEMO_UI_SOURCE_DIR}/cpp" core)
 
 get_target_property(RTI_DEMO_UI_ACTUAL_VERSION rti_demo_ui::core VERSION)
-if(NOT RTI_DEMO_UI_ACTUAL_VERSION STREQUAL "0.4.0")
+if(NOT RTI_DEMO_UI_ACTUAL_VERSION STREQUAL "0.4.1")
     message(FATAL_ERROR
-        "rti_demo_ui::core version is ${RTI_DEMO_UI_ACTUAL_VERSION}, expected 0.4.0"
+        "rti_demo_ui::core version is ${RTI_DEMO_UI_ACTUAL_VERSION}, expected 0.4.1"
     )
 endif()

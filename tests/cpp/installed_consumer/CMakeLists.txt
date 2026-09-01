@@ -13,6 +13,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(rti_demo_ui_installed_consumer LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 find_package(rti_demo_ui CONFIG REQUIRED)
 
 add_executable(rti_demo_ui_installed_consumer main.cpp)
