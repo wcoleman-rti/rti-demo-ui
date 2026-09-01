@@ -225,6 +225,11 @@ def _assert_arm_page(page, base_url):
     page.locator("#arm3d-scene [role=option]").first.focus()
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
+    page.wait_for_function(
+        "document.querySelectorAll('[role=option][aria-selected=true]').length === 1"
+        " && document.querySelector('.sdk-scene3d-live')"
+        ".textContent.endsWith('selected')"
+    )
     assert page.locator('[role="option"][aria-selected="true"]').count() == 1
     assert page.locator(".sdk-scene3d-live").inner_text().endswith("selected")
     page.get_by_role("button", name="Zoom to model").click()
