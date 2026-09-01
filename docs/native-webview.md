@@ -63,10 +63,10 @@ Download the core and companion wheels attached to a GitHub release, then
 install both local files. The project does not publish them to a package index:
 
 ```bash
-gh release download v0.4.0 --repo wcoleman-rti/rti-demo-ui \
+gh release download v0.4.1 --repo wcoleman-rti/rti-demo-ui \
   --pattern '*.whl' --dir dist
-.venv/bin/pip install dist/rti_demo_ui-0.4.0-py3-none-any.whl \
-  dist/rti_demo_ui_native-0.4.0-py3-none-any.whl
+.venv/bin/pip install dist/rti_demo_ui-0.4.1-py3-none-any.whl \
+  dist/rti_demo_ui_native-0.4.1-py3-none-any.whl
 ```
 
 From a source checkout:

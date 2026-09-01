@@ -16,6 +16,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/rti-demo-ui-version.cmake")
 
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -75,21 +78,87 @@ add_library(rti_demo_ui_core STATIC
     src/demo_ui_app.cpp
     src/components.cpp
 )
-set_target_properties(rti_demo_ui_core PROPERTIES VERSION 0.4.0)
+set_target_properties(
+    rti_demo_ui_core PROPERTIES
+    EXPORT_NAME core
+    VERSION ${RTI_DEMO_UI_VERSION}
+)
 
 target_include_directories(rti_demo_ui_core
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${cpp_httplib_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
         "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
-
-target_link_libraries(rti_demo_ui_core
-    PUBLIC httplib::httplib nlohmann_json::nlohmann_json
-)
+target_compile_features(rti_demo_ui_core PUBLIC cxx_std_17)
 
 add_library(rti_demo_ui::core ALIAS rti_demo_ui_core)
+
+install(
+    TARGETS rti_demo_ui_core
+    EXPORT rti_demo_ui_targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+install(
+    DIRECTORY include/rti_demo_ui
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+    FILES "${cpp_httplib_SOURCE_DIR}/httplib.h"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+    DIRECTORY "${nlohmann_json_SOURCE_DIR}/include/nlohmann"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(
+    FILES "${CMAKE_CURRENT_LIST_DIR}/../LICENSE"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rti-demo-ui/licenses
+    RENAME LICENSE-rti-demo-ui
+)
+install(
+    FILES "${cpp_httplib_SOURCE_DIR}/LICENSE"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rti-demo-ui/licenses
+    RENAME LICENSE-cpp-httplib
+)
+install(
+    FILES "${nlohmann_json_SOURCE_DIR}/LICENSE.MIT"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rti-demo-ui/licenses
+    RENAME LICENSE-nlohmann-json
+)
+install(
+    FILES "${CMAKE_CURRENT_LIST_DIR}/../README.md"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rti-demo-ui
+)
+
+set(RTI_DEMO_UI_CMAKE_INSTALL_DIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/rti_demo_ui"
+)
+configure_package_config_file(
+    "${CMAKE_CURRENT_LIST_DIR}/cmake/rti-demo-ui-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/rti_demo_ui-config.cmake"
+    INSTALL_DESTINATION "${RTI_DEMO_UI_CMAKE_INSTALL_DIR}"
+)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/rti_demo_ui-config-version.cmake"
+    VERSION "${RTI_DEMO_UI_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+install(
+    EXPORT rti_demo_ui_targets
+    FILE rti_demo_ui-targets.cmake
+    NAMESPACE rti_demo_ui::
+    DESTINATION "${RTI_DEMO_UI_CMAKE_INSTALL_DIR}"
+)
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/rti_demo_ui-config.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/rti_demo_ui-config-version.cmake"
+    DESTINATION "${RTI_DEMO_UI_CMAKE_INSTALL_DIR}"
+)
 
 if(NOT DEFINED RTI_DEMO_TOP_LEVEL_BUILD)
     if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)

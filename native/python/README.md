@@ -19,8 +19,8 @@ WebKitGTK 4.1, and pywebview 6.2.1. Download both wheels from the matching
 GitHub release and install their local paths:
 
 ```bash
-pip install rti_demo_ui-0.4.0-py3-none-any.whl \
-  rti_demo_ui_native-0.4.0-py3-none-any.whl
+pip install rti_demo_ui-0.4.1-py3-none-any.whl \
+  rti_demo_ui_native-0.4.1-py3-none-any.whl
 ```
 
 ```python

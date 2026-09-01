@@ -11,9 +11,14 @@
 #
 
 cmake_minimum_required(VERSION 3.16)
-include(cmake/rti-demo-ui-version.cmake)
-project(rti_demo_ui VERSION ${RTI_DEMO_UI_VERSION} LANGUAGES CXX)
+project(rti_demo_ui_installed_consumer LANGUAGES CXX)
 
-include(CTest)
-set(RTI_DEMO_TOP_LEVEL_BUILD ON)
-add_subdirectory(cpp)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(rti_demo_ui CONFIG REQUIRED)
+
+add_executable(rti_demo_ui_installed_consumer main.cpp)
+target_link_libraries(
+    rti_demo_ui_installed_consumer PRIVATE rti_demo_ui::core
+)
