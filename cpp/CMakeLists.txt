@@ -57,12 +57,55 @@ file(READ "${RTI_DEMO_UI_ASSETS_DIR}/runtime3d.js" RTI_DEMO_RUNTIME3D_JS)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/client.js" RTI_DEMO_CLIENT_JS)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/theme.css" RTI_DEMO_THEME_CSS)
 
-foreach(asset_var RTI_DEMO_INDEX_HTML RTI_DEMO_RUNTIME_JS RTI_DEMO_RUNTIME3D_JS RTI_DEMO_CLIENT_JS RTI_DEMO_THEME_CSS)
+function(rti_demo_cpp_asset input_var output_var size_var)
+    set(asset "${${input_var}}")
+    string(LENGTH "${asset}" asset_size)
+    set(statements "")
+    while(asset_size GREATER 0)
+        if(asset_size GREATER 8192)
+            set(chunk_size 8192)
+        else()
+            set(chunk_size "${asset_size}")
+        endif()
+        string(SUBSTRING "${asset}" 0 "${chunk_size}" chunk)
+        string(APPEND statements
+            "        result.append(R\"RTI_ASSET(${chunk})RTI_ASSET\");\n"
+        )
+        string(SUBSTRING "${asset}" "${chunk_size}" -1 asset)
+        string(LENGTH "${asset}" asset_size)
+    endwhile()
+    set("${output_var}" "${statements}" PARENT_SCOPE)
+    string(LENGTH "${${input_var}}" total_size)
+    set("${size_var}" "${total_size}" PARENT_SCOPE)
+endfunction()
+
+foreach(asset_var
+        RTI_DEMO_INDEX_HTML
+        RTI_DEMO_RUNTIME_JS
+        RTI_DEMO_RUNTIME3D_JS
+        RTI_DEMO_CLIENT_JS
+        RTI_DEMO_THEME_CSS)
     string(FIND "${${asset_var}}" "RTI_ASSET" RTI_DEMO_ASSET_DELIMITER_INDEX)
     if(NOT RTI_DEMO_ASSET_DELIMITER_INDEX EQUAL -1)
         message(FATAL_ERROR "${asset_var} contains the reserved raw-string delimiter RTI_ASSET")
     endif()
 endforeach()
+
+rti_demo_cpp_asset(
+    RTI_DEMO_INDEX_HTML RTI_DEMO_INDEX_HTML_CPP RTI_DEMO_INDEX_HTML_SIZE
+)
+rti_demo_cpp_asset(
+    RTI_DEMO_RUNTIME_JS RTI_DEMO_RUNTIME_JS_CPP RTI_DEMO_RUNTIME_JS_SIZE
+)
+rti_demo_cpp_asset(
+    RTI_DEMO_RUNTIME3D_JS RTI_DEMO_RUNTIME3D_JS_CPP RTI_DEMO_RUNTIME3D_JS_SIZE
+)
+rti_demo_cpp_asset(
+    RTI_DEMO_CLIENT_JS RTI_DEMO_CLIENT_JS_CPP RTI_DEMO_CLIENT_JS_SIZE
+)
+rti_demo_cpp_asset(
+    RTI_DEMO_THEME_CSS RTI_DEMO_THEME_CSS_CPP RTI_DEMO_THEME_CSS_SIZE
+)
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file(

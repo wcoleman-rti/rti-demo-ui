@@ -14,27 +14,54 @@
 // assets/ — do not edit.
 #pragma once
 
+#include <string>
+
 namespace rti::demo::ui {
 namespace detail {
 
 inline const char* embedded_index_html() {
-    return R"RTI_ASSET(@RTI_DEMO_INDEX_HTML@)RTI_ASSET";
+    static const std::string asset = []() {
+        std::string result;
+        result.reserve(@RTI_DEMO_INDEX_HTML_SIZE@);
+@RTI_DEMO_INDEX_HTML_CPP@        return result;
+    }();
+    return asset.c_str();
 }
 
 inline const char* embedded_runtime_js() {
-    return R"RTI_ASSET(@RTI_DEMO_RUNTIME_JS@)RTI_ASSET";
+    static const std::string asset = []() {
+        std::string result;
+        result.reserve(@RTI_DEMO_RUNTIME_JS_SIZE@);
+@RTI_DEMO_RUNTIME_JS_CPP@        return result;
+    }();
+    return asset.c_str();
 }
 
 inline const char* embedded_runtime3d_js() {
-    return R"RTI_ASSET(@RTI_DEMO_RUNTIME3D_JS@)RTI_ASSET";
+    static const std::string asset = []() {
+        std::string result;
+        result.reserve(@RTI_DEMO_RUNTIME3D_JS_SIZE@);
+@RTI_DEMO_RUNTIME3D_JS_CPP@        return result;
+    }();
+    return asset.c_str();
 }
 
 inline const char* embedded_client_js() {
-    return R"RTI_ASSET(@RTI_DEMO_CLIENT_JS@)RTI_ASSET";
+    static const std::string asset = []() {
+        std::string result;
+        result.reserve(@RTI_DEMO_CLIENT_JS_SIZE@);
+@RTI_DEMO_CLIENT_JS_CPP@        return result;
+    }();
+    return asset.c_str();
 }
 
 inline const char* embedded_theme_css() {
-    return R"RTI_ASSET(@RTI_DEMO_THEME_CSS@)RTI_ASSET";
+    static const std::string asset = []() {
+        std::string result;
+        result.reserve(@RTI_DEMO_THEME_CSS_SIZE@);
+@RTI_DEMO_THEME_CSS_CPP@        return result;
+    }();
+    return asset.c_str();
 }
 
 }  // namespace detail

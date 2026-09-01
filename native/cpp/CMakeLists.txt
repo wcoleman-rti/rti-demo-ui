@@ -78,12 +78,6 @@ target_link_libraries(rti_demo_ui_native_webview
     PUBLIC rti_demo_ui::core
     PRIVATE webview::core
 )
-if(APPLE)
-    set_source_files_properties(
-        src/native_webview_macos.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc"
-    )
-endif()
-
 add_library(
     rti_demo_ui_native::native_webview ALIAS rti_demo_ui_native_webview
 )

@@ -28,9 +28,14 @@
     self = [super init];
     if (self != nil) {
         _allowedOrigin = std::move(allowedOrigin);
-        _forwardingUIDelegate = forwardingUIDelegate;
+        _forwardingUIDelegate = [forwardingUIDelegate retain];
     }
     return self;
+}
+
+- (void)dealloc {
+    [_forwardingUIDelegate release];
+    [super dealloc];
 }
 
 - (void)webView:(WKWebView*)webView
@@ -82,6 +87,7 @@ class WebviewHost final : public detail::WindowHost {
             view_.navigationDelegate = nil;
             view_.UIDelegate = forwarding_ui_delegate_;
         }
+        [delegate_ release];
     }
 
     void create(const std::string& title, const std::string& url,
@@ -90,7 +96,7 @@ class WebviewHost final : public detail::WindowHost {
         window_ = std::make_unique<webview::webview>(options.devtools, nullptr);
         auto controller = window_->browser_controller();
         controller.ensure_ok();
-        view_ = (__bridge WKWebView*)controller.value();
+        view_ = (WKWebView*)controller.value();
         forwarding_ui_delegate_ = view_.UIDelegate;
         delegate_ =
             [[RTIDemoNavigationDelegate alloc] initWithAllowedOrigin:detail::origin(url)
