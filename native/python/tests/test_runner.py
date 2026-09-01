@@ -150,7 +150,7 @@ def test_non_loopback_host_is_rejected():
 
 def test_unqualified_production_platform_is_actionable(monkeypatch):
     monkeypatch.setattr(runner.sys, "platform", "darwin")
-    with pytest.raises(NativeWebviewError, match="qualified only on Linux"):
+    with pytest.raises(NativeWebviewError, match="delegate-composition"):
         runner.run_native(
             DemoUiApp("unsupported"),
             application_id="com.example.unsupported",
@@ -257,6 +257,71 @@ def test_pywebview_external_browser_navigation_is_disabled(tmp_path):
         devtools=False,
     )
     assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
+
+
+def test_windows_pywebview_policy_blocks_navigation_and_new_windows(tmp_path):
+    class Event:
+        def __init__(self):
+            self.handlers = []
+
+        def __iadd__(self, handler):
+            self.handlers.append(handler)
+            return self
+
+    class BeforeShow:
+        def __init__(self):
+            self.handler = None
+
+        def __iadd__(self, handler):
+            self.handler = handler
+            return self
+
+    navigation = Event()
+    new_window = Event()
+    browser = SimpleNamespace(
+        NavigationStarting=navigation,
+        NewWindowRequested=new_window,
+    )
+    before_show = BeforeShow()
+    fake_window = SimpleNamespace(
+        events=SimpleNamespace(before_show=before_show),
+        native=SimpleNamespace(
+            webview=SimpleNamespace(CoreWebView2=browser),
+        ),
+    )
+    starts = []
+    fake_webview = SimpleNamespace(
+        settings={"OPEN_EXTERNAL_LINKS_IN_BROWSER": True},
+        create_window=lambda *args, **kwargs: fake_window,
+        start=lambda *args, **kwargs: starts.append(kwargs),
+    )
+    host = runner._WindowsPyWebviewHost(fake_webview, tmp_path)
+    host.create(
+        title="navigation",
+        url="http://127.0.0.1:42000/",
+        width=1280,
+        height=800,
+        devtools=False,
+    )
+    before_show.handler()
+
+    same_origin = SimpleNamespace(Uri="http://127.0.0.1:42000/dashboard", Cancel=False)
+    external = SimpleNamespace(Uri="https://example.invalid/", Cancel=False)
+    popup = SimpleNamespace(Handled=False)
+    navigation.handlers[0](None, same_origin)
+    navigation.handlers[0](None, external)
+    new_window.handlers[0](None, popup)
+
+    assert same_origin.Cancel is False
+    assert external.Cancel is True
+    assert popup.Handled is True
+    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
+
+    host._close_requested.set()
+    host.run()
+    assert starts[0]["gui"] == "edgechromium"
+    assert starts[0]["private_mode"] is False
+    assert starts[0]["storage_path"] == str(tmp_path)
 
 
 def test_window_close_joins_owner_and_releases_port():

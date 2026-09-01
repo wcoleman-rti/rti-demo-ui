@@ -79,6 +79,7 @@ class _PyWebviewHost:
         self._close_error: list[BaseException] = []
         self._devtools = False
         self._allowed_origin = ""
+        self._gui = "gtk"
 
     def create(
         self,
@@ -151,13 +152,43 @@ class _PyWebviewHost:
     def run(self) -> None:
         self._webview.start(
             self._on_started,
-            gui="gtk",
+            gui=self._gui,
             debug=self._devtools,
             private_mode=False,
             storage_path=str(self._profile_path),
         )
         if self._close_error:
             raise self._close_error[0]
+
+
+class _WindowsPyWebviewHost(_PyWebviewHost):
+    def __init__(self, webview_module, profile_path: Path) -> None:
+        super().__init__(webview_module, profile_path)
+        self._gui = "edgechromium"
+        self._navigation_handler = None
+        self._new_window_handler = None
+
+    def _install_navigation_policy(self) -> None:
+        native = self._window.native
+        webview_control = getattr(native, "webview", None)
+        browser = getattr(webview_control, "CoreWebView2", None)
+        if browser is None:
+            raise NativeWebviewError(
+                "WebView2 native controller was not initialized; verify "
+                "pywebview 6.2.1 is using the Edge Chromium backend"
+            )
+
+        def block_external_navigation(_sender, args):
+            if not _same_origin(str(args.Uri), self._allowed_origin):
+                args.Cancel = True
+
+        def block_new_window(_sender, args):
+            args.Handled = True
+
+        self._navigation_handler = block_external_navigation
+        self._new_window_handler = block_new_window
+        browser.NavigationStarting += self._navigation_handler
+        browser.NewWindowRequested += self._new_window_handler
 
 
 def _origin(url: str) -> str:
@@ -207,11 +238,11 @@ def _profile_path(application_id: str) -> Path | None:
 
 
 def _require_supported_production_platform() -> None:
-    if sys.platform == "linux":
+    if sys.platform in {"linux", "win32"}:
         return
     raise NativeWebviewError(
-        "native webview mode is currently qualified only on Linux; Windows and "
-        "macOS support is prepared but requires real-host qualification"
+        "native webview mode on macOS requires a safe pywebview WKWebView "
+        "delegate-composition API that is not available in pywebview 6.2.1"
     )
 
 
@@ -219,10 +250,18 @@ def _load_pywebview():
     try:
         return importlib.import_module("webview")
     except (ImportError, OSError) as error:
+        if sys.platform == "win32":
+            requirement = (
+                "pywebview 6.2.1 with pythonnet and the Evergreen WebView2 "
+                "Runtime is required"
+            )
+        else:
+            requirement = (
+                "pywebview 6.2.1 with GTK/WebKitGTK is required; install the "
+                "documented Ubuntu GTK 3 and WebKitGTK 4.1 packages"
+            )
         raise NativeWebviewError(
-            "pywebview 6.2.1 with GTK/WebKitGTK is required; install "
-            "'rti-demo-ui-native' and the documented Ubuntu GTK 3 and "
-            "WebKitGTK 4.1 packages"
+            f"{requirement}; install 'rti-demo-ui-native'"
         ) from error
 
 
@@ -470,7 +509,10 @@ def run_native(
             raise NativeWebviewError(
                 "the qualified Linux backend requires a native profile path"
             )
-        return _PyWebviewHost(_load_pywebview(), options.profile_path)
+        webview_module = _load_pywebview()
+        if sys.platform == "win32":
+            return _WindowsPyWebviewHost(webview_module, options.profile_path)
+        return _PyWebviewHost(webview_module, options.profile_path)
 
     _require_supported_production_platform()
     _run_native(
