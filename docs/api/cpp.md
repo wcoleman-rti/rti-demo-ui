@@ -148,7 +148,9 @@ copy-then-commit, so failures leave state and revisions unchanged.
 ## Lifecycle and Concurrency
 
 `run()` binds the server, publishes `ReadyInfo`, and blocks until `stop()` is
-called. The app is single-use, while `stop()` is thread-safe and idempotent.
+called. The app is single-use, while `stop()` is thread-safe and idempotent when
+called from a non-callback thread. Command handlers and SDK timer callbacks must
+signal a control thread to call `stop()`.
 Cards and component handles are owned by `DemoUiApp` and remain valid until the
 app is destroyed. C++ model mutations are protected by the app model mutex and
 may be called from application threads.

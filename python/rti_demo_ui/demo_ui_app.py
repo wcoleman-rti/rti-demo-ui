@@ -1311,6 +1311,9 @@ class DemoUiApp:
         ``stop()`` may be awaited before :meth:`run` to prevent any later bind,
         from the owner loop, or from another loop while the app is running. The
         method waits for in-flight requests, active commands, and SSE cleanup.
+        Do not directly await ``stop()`` inside a command handler: that handler
+        is itself active work that shutdown must drain. Schedule it with
+        ``asyncio.create_task(app.stop())`` so the handler can return first.
         """
         owner_loop = self._owner_loop
         if owner_loop is None:

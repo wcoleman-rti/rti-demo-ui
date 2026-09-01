@@ -32,11 +32,20 @@ An app stopped from another event loop schedules shutdown on its owner loop.
 Shutdown rejects new event subscriptions, wakes connected and idle SSE handlers,
 closes their transports, and then completes normal aiohttp cleanup.
 
+Do not directly await `app.stop()` from a command handler. Shutdown drains active
+commands, including the current handler. Instead, schedule
+`asyncio.create_task(app.stop())` and return from the handler so cleanup can
+proceed.
+
 The C++ `wait_until_ready()` returns only after the bound httplib listener is
 running and the reported URL can accept requests. `run()` remains blocking and
 owns the managed listener until `stop()`; callers do not need a separate health
 poll after readiness. Concurrent startup and stop cannot publish a stale
 `ReadyInfo`.
+
+C++ `stop()` must run on a non-callback control thread. A command handler or SDK
+timer callback must signal that control thread rather than call `stop()` itself,
+because shutdown waits for active commands and joins timer threads.
 
 Component factory and mutation methods remain synchronous. Configuration before
 startup is allowed; after startup, mutations and snapshots must run on the

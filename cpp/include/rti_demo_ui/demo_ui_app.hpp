@@ -409,7 +409,9 @@ class DemoUiApp {
     /**
      * Stop serving and wait for active commands and timer threads.
      *
-     * Safe to call before, during, or after run(), and safe to call repeatedly.
+     * Safe to call before, during, or after run(), and safe to call repeatedly
+     * from a non-callback thread. Do not call from a command handler or SDK
+     * timer callback because stop waits for those callbacks to finish.
      */
     void stop() noexcept;
 
