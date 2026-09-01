@@ -66,6 +66,9 @@ class WebviewHost final : public detail::WindowHost {
         window_->set_title(title).ensure_ok();
         window_->set_size(options.width, options.height, WEBVIEW_HINT_NONE)
             .ensure_ok();
+,         auto native_window = window_->window();
+        native_window.ensure_ok();
+        native_window_ = static_cast<HWND>(native_window.value());
         window_->navigate(url).ensure_ok();
         if (close_requested_) {
             dispatch_close_locked();
@@ -156,13 +159,16 @@ class WebviewHost final : public detail::WindowHost {
     }
 
     void dispatch_close_locked() {
-        auto* window = window_.get();
-        window->dispatch([window]() { window->terminate().ensure_ok(); })
-            .ensure_ok();
+        if (native_window_ == nullptr ||
+            !PostMessageW(native_window_, WM_CLOSE, 0, 0)) {
+            throw NativeWebviewError(
+                "failed to post WM_CLOSE to the native window");
+        }
     }
 
     std::mutex mutex_;
     std::unique_ptr<webview::webview> window_;
+    HWND native_window_ = nullptr;
     ComPtr<ICoreWebView2> browser_;
     ComPtr<ICoreWebView2NavigationStartingEventHandler> navigation_handler_;
     ComPtr<ICoreWebView2NewWindowRequestedEventHandler> new_window_handler_;
