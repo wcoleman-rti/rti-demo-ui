@@ -339,3 +339,8 @@ jobs:
       - name: Run Windows Python real-engine smoke
         if: runner.os == 'Windows'
         run: python native/python/tests/real_host_smoke.py
+      - name: Run native real-engine conformance
+        run: >
+          python native/python/tests/hosted_conformance.py
+          --build-dir build/native-cross-platform
+          --static-root tools/native_webview_spike/conformance
