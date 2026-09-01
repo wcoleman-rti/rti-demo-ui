@@ -18,7 +18,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "rti-demo-ui>=0.4,<0.5",
-    "pywebview==6.2.1; sys_platform == 'linux'",
+    "pywebview==6.2.1; sys_platform == 'linux' or sys_platform == 'win32'",
     "PyGObject==3.50.0; sys_platform == 'linux' and python_version < '3.13'",
 ]
 classifiers = [

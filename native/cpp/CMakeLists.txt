@@ -11,9 +11,25 @@ option(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS
 option(RTI_DEMO_NATIVE_BUILD_EXAMPLES
        "Build native companion examples" OFF)
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
+        src/control_posix.cpp
+        src/native_webview_linux.cpp
+    )
+elseif(WIN32)
+    set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
+        src/control_windows.cpp
+        src/native_webview_windows.cpp
+    )
+elseif(APPLE)
+    enable_language(OBJCXX)
+    set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
+        src/control_posix.cpp
+        src/native_webview_macos.mm
+    )
+else()
     message(FATAL_ERROR
-        "rti_demo_ui_native 0.4 supports only Linux; use browser mode on this platform"
+        "rti_demo_ui_native is prepared only for Linux, Windows, and macOS"
     )
 endif()
 
@@ -42,7 +58,8 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(webview)
 
 add_library(rti_demo_ui_native_webview STATIC
-    src/native_webview.cpp
+    ${RTI_DEMO_NATIVE_PLATFORM_SOURCES}
+    src/navigation.cpp
     src/runner.cpp
 )
 set_target_properties(
@@ -61,7 +78,6 @@ target_link_libraries(rti_demo_ui_native_webview
     PUBLIC rti_demo_ui::core
     PRIVATE webview::core
 )
-
 add_library(
     rti_demo_ui_native::native_webview ALIAS rti_demo_ui_native_webview
 )

@@ -8,9 +8,17 @@
 #include <system_error>
 #include <utility>
 
+#include "navigation.hpp"
 #include "runner.hpp"
 
 namespace rti::demo::ui::native {
+namespace detail {
+
+const char* native_window_failure_guidance() noexcept {
+    return "native window failed; verify GTK 3 and WebKitGTK 4.1 are installed";
+}
+
+}  // namespace detail
 namespace {
 
 class WebviewHost final : public detail::WindowHost {
@@ -20,7 +28,7 @@ class WebviewHost final : public detail::WindowHost {
         std::lock_guard<std::mutex> guard(mutex_);
         window_ = std::make_unique<webview::webview>(options.devtools, nullptr);
         configure_persistent_cookies();
-        allowed_origin_ = origin(url);
+        allowed_origin_ = detail::origin(url);
         auto controller = window_->browser_controller();
         controller.ensure_ok();
         auto* view = WEBKIT_WEB_VIEW(controller.value());
@@ -71,26 +79,8 @@ class WebviewHost final : public detail::WindowHost {
     }
 
    private:
-    static std::string origin(const std::string& url) {
-        const auto scheme = url.find("://");
-        const auto path =
-            url.find('/', scheme == std::string::npos ? 0 : scheme + 3);
-        if (scheme == std::string::npos || path == std::string::npos) {
-            throw NativeWebviewError("native window URL is not an HTTP origin");
-        }
-        return url.substr(0, path);
-    }
-
     bool same_origin(const std::string& uri) const {
-        if (uri == allowed_origin_) {
-            return true;
-        }
-        if (uri.size() <= allowed_origin_.size() ||
-            uri.compare(0, allowed_origin_.size(), allowed_origin_) != 0) {
-            return false;
-        }
-        const char separator = uri[allowed_origin_.size()];
-        return separator == '/' || separator == '?' || separator == '#';
+        return detail::same_origin(uri, allowed_origin_);
     }
 
     static gboolean block_external_navigation(
@@ -119,7 +109,8 @@ class WebviewHost final : public detail::WindowHost {
             std::filesystem::read_symlink("/proc/self/exe", error);
         if (error || executable.filename().empty()) {
             throw NativeWebviewError(
-                "could not determine the executable identity from /proc/self/exe");
+                "could not determine the executable identity from "
+                "/proc/self/exe");
         }
         const char* data_home = g_get_user_data_dir();
         if (data_home == nullptr || data_home[0] == '\0') {
