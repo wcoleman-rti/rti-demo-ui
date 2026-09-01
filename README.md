@@ -12,254 +12,57 @@
 
 # RTI Demo UI
 
-A small UI SDK designed for local RTI Connext DDS demos, without linking to or
-depending on Connext itself. It has one shared browser frontend and two
-interchangeable state servers: Python 3.11+ with native
-`asyncio`/`aiohttp`, and C++17 (pinned `cpp-httplib` + `nlohmann/json` via
-CMake `FetchContent`). See [docs/architecture.md](docs/architecture.md)
-for the full design. Direct third-party dependencies and licenses are listed
-in [docs/third-party.md](docs/third-party.md).
+Build local browser interfaces for RTI Connext DDS demos from Python or C++.
+Applications define cards and stateful components; RTI Demo UI serves the
+shared frontend and handles browser updates. Connext integration is optional
+and remains application-owned.
 
-Each backend owns the authoritative component model (`DemoUiApp`, `Card`,
-`Scene2DViewport`, `Scene3DViewport`, generic state components, and custom
-components) and serves
-an identical v2 JSON snapshot and SSE stream; the browser owns DOM/SVG rendering
-via the supported `/sdk/client.js` transport and shared `runtime.js`. Polling is
-the compatibility default, while custom frontends may explicitly select SSE.
-Scene3D is an
-opt-in dynamic import of the bundled `/sdk/runtime3d.js`; ordinary pages never
-load Three.js. There is no Node.js process or DDS dependency at runtime.
+Use the built-in frontend for fast demos, provide a custom frontend when needed,
+or opt into a native Linux window. The core SDK does not require Connext,
+Node.js, or a separate frontend process at runtime.
 
-## Quick usage
-
-Python:
-
-```python
-import asyncio
-
-from rti_demo_ui import DemoUiApp
-
-
-async def main() -> None:
-  app = DemoUiApp(title="Fleet Telemetry")
-  scene = app.add_card("Vehicles").add_scene_2d(
-    width=600, height=400, bounds=(-100.0, 100.0, -100.0, 100.0)
-  )
-  scene.add_entity("vehicle-1", x=0.0, y=0.0, heading=0.0)
-
-  try:
-    await app.run()
-  finally:
-    await app.stop()
-
-
-asyncio.run(main())
-```
-
-The built-in page supports governed `dark`/`light` themes and `auto`, `grid-2`,
-`grid-3`, and `sidebar-main` layouts. See the language API guides for
-constructor and live mutation examples.
-
-C++:
-
-```cpp
-#include <rti_demo_ui/rti_demo_ui.hpp>
-
-int main() {
-  using namespace rti::demo::ui;
-
-  DemoUiApp app("Fleet Telemetry");
-  auto* scene = app.add_card("Vehicles")->add_scene_2d(
-    600, 400, {-100.0, 100.0, -100.0, 100.0});
-  scene->add_entity("vehicle-1", 0.0, 0.0, 0.0);
-
-  app.run();
-}
-```
-
-See [examples/py/simple.py](examples/py/simple.py) and
-[examples/cpp/simple.cpp](examples/cpp/simple.cpp) for animation and graceful
-interactive shutdown.
-
-An opt-in native window is available on supported Linux systems through
-separately packaged Python and C++ companions. Browser mode and core
-installation remain unchanged. See
-[Native Webview Mode](docs/native-webview.md) for prerequisites, API examples,
-profiles, troubleshooting, platform tier, and the release checklist.
-
-Run the application-owned gallery in any governed presentation:
+## Start with Python
 
 ```bash
-PYTHONPATH=python python examples/py/gallery.py --theme light --layout grid-3
-./build/cpp/examples/rti_demo_ui_gallery --theme dark --layout sidebar-main
+python -m pip install -e .
+python examples/py/simple.py
 ```
 
-## Arm 3D pilot
+Open the URL printed by the example. Python 3.11 or newer is required.
 
-The application-owned arm pilot serves a deterministic GLB and updates five
-mock joint targets without DDS or a Node.js development server:
+## Start with C++
 
 ```bash
-PYTHONPATH=python python examples/py/arm3d.py
-./build/cpp/examples/rti_demo_ui_arm3d
-```
-
-Open the printed URL. The model, stable node paths, coordinate conventions,
-fallback behavior, and replacement guidance are documented in
-[examples/web/arm3d/README.md](examples/web/arm3d/README.md).
-
-## Repository layout
-
-```text
-assets/       canonical index.html, runtime.js, runtime3d.js, client.js, theme.css
-cpp/          C++17 SDK core (rti_demo_ui::core)
-native/       opt-in Python and C++ native webview companions
-python/       Python 3.11+ SDK source (rti_demo_ui)
-examples/     simple, gallery, and guarded Connext examples per language
-tests/        cpp (CTest), py (pytest model/HTTP), browser (Playwright)
-docs/         architecture, API, frontend, lifecycle, and contributor guides
-```
-
-## Python
-
-```bash
-pip install -e .                  # editable install
-pip install -e '.[dev]'           # + test, browser, and commit tooling
-# Pins: pytest 8.4.2, pytest-asyncio 1.4.0
-pre-commit install --install-hooks # install and provision checks before commits
-# One-time browser binary download, needed for tests/browser.
-playwright install chromium
-python examples/py/simple.py      # runs the asyncio app and prints its URL
-```
-
-## C++
-
-```bash
-cmake -S . -B build -DBUILD_TESTING=ON
-cmake --build build
-ctest --test-dir build
+cmake -S . -B build
+cmake --build build --target rti_demo_ui_simple
 ./build/cpp/examples/rti_demo_ui_simple
 ```
 
-`cmake -S . -B build -DBUILD_TESTING=ON` fetches pinned, MIT-licensed
-dependencies on first configure (network required only when the `FetchContent`
-cache is empty):
+C++17 and a network connection for the first dependency fetch are required.
 
-- [`yhirose/cpp-httplib`](https://github.com/yhirose/cpp-httplib) v0.18.3 (MIT)
-- [`nlohmann/json`](https://github.com/nlohmann/json) v3.11.3 (MIT)
+## What you can build
 
-`RTI_DEMO_BUILD_EXAMPLES` defaults ON for a top-level build; consuming
-projects that `add_subdirectory(cpp)` get it OFF by default and link
-`rti_demo_ui::core` directly.
+- Dashboards using tables, metrics, text, badges, logs, and governed layouts.
+- Live 2D scenes and glTF-based 3D scenes.
+- Custom browser frontends using polling or server-sent events.
+- Validated browser commands and application-owned JSON state.
+- Optional native Linux windows through separate Python and C++ companions.
 
-## Opening the SDK app
+Explore the [Python examples](examples/py), [C++ examples](examples/cpp), or the
+[Arm 3D example](examples/web/arm3d/README.md). Optional Connext examples show
+how to connect DDS data without adding Connext to the core SDK.
 
-Both backends bind literal loopback `127.0.0.1` on port `0` by default and print
-the actual URL after binding. Use `ReadyInfo` when code needs the selected port.
-Open that URL in a normal browser, VS Code Simple Browser, or a forwarded
-Codespaces port — no separate frontend process is required. The gallery example
-passes its own `examples/web/gallery` directory as `static_root` and serves at
-`/`.
+## Documentation
 
-## Custom frontends
+- [Documentation home](https://wcoleman-rti.github.io/rti-demo-ui/)
+- [Python guide](https://wcoleman-rti.github.io/rti-demo-ui/api/python.html) and
+  [API reference](https://wcoleman-rti.github.io/rti-demo-ui/reference/python.html)
+- [C++ guide](https://wcoleman-rti.github.io/rti-demo-ui/api/cpp.html) and
+  [API reference](https://wcoleman-rti.github.io/rti-demo-ui/reference/cpp.html)
+- [Custom frontends](https://wcoleman-rti.github.io/rti-demo-ui/custom-frontends.html)
+- [Native webview mode](https://wcoleman-rti.github.io/rti-demo-ui/native-webview.html)
+- [Examples](examples) and
+  [contributing](https://wcoleman-rti.github.io/rti-demo-ui/development/contributing.html)
 
-Pass an application-owned directory containing `index.html` as `static_root`.
-The SDK keeps `/sdk/index.html`, `/sdk/runtime.js`, `/sdk/runtime3d.js`,
-`/sdk/client.js`, `/sdk/theme.css`, `/api/health`, `/api/state`, and
-`/api/events` reserved in both modes. Other paths resolve under the validated
-static root; traversal, absolute paths, directories, and symlinks escaping the
-root are rejected. Unknown `/api/` paths return JSON 404; unknown `/sdk/` paths
-return static 404. See
-[docs/custom-frontends.md](docs/custom-frontends.md) for the complete route,
-MIME, security, and CSS compatibility contract.
-
-The canonical CSS is always available at `/sdk/theme.css`; application pages
-should load it rather than copy `assets/theme.css`. The built-in HTML and
-gallery use `/sdk/runtime.js` and `/sdk/theme.css`.
-
-Custom JavaScript can opt into streaming without changing backend setup:
-
-```js
-import {createClient} from "/sdk/client.js";
-
-const client = createClient({transport: "sse"});
-client.subscribe((snapshot) => render(snapshot));
-client.start();
-```
-
-Omit `transport` (or select `"poll"`) for compatibility polling. Explicit SSE
-never falls back to polling; it requires a same-origin, unbuffered streaming
-path. See [docs/custom-frontends.md](docs/custom-frontends.md#browser-transport)
-for recovery, cleanup, and reverse-proxy constraints.
-
-## Packaging and CMake consumption
-
-The root `pyproject.toml` maps the `python/` source directory and stages the
-canonical root assets into the package at build time. Wheel and source
-distribution installs load built-in assets from package resources and do not
-need a repository checkout. Editable installs expose the same assets through a
-development link. Application-owned frontend directories are not included in
-the SDK package.
-
-For C++, link `rti_demo_ui::core` from `cpp/` with `add_subdirectory()` and
-pass a deployed frontend directory to the `DemoUiApp` `static_root` argument.
-The C++ library embeds all five SDK assets and never uses
-`cpp-httplib::set_mount_point()`.
-
-## Optional Connext examples
-
-`examples/py/connext.py` requires `rti.connextdds`/`rti.types` (RTI Connext
-Professional 7.7.0), installed separately — it is never an SDK runtime
-dependency.
-
-`examples/cpp/connext.cpp` is built only with `BUILD_CONNEXT_EXAMPLE=ON` and
-requires an installed RTI Connext Professional 7.7.0 and `CONNEXTDDS_DIR` (or
-`$NDDSHOME`) pointing at it:
-
-```bash
-cmake -S . -B build-connext \
-  -DBUILD_CONNEXT_EXAMPLE=ON \
-  -DCONNEXTDDS_DIR=/opt/rti.com/rti_connext_dds-7.7.0
-cmake --build build-connext
-```
-
-IDL-to-C++ code generation uses
-[`rticommunity/rticonnextdds-cmake-utils`](https://github.com/rticommunity/rticonnextdds-cmake-utils)
-(pinned commit), not handwritten `rtiddsgen` invocations. Default builds
-never discover Connext or fetch this utility.
-
-## Shutdown responsibilities
-
-Python uses `await app.run()` and `await app.stop()`; `stop()` is idempotent,
-waits for aiohttp cleanup, and the app instance is single-use. Python model
-mutations are synchronous during configuration and must run on the owner event
-loop after startup. Foreign threads must schedule work with
-`loop.call_soon_threadsafe`. C++ retains its blocking, thread-safe lifecycle
-and SDK timer API. Applications that start their own DDS/worker threads must
-join those workers themselves before destroying `DemoUiApp`.
-The core SDK does not install process-global signal handlers. Python browser
-examples catch `asyncio.CancelledError`; C++ browser examples use an
-example-local controller. The optional native companions temporarily install
-minimal `SIGINT`/`SIGTERM` handlers and restore the previous handlers after
-their managed window lifecycle exits.
-
-See [docs/lifecycle.md](docs/lifecycle.md) for startup, cancellation, worker
-ownership, and platform-specific control behavior.
-
-## Quality gates
-
-```bash
-pre-commit run --all-files  # ruff, clang-format, whitespace/YAML checks
-PYTHONPATH=python pytest tests/py                       # model + HTTP contract
-# Playwright; first run `playwright install chromium`.
-PYTHONPATH=python pytest tests/browser
-cmake --build build && ctest --test-dir build            # C++ model + HTTP contract
-```
-
-`clang-format` and `pre-commit` come from the `dev` extra (no system
-package/sudo required); `pre-commit` picks `clang-format` up from the active
-virtualenv.
-
-For public API examples, see [docs/api/python.md](docs/api/python.md) and
-[docs/api/cpp.md](docs/api/cpp.md). Contributor setup and the implementation
-plan policy are in [docs/development/contributing.md](docs/development/contributing.md).
+See [third-party notices](docs/third-party.md) for dependency and license
+details.
