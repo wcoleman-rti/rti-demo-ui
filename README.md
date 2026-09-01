@@ -48,9 +48,9 @@ C++17 and a network connection for the first dependency fetch are required.
 - Validated browser commands and application-owned JSON state.
 - Optional native Linux windows through separate Python and C++ companions.
 
-Explore the [Python examples](examples/py), [C++ examples](examples/cpp), or the
-[Arm 3D example](examples/web/arm3d/README.md). Optional Connext examples show
-how to connect DDS data without adding Connext to the core SDK.
+Explore the focused [example catalog](examples/README.md) for Python and C++
+references covering components, application data, commands, scenes, layouts,
+and optional Connext integration.
 
 ## Documentation
 
