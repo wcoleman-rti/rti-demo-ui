@@ -215,3 +215,23 @@ The no-host preparation checkpoint is complete when:
 - The exact commands, unverified assumptions, and required host actions are
   recorded.
 - Existing Linux and browser behavior remains fully green.
+
+## Preparation CI Evidence
+
+GitHub Actions run
+[`33563348799`](https://github.com/wcoleman-rti/rti-demo-ui/actions/runs/33563348799)
+validated the initial host-independent checkpoint on 2026-09-01:
+
+- `windows-2022` reported Windows Server 2022-compatible build
+  `10.0.20348`, AMD64, and completed 27 tests with five intentional
+  platform-specific skips.
+- `macos-14` reported macOS 14.8.7, arm64, and completed 27 tests with five
+  intentional platform-specific skips. This confirms that the hosted label
+  matches the `arm64Darwin23clang16.0` host architecture needed for subsequent
+  compile and engine work.
+- Existing Python, C++, browser, and Linux real-engine jobs also passed.
+
+The initial preparation jobs omitted the repository's pinned `pytest-asyncio`
+dependency, causing warnings for its configured pytest options. The job now
+installs that existing pin; this was a test-environment issue rather than a
+runner behavior failure.
