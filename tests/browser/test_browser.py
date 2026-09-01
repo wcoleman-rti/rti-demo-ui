@@ -222,6 +222,10 @@ def _assert_arm_page(page, base_url):
         "document.querySelector('#arm3d-scene canvas') && "
         "document.querySelector('#arm3d-scene canvas').width > 0"
     )
+    page.wait_for_function(
+        "document.querySelector('.sdk-scene3d-live').textContent === "
+        "'3D model loaded'"
+    )
     page.locator("#arm3d-scene [role=option]").first.focus()
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
