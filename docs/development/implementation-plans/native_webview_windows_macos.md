@@ -2,19 +2,22 @@
 
 ## Status
 
-Preparation may proceed from the completed Linux native-webview implementation.
-Neither additional platform is supported until its Python and C++ runners pass
-the fixed real-engine, lifecycle, profile, CI, and manual gates below.
+Windows Python/C++ and macOS C++ have passed hosted compilation, real-engine,
+lifecycle, navigation, persistence/isolation, and shared frontend conformance.
+They remain release candidates pending the manual gates below. macOS Python
+now uses a direct PyObjC Cocoa host rather than a pywebview fork and awaits its
+hosted qualification run.
 
 This work is intentionally separate from the Linux implementation pull request.
 It targets the RTI development-host architectures that are relevant to recent
 Connext releases:
 
-| RTI architecture | Native host | Development toolchain | Initial status |
-| --- | --- | --- | --- |
-| `arm64Darwin23clang16.0` | Apple Silicon macOS 14 / Darwin 23 | Current compatible Xcode and Apple Clang | Unqualified |
-| `x64Linux4gcc8.3.0` | x86-64 Ubuntu 22.04+ | GCC 11+ or Clang 14+ | Supported |
-| `x64Win64VS2017` | x86-64 Windows 10/11 | Visual Studio 2022 and current Windows SDK | Unqualified |
+| RTI architecture | Combination | Qualification status |
+| --- | --- | --- |
+| `arm64Darwin23clang16.0` | C++17 / Apple Silicon macOS 14+ / current compatible Xcode | Automated gates passed; manual acceptance pending |
+| `arm64Darwin23clang16.0` | Python 3.11+ / Apple Silicon macOS 14+ | Direct PyObjC host implemented; hosted qualification pending |
+| `x64Linux4gcc8.3.0` | Python 3.11+ and C++17 / Ubuntu 22.04+ / GCC 11+ or Clang 14+ | Supported |
+| `x64Win64VS2017` | Python 3.11+ and C++17 / Windows 10/11 / VS2022 | Automated gates passed; manual acceptance pending |
 
 The compiler encoded in an RTI architecture name describes the toolchain used
 to build the RTI binaries. It is not a requirement to build the consuming
@@ -46,9 +49,11 @@ The additional platforms must preserve the completed Linux contract:
 - Built-in, custom, and adapter-provided frontends use the same HTTP, snapshot,
   SSE, command, theme, Canvas, WebGL, focus, and resize contracts.
 
-Dependency pins remain pywebview 6.2.1 and webview 0.12.0 unless a fixed gate
-demonstrates that a pin cannot implement the contract. Any dependency change
-requires an explicit plan revision rather than an implicit substitution.
+The latest stable pywebview release remains 6.2.1. Its Cocoa backend does not
+honor `storage_path`, expose a pre-construction WKWebView configuration hook,
+or provide cancellable navigation/new-window callbacks or safe delegate
+composition. No newer stable version can remove the macOS Python blocker.
+Linux and Windows retain pywebview 6.2.1; C++ retains webview 0.12.0.
 
 ## Application Identity and Profiles
 
@@ -56,9 +61,8 @@ Python retains the required reverse-DNS `application_id` on every platform:
 
 - Windows:
   `%LOCALAPPDATA%/rti-demo-ui-native/<application_id>`
-- macOS: pywebview 6.2.1 ignores `storage_path` and uses the packaged
-  application's default WKWebsiteDataStore. The `application_id` remains the
-  SDK identity but cannot be claimed as a separate WebKit storage namespace.
+- macOS direct host: derive a stable UUID from `application_id` and select the
+  corresponding macOS 14 named persistent `WKWebsiteDataStore`.
 - Linux:
   the existing XDG data location
 
@@ -110,19 +114,22 @@ distinct bundle IDs or executable filenames.
 
 ### Python
 
-- Select pywebview's Cocoa backend explicitly.
-- Use persistent/private mode disabled. pywebview 6.2.1 does not apply
-  `storage_path` to WKWebsiteDataStore, so do not create or report a misleading
-  application-ID profile path. Qualification must verify that the application
-  default store is isolated by the packaged bundle identity.
-- Disable external-browser handling before window creation.
-- Attach exact-origin navigation and new-window denial without replacing
-  pywebview callbacks required for its lifecycle.
+- Implement a direct PyObjC host in the companion package.
+- Create and run `NSApplication`, `NSWindow`, and `WKWebView` on the main
+  thread while retaining the common Python server/lifecycle owner.
+- Select a macOS 14 named persistent `WKWebsiteDataStore` derived from
+  `application_id` before constructing WKWebView.
+- Own `WKNavigationDelegate` and `WKUIDelegate`; enforce exact-origin
+  top-level navigation and deny every new-window request before initial load.
+- Expose no JavaScript-native bridge.
 - Translate missing PyObjC/framework and initialization failures into
   actionable `NativeWebviewError`.
-- Create and run AppKit on the main thread. POSIX handlers only set an event;
-  the managed watcher requests close outside signal context and restores prior
-  handlers.
+- POSIX handlers only set an event; the managed watcher schedules close on the
+  AppKit main queue and restores prior handlers.
+
+Do not use pywebview private `BrowserView` state or replace its private
+delegates. Re-evaluate pywebview only when a stable release provides datastore
+selection and supported cancellable policy composition.
 
 ### C++
 
@@ -235,3 +242,21 @@ The initial preparation jobs omitted the repository's pinned `pytest-asyncio`
 dependency, causing warnings for its configured pytest options. The job now
 installs that existing pin; this was a test-environment issue rather than a
 runner behavior failure.
+
+## Automated Native Qualification Evidence
+
+GitHub Actions run
+[`35356444290`](https://github.com/wcoleman-rti/rti-demo-ui/actions/runs/35356444290)
+passed on 2026-09-18:
+
+- Windows Server 2022 / AMD64: Python and C++ compilation, fake lifecycle,
+  real-window smoke, shared conformance, dynamic-port persistence, and
+  application/executable identity isolation.
+- macOS 14 / arm64: C++ compilation, fake lifecycle, real-window smoke, shared
+  conformance, dynamic-port persistence, and executable identity isolation.
+- Linux native, core Python/C++, browser, and documentation regression jobs.
+
+These results qualify the automated contract. They do not replace interactive
+Windows 10/11 and Apple Silicon macOS checks for accessibility, native chrome,
+hardware GPU behavior, DPI/multi-monitor behavior, and user-driven close and
+control handling.

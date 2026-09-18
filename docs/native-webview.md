@@ -5,21 +5,29 @@ desktop application window. It does not replace the HTML/CSS/JavaScript
 renderer with native widgets. Browser mode remains the default and requires no
 native companion package.
 
-## Support Tier
+## Support and Qualification
 
-The first release supports these combinations:
+| Language | Platform | Automated qualification | Release support |
+| --- | --- | --- | --- |
+| Python 3.11+ / pywebview 6.2.1 | Ubuntu 22.04+ x86-64 / GTK 3 / WebKitGTK 4.1 | Passed | Supported |
+| C++17 / webview 0.12.0 | Ubuntu 22.04+ x86-64 / GTK 3 / WebKitGTK 4.1 | Passed | Supported |
+| Python 3.11+ / pywebview 6.2.1 | Windows 10/11 x64 / Evergreen WebView2 | Passed | Pending manual acceptance |
+| C++17 / webview 0.12.0 | Windows 10/11 x64 / Evergreen WebView2 | Passed | Pending manual acceptance |
+| C++17 / webview 0.12.0 | Apple Silicon macOS 14+ / WKWebView | Passed | Pending manual acceptance |
+| Python 3.11+ / PyObjC 12.2.2 | Apple Silicon macOS 14+ / WKWebView | Pending hosted run | Pending qualification |
 
-| Language | Companion | Platform |
-| --- | --- | --- |
-| Python 3.11+ | `rti-demo-ui-native` 0.4.x with pywebview 6.2.1 | Ubuntu 22.04+ with GTK 3 and WebKitGTK 4.1 |
-| C++17 | `rti_demo_ui_native::native_webview` 0.4.x with webview 0.12.0 | Ubuntu 22.04+ with GTK 3 and WebKitGTK 4.1 |
+Automated qualification covers compilation, real-window startup, the shared
+frontend contract, navigation denial, lifecycle, persistence, and profile
+isolation on the target hosted operating systems. Windows and macOS do not
+become release-supported until the manual checklist below is recorded.
 
-The release gates run on x86-64 Ubuntu 22.04 under Xvfb, D-Bus, and Mesa.
-Windows and macOS are unsupported in this release because their real engines
-have not passed the fixed conformance gates. Use browser mode on unsupported
-platforms.
+Python on macOS uses a direct PyObjC Cocoa host so the companion owns the named
+data store and delegates without patching or forking pywebview. pywebview
+remains pinned to 6.2.1 for Linux and Windows.
 
-## Linux Prerequisites
+## Platform Prerequisites
+
+### Linux
 
 On Ubuntu 22.04 and 24.04 with Python 3.11 or 3.12, install the build
 prerequisites for the companion's pinned PyGObject 3.50 dependency:
@@ -56,6 +64,26 @@ sudo apt-get install \
 The C++ companion fetches the pinned webview 0.12.0 source during its first
 CMake configure. A network connection is needed only when that FetchContent
 dependency is not already cached.
+
+### Windows
+
+Python requires Python 3.11+, the companion wheel, and the Evergreen WebView2
+Runtime. Installing the companion installs pywebview 6.2.1 and pythonnet.
+
+C++ requires Visual Studio 2022 with the current Windows SDK and the Evergreen
+WebView2 Runtime. The `x64Win64VS2017` RTI architecture name describes the
+Connext binary ABI; applications may use the compatible current MSVC toolchain.
+
+### macOS
+
+C++ requires Apple Silicon macOS 14+, current compatible Xcode/Apple Clang,
+AppKit, and WebKit. The `arm64Darwin23clang16.0` RTI architecture remains the
+Connext binary architecture even when a newer compatible Xcode builds the
+application.
+
+Python requires Python 3.11+ and the companion's pinned PyObjC 12.2.2 Cocoa
+and WebKit bindings. This path remains pending until its hosted automated run
+passes, followed by manual acceptance.
 
 ## Python Installation and Use
 
@@ -101,9 +129,9 @@ run_native(
 ```
 
 `application_id` is a required lowercase reverse-DNS identifier and selects
-the persistent browser profile. `async_main` runs on the app's owner event
-loop after the server is ready. A normal return closes the window; an
-exception is re-raised on the calling thread after cleanup.
+the persistent browser profile on Linux and Windows. `async_main` runs on the
+app's owner event loop after the server is ready. A normal return closes the
+window; an exception is re-raised on the calling thread after cleanup.
 
 ## C++ Build and Use
 
@@ -133,10 +161,10 @@ options.height = 800;
 rti::demo::ui::native::run(app, options);
 ```
 
-The executable filename is the first-release C++ application identity.
+On Linux and Windows, the executable filename is the C++ application identity.
 Packagers must give unrelated applications distinct executable filenames.
-Moving an executable without renaming it retains its profile; renaming it
-selects a new one.
+On macOS, packaged applications use their bundle identity; an unbundled
+development executable falls back to executable identity.
 
 ## Browser Fallback
 
@@ -158,11 +186,16 @@ under `native/python/examples` and `native/cpp/examples`.
 
 ## Profiles and Navigation
 
-Python stores its profile under
-`$XDG_DATA_HOME/rti-demo-ui-native/<application-id>`, falling back to the
-standard `~/.local/share` data root. C++ stores persistent cookies under
-`$XDG_DATA_HOME/rti-demo-ui-native/<executable-filename>/cookies.sqlite`, with
-the same standard data-root fallback.
+Python stores its Linux profile under
+`$XDG_DATA_HOME/rti-demo-ui-native/<application-id>`, falling back to
+`~/.local/share`, and its Windows profile under
+`%LOCALAPPDATA%/rti-demo-ui-native/<application-id>`.
+
+C++ stores Linux cookies under
+`$XDG_DATA_HOME/rti-demo-ui-native/<executable-filename>/cookies.sqlite`.
+Pinned webview stores Windows WebView2 data under
+`%APPDATA%/<executable-filename>`. WKWebView uses the packaged application's
+default persistent website data store on macOS.
 
 Cookies can preserve browser-owned preferences across the dynamic loopback
 ports selected on different runs. `localStorage` and IndexedDB are scoped to
@@ -178,16 +211,20 @@ tools are disabled by default, and no JavaScript-native bridge is exposed.
 
 ## Shutdown and Troubleshooting
 
-Closing the window, stopping the app, or sending `SIGINT`/`SIGTERM` performs
-normal cleanup and joins the managed server and watcher contexts. Python
-restores the process's previous signal handlers after `run_native` returns;
-C++ does the same after `native::run`.
+Closing the window, stopping the app, or sending `SIGINT`/`SIGTERM` on POSIX
+performs normal cleanup and joins the managed server and watcher contexts.
+Windows C++ handles console control requests through a registered control
+handler and posts `WM_CLOSE` to the owned window. Python and POSIX C++ restore
+the process's previous handlers after the native runner returns.
 
 Common failures:
 
-- **Supported only on Linux**: use external browser mode on macOS or Windows.
+- **Missing PyObjC on macOS**: reinstall the companion so its pinned Cocoa and
+  WebKit bindings are present.
+- **Missing WebView2 Runtime on Windows**: install the Evergreen WebView2
+  Runtime and retry from an interactive desktop session.
 - **Missing pywebview 6.2.1**: install `rti-demo-ui-native` and the Python
-  system prerequisites above in the active environment.
+  platform prerequisites above in the active environment.
 - **GTK/WebKitGTK initialization failure**: install the 4.1 development/runtime
   packages and launch from a graphical session. CI needs both Xvfb and a D-Bus
   session.
@@ -195,8 +232,8 @@ Common failures:
   `com.example.demo`.
 - **Literal loopback required**: leave the host at `127.0.0.1` or use `::1`;
   `localhost` and remote bind addresses are intentionally rejected.
-- **Profile cannot be created**: verify that `XDG_DATA_HOME`, when set, is an
-  absolute writable path.
+- **Profile cannot be created**: verify that `XDG_DATA_HOME` on Linux or
+  `LOCALAPPDATA` on Windows resolves to an absolute writable path.
 - **A reused app cannot run**: each `DemoUiApp` instance is single-use in both
   browser and native modes.
 

@@ -70,10 +70,14 @@ docs/                   architecture, API, lifecycle, and frontend contracts
 
 The core packages remain browser-first and contain no native GUI dependency,
 import, or platform probe. The independently versioned 0.4.x companions host
-the same loopback frontend in a native window on supported Linux systems:
+the same loopback frontend in a native window. Linux Python/C++ is supported;
+Windows Python/C++ and macOS C++ have passed automated qualification and await
+manual release acceptance:
 
-- Python runs pywebview 6.2.1 on the calling main thread and owns the app's
-  asyncio loop in one joined worker.
+- Python runs pywebview 6.2.1 on Linux and Windows on the calling main thread
+  and owns the app's asyncio loop in one joined worker. macOS Python requires
+  a future direct PyObjC host because pywebview's Cocoa backend lacks the
+  required public policy and profile controls.
 - C++ runs webview 0.12.0 on the calling main thread and owns blocking
   `DemoUiApp::run()` in one joined worker.
 - Both wait for listener readiness before initial navigation, permit only the

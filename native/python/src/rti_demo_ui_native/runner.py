@@ -22,6 +22,7 @@ import re
 import signal
 import sys
 import threading
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -212,6 +213,10 @@ def _same_origin(url: str, allowed_origin: str) -> bool:
         return False
 
 
+def _cocoa_profile_identifier(application_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"rti-demo-ui:{application_id}"))
+
+
 def _profile_path(application_id: str) -> Path | None:
     if sys.platform == "linux":
         data_root = os.environ.get("XDG_DATA_HOME")
@@ -245,11 +250,10 @@ def _profile_path(application_id: str) -> Path | None:
 
 
 def _require_supported_production_platform() -> None:
-    if sys.platform in {"linux", "win32"}:
+    if sys.platform in {"darwin", "linux", "win32"}:
         return
     raise NativeWebviewError(
-        "native webview mode on macOS requires a safe pywebview WKWebView "
-        "delegate-composition API that is not available in pywebview 6.2.1"
+        f"native webview mode is not supported on platform '{sys.platform}'"
     )
 
 
@@ -509,12 +513,21 @@ def run_native(
     height: int = 800,
     devtools: bool = False,
 ) -> None:
-    """Run one app in a Linux native webview until the window or app closes."""
+    """Run one app in a native webview until the window or app closes."""
 
     def create_host(options: _Options) -> _WindowHost:
+        if sys.platform == "darwin":
+            try:
+                from .cocoa import CocoaWindowHost
+            except (ImportError, OSError) as error:
+                raise NativeWebviewError(
+                    "PyObjC 12.2.2 with Cocoa and WebKit is required for "
+                    "native webview mode on macOS"
+                ) from error
+            return CocoaWindowHost(options.application_id)
         if options.profile_path is None:
             raise NativeWebviewError(
-                "the qualified Linux backend requires a native profile path"
+                "the selected native backend requires a profile path"
             )
         webview_module = _load_pywebview()
         if sys.platform == "win32":

@@ -75,7 +75,7 @@ def main():
         shutil.copy2(cpp_conformance, isolated)
         run([str(isolated), "__absent__", "isolated"], environment=environment)
 
-        if sys.platform == "win32":
+        if sys.platform in {"darwin", "win32"}:
             python_conformance = Path(__file__).with_name("real_conformance.py")
             base = [
                 sys.executable,

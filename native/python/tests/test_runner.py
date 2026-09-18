@@ -148,9 +148,9 @@ def test_non_loopback_host_is_rejected():
         run_fake(DemoUiApp("remote", host="localhost"), FakeWindowHost())
 
 
-def test_unqualified_production_platform_is_actionable(monkeypatch):
-    monkeypatch.setattr(runner.sys, "platform", "darwin")
-    with pytest.raises(NativeWebviewError, match="delegate-composition"):
+def test_unknown_production_platform_is_actionable(monkeypatch):
+    monkeypatch.setattr(runner.sys, "platform", "plan9")
+    with pytest.raises(NativeWebviewError, match="not supported"):
         runner.run_native(
             DemoUiApp("unsupported"),
             application_id="com.example.unsupported",
@@ -182,9 +182,15 @@ def test_windows_profile_path_is_application_scoped(monkeypatch, tmp_path):
     )
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS path semantics")
-def test_macos_does_not_claim_ignored_storage_path():
+def test_macos_uses_named_store_instead_of_filesystem_profile(monkeypatch):
+    monkeypatch.setattr(runner.sys, "platform", "darwin")
     assert runner._profile_path("com.example.demo") is None
+
+
+def test_macos_profile_identifier_is_stable_and_application_scoped():
+    first = runner._cocoa_profile_identifier("com.example.first")
+    assert first == runner._cocoa_profile_identifier("com.example.first")
+    assert first != runner._cocoa_profile_identifier("com.example.second")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows environment")

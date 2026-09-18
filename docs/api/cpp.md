@@ -54,8 +54,8 @@ hosts.
 
 ## Native Window
 
-On supported Linux systems, add the separate `native/cpp` CMake project after
-the core target and link `rti_demo_ui_native::native_webview`:
+Add the separate `native/cpp` CMake project after the core target and link
+`rti_demo_ui_native::native_webview`:
 
 ```cpp
 #include <rti_demo_ui_native/native_webview.hpp>
@@ -69,7 +69,7 @@ rti::demo::ui::native::run(app, options);
 The call owns the native main-thread loop and a joined server thread. Browser
 targets remain core-only and call `app.run()`. See
 [Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
-profiles, platform support, and troubleshooting.
+profiles, and the current Linux, Windows, and macOS qualification status.
 
 Both `GET /api/state` and `GET /api/events` are served by the C++ backend.
 Browser transport selection is not a `DemoUiApp` constructor option: custom

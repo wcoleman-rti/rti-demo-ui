@@ -81,9 +81,10 @@ See [examples/py/simple.py](examples/py/simple.py) and
 [examples/cpp/simple.cpp](examples/cpp/simple.cpp) for animation and graceful
 interactive shutdown.
 
-An opt-in native window is available on supported Linux systems through
-separately packaged Python and C++ companions. Browser mode and core
-installation remain unchanged. See
+An opt-in native window is available through separately packaged Python and
+C++ companions. Linux is release-supported; Windows Python/C++ and Apple
+Silicon macOS C++ have passed automated qualification and await manual release
+acceptance. Browser mode and core installation remain unchanged. See
 [Native Webview Mode](docs/native-webview.md) for prerequisites, API examples,
 profiles, troubleshooting, platform tier, and the release checklist.
 
