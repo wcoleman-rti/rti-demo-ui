@@ -11,11 +11,13 @@
 #
 
 import argparse
+from contextlib import contextmanager
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -49,6 +51,22 @@ def find_cpp_conformance(build_dir):
     return matches[0]
 
 
+@contextmanager
+def temporary_workspace():
+    path = Path(tempfile.mkdtemp(prefix="rti-native-conformance-"))
+    try:
+        yield path
+    finally:
+        for attempt in range(20):
+            try:
+                shutil.rmtree(path)
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.5)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-dir", required=True, type=Path)
@@ -59,8 +77,7 @@ def main():
     static_root = args.static_root.resolve()
     cpp_conformance = find_cpp_conformance(build_dir)
 
-    with tempfile.TemporaryDirectory(prefix="rti-native-conformance-") as temp:
-        work = Path(temp)
+    with temporary_workspace() as work:
         environment = {
             **os.environ,
             "APPDATA": str(work / "appdata"),
@@ -87,7 +104,7 @@ def main():
                 [
                     *base,
                     "--application-id",
-                    "org.rti.native-windows-same",
+                    "org.rti.native-hosted-same",
                     "--expected",
                     "__absent__",
                     "--write",
@@ -99,7 +116,7 @@ def main():
                 [
                     *base,
                     "--application-id",
-                    "org.rti.native-windows-same",
+                    "org.rti.native-hosted-same",
                     "--expected",
                     "first",
                     "--write",
@@ -111,7 +128,7 @@ def main():
                 [
                     *base,
                     "--application-id",
-                    "org.rti.native-windows-isolated",
+                    "org.rti.native-hosted-isolated",
                     "--expected",
                     "__absent__",
                     "--write",
