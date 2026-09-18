@@ -17,9 +17,10 @@ Applications define cards and stateful components; RTI Demo UI serves the
 shared frontend and handles browser updates. Connext integration is optional
 and remains application-owned.
 
-Use the built-in frontend for fast demos, provide a custom frontend when needed,
-or opt into a native Linux window. The core SDK does not require Connext,
-Node.js, or a separate frontend process at runtime.
+Use the built-in frontend for fast demos, provide a custom frontend when
+needed, or opt into a native window through separate Python and C++
+companions. The core SDK does not require Connext, Node.js, or a separate
+frontend process at runtime.
 
 ## Start with Python
 
@@ -46,7 +47,10 @@ C++17 and a network connection for the first dependency fetch are required.
 - Live 2D scenes and glTF-based 3D scenes.
 - Custom browser frontends using polling or server-sent events.
 - Validated browser commands and application-owned JSON state.
-- Optional native Linux windows through separate Python and C++ companions.
+- Optional native windows through separate Python and C++ companions. Linux is
+  release-supported; see the
+  [native support matrix](docs/native-webview.md#support-and-qualification) for
+  Windows and macOS qualification status.
 
 Explore the focused [example catalog](examples/README.md) for Python and C++
 references covering components, application data, commands, scenes, layouts,

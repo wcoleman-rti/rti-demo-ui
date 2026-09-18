@@ -250,36 +250,12 @@ jobs:
 
           XDG_DATA_HOME="$work/production-python" \
             timeout 40s python native/python/tests/real_conformance.py \
-              --application-id org.rti.phase2.same \
-              --expected __absent__ \
-              --write first \
               --static-root tools/native_webview_spike/conformance \
-              | tee "$work/production-python-a1.log"
-          XDG_DATA_HOME="$work/production-python" \
-            timeout 40s python native/python/tests/real_conformance.py \
-              --application-id org.rti.phase2.same \
-              --expected first \
-              --write second \
-              --static-root tools/native_webview_spike/conformance \
-              | tee "$work/production-python-a2.log"
-          XDG_DATA_HOME="$work/production-python" \
-            timeout 40s python native/python/tests/real_conformance.py \
-              --application-id org.rti.phase2.isolated \
-              --expected __absent__ \
-              --write isolated \
-              --static-root tools/native_webview_spike/conformance \
-              | tee "$work/production-python-b1.log"
+              | tee "$work/production-python.log"
 
           XDG_DATA_HOME="$work/production-cpp" \
-            timeout 40s "$production_cpp" __absent__ first \
-              | tee "$work/production-cpp-a1.log"
-          XDG_DATA_HOME="$work/production-cpp" \
-            timeout 40s "$production_cpp" first second \
-              | tee "$work/production-cpp-a2.log"
-          cp "$production_cpp" "$work/production_cpp_isolated"
-          XDG_DATA_HOME="$work/production-cpp" \
-            timeout 40s "$work/production_cpp_isolated" __absent__ isolated \
-              | tee "$work/production-cpp-b1.log"
+            timeout 40s "$production_cpp" \
+              | tee "$work/production-cpp.log"
           SCRIPT
       - name: Report native C++ cache statistics
         if: always()
@@ -290,3 +266,52 @@ jobs:
         with:
           name: native-webview-logs
           path: ${{ runner.temp }}/native-webview/*.log
+
+  native-cross-platform-preparation:
+    name: Native preparation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install host-independent test dependencies
+        run: |
+          python -m pip install -e . pytest==8.4.2 pytest-asyncio==1.4.0
+      - name: Install native companion dependencies
+        run: python -m pip install -e native/python
+      - name: Record preparation host
+        run: python -c "import platform; print(platform.platform(), platform.machine())"
+      - name: Run fake lifecycle and profile policy tests
+        run: python -m pytest native/python/tests -q
+      - name: Configure native C++ companion
+        run: >
+          cmake -S native/cpp -B build/native-cross-platform
+          -DBUILD_TESTING=ON
+          -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
+      - name: Build native C++ companion
+        run: cmake --build build/native-cross-platform --config Release --parallel
+      - name: Run native C++ fake lifecycle tests
+        run: >
+          ctest --test-dir build/native-cross-platform
+          -C Release
+          --output-on-failure
+          -LE real_engine
+      - name: Run native C++ real-engine smoke
+        run: >
+          ctest --test-dir build/native-cross-platform
+          -C Release
+          --output-on-failure
+          -L real_engine
+      - name: Run Python real-engine smoke
+        run: python native/python/tests/real_host_smoke.py
+      - name: Run native real-engine conformance
+        run: >
+          python native/python/tests/hosted_conformance.py
+          --build-dir build/native-cross-platform
+          --static-root tools/native_webview_spike/conformance

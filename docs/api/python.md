@@ -83,14 +83,13 @@ The SDK does not provide Python timer APIs or lifecycle compatibility adapters.
 ## Native Window
 
 The separately installed `rti-demo-ui-native` companion provides a synchronous
-main-thread runner on supported Linux systems:
+main-thread runner on Linux and Windows:
 
 ```python
 from rti_demo_ui_native import run_native
 
 run_native(
     app,
-    application_id="com.example.fleet-demo",
     async_main=receive_samples,
     width=1280,
     height=800,
@@ -100,8 +99,10 @@ run_native(
 `async_main(app)` starts on the app owner loop after readiness. A normal return
 closes the native window; an exception is re-raised after all managed work is
 joined. Browser mode remains the default and does not import pywebview. See
-[Native Webview Mode](../native-webview.md) for installation, profiles,
-platform support, and troubleshooting. The
+[Native Webview Mode](../native-webview.md) for installation, browser storage,
+qualification status, and troubleshooting. Python native mode uses pywebview
+on Linux, Windows, and macOS; Windows and macOS await manual release
+acceptance. The
 [native Python API reference](../reference/native-python.rst) documents the
 runner contract and validation errors.
 

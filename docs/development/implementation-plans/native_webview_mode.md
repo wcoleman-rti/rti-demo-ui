@@ -17,8 +17,17 @@
 All implementation phases completed on 2026-08-31 for the supported Linux
 Python and C++ combinations. The independently packaged runners provide
 managed lifecycle, supported-platform integration, release artifacts,
-consumer examples, and documented operations. macOS and Windows remain
-unsupported.
+consumer examples, and documented operations. Subsequent Windows and macOS
+qualification is tracked in
+[`native_webview_windows_macos.md`](native_webview_windows_macos.md); status in
+this completed Linux plan is historical evidence, not the current
+cross-platform support matrix.
+
+The later cross-platform work also simplified the production contract:
+backend-owned default storage replaced SDK-managed profile isolation, and
+frontend navigation became application-owned. Profile and navigation results
+below remain historical evidence from the stricter Linux qualification, not
+current production guarantees.
 
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
@@ -846,9 +855,9 @@ in that run.
 Phase 0 is complete. Linux Python and C++ satisfy every fixed criterion,
 including real rendering, dynamic-port persistence, isolation, navigation
 policy, signals, lifecycle, manual acceptance, and Ubuntu 22.04 hosted
-execution. The minimum one-Python/one-C++ rule is met and Phase 1 may begin as
-Linux-first work; macOS and Windows remain unsupported until separately
-qualified.
+execution. The minimum one-Python/one-C++ rule was met and Phase 1 could begin as
+Linux-first work; macOS and Windows were unsupported at this checkpoint and
+are tracked by the separate cross-platform qualification plan.
 
 ### Exact Verification Commands and Results
 

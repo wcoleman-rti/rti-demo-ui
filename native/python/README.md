@@ -12,11 +12,17 @@
 
 # RTI Demo UI Native
 
-Optional Linux native-window runner for `rti-demo-ui`.
+Optional native-window runner for `rti-demo-ui`.
 
 The 0.4.x release supports Python 3.11+ on Ubuntu 22.04+ with GTK 3,
-WebKitGTK 4.1, and pywebview 6.2.1. Download both wheels from the matching
-GitHub release and install their local paths:
+WebKitGTK 4.1, and pywebview 6.2.1. Windows 10/11 x64 with the Evergreen
+WebView2 Runtime has passed hosted automated qualification and is pending
+manual release acceptance. Apple Silicon macOS uses pywebview 6.2.1 with its
+Cocoa/WKWebView backend; hosted automated qualification has passed and manual
+acceptance remains pending.
+
+Download both wheels from the matching GitHub release and install their local
+paths:
 
 ```bash
 pip install rti_demo_ui-0.4.1-py3-none-any.whl \
@@ -28,9 +34,9 @@ from rti_demo_ui import DemoUiApp
 from rti_demo_ui_native import run_native
 
 app = DemoUiApp("Fleet demo")
-run_native(app, application_id="com.example.fleet-demo")
+run_native(app)
 ```
 
 Browser mode remains available through the core package without installing
 this companion. See the project's `docs/native-webview.md` for system
-prerequisites, lifecycle, profile, security, and troubleshooting details.
+prerequisites, lifecycle, backend-owned storage, and troubleshooting details.

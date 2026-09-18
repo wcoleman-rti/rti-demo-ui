@@ -27,34 +27,22 @@ EXPECTED_CHECKS = {
     "runtime3d_import",
     "module_worker",
     "theme_asset",
-    "persistent_storage",
     "canvas",
     "webgl",
     "keyboard_focus",
     "resize_observation",
-    "navigation_policy",
     "command_origin",
 }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--application-id", required=True)
-    parser.add_argument("--expected", required=True)
-    parser.add_argument("--write", required=True)
     parser.add_argument("--static-root", required=True, type=Path)
     args = parser.parse_args()
 
     report_event = threading.Event()
     report = {}
     app = DemoUiApp("Native Phase 2 conformance", static_root=args.static_root)
-    app.set_data(
-        {
-            "native_storage_key": "phase2-production",
-            "native_storage_expected": args.expected,
-            "native_storage_write": args.write,
-        }
-    )
 
     def record_report(payload):
         report.update(payload)
@@ -74,7 +62,6 @@ def main() -> None:
 
     run_native(
         app,
-        application_id=args.application_id,
         async_main=wait_for_report,
     )
 

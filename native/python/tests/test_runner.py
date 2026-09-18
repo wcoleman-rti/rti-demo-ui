@@ -26,12 +26,7 @@ import pytest
 from rti_demo_ui import DemoUiApp
 from rti_demo_ui_native import NativeWebviewError
 from rti_demo_ui_native import runner
-from rti_demo_ui_native.runner import (
-    _load_pywebview,
-    _origin,
-    _run_native,
-    _same_origin,
-)
+from rti_demo_ui_native.runner import _load_pywebview, _run_native
 
 
 class FakeWindowHost:
@@ -98,7 +93,10 @@ def test_import_is_lazy_for_pywebview():
             "import sys; import rti_demo_ui_native; "
             "assert 'webview' not in sys.modules",
         ],
-        env={"PYTHONPATH": f"{source_root}:{core_root}"},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join((str(source_root), str(core_root))),
+        },
         check=False,
     )
     assert result.returncode == 0
@@ -110,7 +108,6 @@ def test_import_is_lazy_for_pywebview():
         ("demo", "reverse-DNS"),
         ("Com.Example.Demo", "reverse-DNS"),
         ("com.example.-demo", "reverse-DNS"),
-        (None, "reverse-DNS"),
     ],
 )
 def test_invalid_application_id_is_actionable(application_id, message):
@@ -120,6 +117,18 @@ def test_invalid_application_id_is_actionable(application_id, message):
             FakeWindowHost(),
             application_id=application_id,
         )
+
+
+def test_application_id_is_optional():
+    _run_native(
+        DemoUiApp("optional identity"),
+        application_id=None,
+        async_main=None,
+        width=1280,
+        height=800,
+        devtools=False,
+        host_factory=lambda _options: FakeWindowHost(close_immediately=True),
+    )
 
 
 @pytest.mark.parametrize(
@@ -145,10 +154,34 @@ def test_non_loopback_host_is_rejected():
         run_fake(DemoUiApp("remote", host="localhost"), FakeWindowHost())
 
 
-def test_unsupported_platform_is_actionable(monkeypatch):
-    monkeypatch.setattr(runner.sys, "platform", "darwin")
-    with pytest.raises(NativeWebviewError, match="supported only on Linux"):
-        run_fake(DemoUiApp("unsupported"), FakeWindowHost())
+def test_unknown_production_platform_is_actionable(monkeypatch):
+    monkeypatch.setattr(runner.sys, "platform", "plan9")
+    with pytest.raises(NativeWebviewError, match="not supported"):
+        runner.run_native(
+            DemoUiApp("unsupported"),
+            application_id="com.example.unsupported",
+        )
+
+
+@pytest.mark.parametrize(
+    ("platform", "gui"),
+    [("darwin", "cocoa"), ("linux", "gtk"), ("win32", "edgechromium")],
+)
+def test_run_native_selects_platform_pywebview_backend(monkeypatch, platform, gui):
+    fake_webview = object()
+    captured = {}
+
+    def capture_run(_app, **kwargs):
+        captured["host"] = kwargs["host_factory"](None)
+
+    monkeypatch.setattr(runner.sys, "platform", platform)
+    monkeypatch.setattr(runner, "_load_pywebview", lambda: fake_webview)
+    monkeypatch.setattr(runner, "_run_native", capture_run)
+
+    runner.run_native(DemoUiApp("backend"))
+
+    assert captured["host"]._webview is fake_webview
+    assert captured["host"]._gui == gui
 
 
 def test_missing_pywebview_is_actionable(monkeypatch):
@@ -177,37 +210,29 @@ def test_run_native_requires_main_thread():
     assert "main thread" in str(errors[0])
 
 
-def test_navigation_origin_is_exact():
-    origin = _origin("http://127.0.0.1:42000/")
-    assert _same_origin("http://127.0.0.1:42000/dashboard", origin)
-    assert _same_origin("http://127.0.0.1:42000/?view=main", origin)
-    assert not _same_origin("http://127.0.0.1:42001/", origin)
-    assert not _same_origin("http://localhost:42000/", origin)
-    assert not _same_origin("https://example.invalid/", origin)
-    assert not _same_origin("about:blank", origin)
-
-
-def test_pywebview_external_browser_navigation_is_disabled(tmp_path):
-    class EventHook:
-        def __iadd__(self, _callback):
-            return self
-
-    fake_window = SimpleNamespace(
-        events=SimpleNamespace(before_show=EventHook()),
-    )
+@pytest.mark.parametrize("gui", ["cocoa", "edgechromium", "gtk"])
+def test_pywebview_uses_platform_defaults(gui):
+    fake_window = SimpleNamespace()
+    starts = []
     fake_webview = SimpleNamespace(
         settings={"OPEN_EXTERNAL_LINKS_IN_BROWSER": True},
         create_window=lambda *args, **kwargs: fake_window,
+        start=lambda *args, **kwargs: starts.append(kwargs),
     )
-    host = runner._PyWebviewHost(fake_webview, tmp_path)
+    host = runner._PyWebviewHost(fake_webview, gui)
     host.create(
-        title="navigation",
+        title="defaults",
         url="http://127.0.0.1:42000/",
         width=1280,
         height=800,
         devtools=False,
     )
-    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
+    host._close_requested.set()
+    host.run()
+    assert starts[0]["gui"] == gui
+    assert starts[0]["private_mode"] is False
+    assert "storage_path" not in starts[0]
+    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is True
 
 
 def test_window_close_joins_owner_and_releases_port():
@@ -299,6 +324,7 @@ def test_server_stop_dispatches_window_close():
     assert_port_released(host.options["url"])
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal delivery")
 def test_sigint_requests_window_close_and_restores_handler():
     host = FakeWindowHost()
     previous_handler = signal.getsignal(signal.SIGINT)
@@ -322,14 +348,7 @@ def test_app_instance_cannot_run_twice():
         run_fake(app, FakeWindowHost(close_immediately=True))
 
 
-def test_relative_xdg_data_home_is_rejected(monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", "relative")
-    with pytest.raises(NativeWebviewError, match="absolute path"):
-        run_fake(DemoUiApp("profile"), FakeWindowHost(close_immediately=True))
-
-
-def test_profile_namespace_uses_application_id(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+def test_application_id_remains_part_of_validated_options():
     captured = []
     host = FakeWindowHost(close_immediately=True)
     _run_native(
@@ -341,9 +360,4 @@ def test_profile_namespace_uses_application_id(tmp_path, monkeypatch):
         devtools=False,
         host_factory=lambda options: captured.append(options) or host,
     )
-    assert captured[0].profile_path == (
-        tmp_path
-        / "rti-demo-ui-native"
-        / "com.example.factory-dashboard"
-    )
-    assert captured[0].profile_path.is_dir()
+    assert captured[0].application_id == "com.example.factory-dashboard"

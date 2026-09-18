@@ -70,8 +70,8 @@ hosts.
 
 ## Native Window
 
-On supported Linux systems, add the separate `native/cpp` CMake project after
-the core target and link `rti_demo_ui_native::native_webview`:
+Add the separate `native/cpp` CMake project after the core target and link
+`rti_demo_ui_native::native_webview`:
 
 ```cpp
 #include <rti_demo_ui_native/native_webview.hpp>
@@ -85,7 +85,8 @@ rti::demo::ui::native::run(app, options);
 The call owns the native main-thread loop and a joined server thread. Browser
 targets remain core-only and call `app.run()`. See
 [Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
-profiles, platform support, and troubleshooting. The generated
+profiles, the current Linux, Windows, and macOS qualification status, and
+troubleshooting. The generated
 [C++ API reference](../reference/cpp.rst) also documents the public native
 runner types.
 

@@ -1,8 +1,7 @@
 #pragma once
 
-#include <string>
-
 #include <rti_demo_ui_native/native_webview.hpp>
+#include <string>
 
 namespace rti::demo::ui::native::detail {
 
@@ -20,5 +19,6 @@ void run_with_host(DemoUiApp& app, const NativeWindowOptions& options,
                    WindowHost& host);
 void run_with_signals(DemoUiApp& app, const NativeWindowOptions& options,
                       WindowHost& host);
+const char* native_window_failure_guidance() noexcept;
 
 }  // namespace rti::demo::ui::native::detail

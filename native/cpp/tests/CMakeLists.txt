@@ -5,6 +5,9 @@ target_include_directories(rti_demo_ui_native_runner_tests
 target_link_libraries(
     rti_demo_ui_native_runner_tests PRIVATE rti_demo_ui_native::native_webview
 )
+if(WIN32)
+    target_link_libraries(rti_demo_ui_native_runner_tests PRIVATE ws2_32)
+endif()
 add_test(NAME native_runner_tests COMMAND rti_demo_ui_native_runner_tests)
 set_tests_properties(native_runner_tests PROPERTIES TIMEOUT 15)
 
