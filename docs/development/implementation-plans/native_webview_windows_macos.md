@@ -249,3 +249,21 @@ extended that evidence on 2026-09-18:
 That direct-host result is retained as historical evidence. The subsequent
 thin-shell revision replaced it with pywebview Cocoa and removed profile
 isolation and navigation denial from the production contract.
+
+GitHub Actions run
+[`35371123750`](https://github.com/wcoleman-rti/rti-demo-ui/actions/runs/35371123750)
+validated the final thin-shell implementation on 2026-09-18:
+
+- Windows Server 2022 / AMD64: stock pywebview Edge Chromium and C++ WebView2
+  passed compilation, lifecycle, real-window smoke, and shared conformance.
+- macOS 14 / arm64: stock pywebview Cocoa and C++ WKWebView passed compilation,
+  lifecycle, real-window smoke, and shared conformance.
+- Linux Python/GTK and C++/WebKitGTK passed lifecycle, real-window smoke, shared
+  conformance, installed-wheel, and downstream-consumer checks.
+- Core Python/C++, browser, and documentation regression jobs passed. The
+  browser job passed on its first rerun after a transient Arm3D rendering
+  timeout.
+
+This run demonstrates the automated gates for the maintained lightweight path
+on all three platform families. Interactive Windows 10/11 and Apple Silicon
+macOS acceptance remains required before support is considered complete.
