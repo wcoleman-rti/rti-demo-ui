@@ -66,7 +66,7 @@ class WebviewHost final : public detail::WindowHost {
         window_->set_title(title).ensure_ok();
         window_->set_size(options.width, options.height, WEBVIEW_HINT_NONE)
             .ensure_ok();
-,         auto native_window = window_->window();
+        auto native_window = window_->window();
         native_window.ensure_ok();
         native_window_ = static_cast<HWND>(native_window.value());
         window_->navigate(url).ensure_ok();
