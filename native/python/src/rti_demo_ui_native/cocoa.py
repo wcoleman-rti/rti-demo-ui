@@ -106,7 +106,7 @@ class CocoaWindowHost:
         self._window.center()
 
         configuration = WebKit.WKWebViewConfiguration.alloc().init()
-        identifier = Foundation.NSUUID.UUIDWithString_(
+        identifier = Foundation.NSUUID.alloc().initWithUUIDString_(
             _cocoa_profile_identifier(self._application_id)
         )
         data_store = WebKit.WKWebsiteDataStore.dataStoreForIdentifier_(identifier)

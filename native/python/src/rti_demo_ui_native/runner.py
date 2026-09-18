@@ -257,6 +257,14 @@ def _require_supported_production_platform() -> None:
     )
 
 
+def _native_prerequisite_hint() -> str:
+    if sys.platform == "darwin":
+        return "verify PyObjC 12.2.2 and macOS 14 WKWebView are available"
+    if sys.platform == "win32":
+        return "verify pywebview 6.2.1 and the WebView2 Runtime are installed"
+    return "verify GTK 3 and WebKitGTK 4.1 are installed"
+
+
 def _load_pywebview():
     try:
         return importlib.import_module("webview")
@@ -483,7 +491,7 @@ def _run_with_host(
         if isinstance(window_error, NativeWebviewError):
             raise window_error
         raise NativeWebviewError(
-            "native window failed; verify GTK 3 and WebKitGTK 4.1 are installed"
+            f"native window failed; {_native_prerequisite_hint()}"
         ) from window_error
 
 
