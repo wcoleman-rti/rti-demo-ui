@@ -102,7 +102,7 @@ closes the native window; an exception is re-raised after all managed work is
 joined. Browser mode remains the default and does not import pywebview. See
 [Native Webview Mode](../native-webview.md) for installation, profiles,
 qualification status, and troubleshooting. Python native mode on macOS uses a
-direct PyObjC WKWebView host and remains pending qualification. The
+direct PyObjC WKWebView host and awaits manual release acceptance. The
 [native Python API reference](../reference/native-python.rst) documents the
 runner contract and validation errors.
 

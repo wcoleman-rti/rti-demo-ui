@@ -14,7 +14,7 @@ native companion package.
 | Python 3.11+ / pywebview 6.2.1 | Windows 10/11 x64 / Evergreen WebView2 | Passed | Pending manual acceptance |
 | C++17 / webview 0.12.0 | Windows 10/11 x64 / Evergreen WebView2 | Passed | Pending manual acceptance |
 | C++17 / webview 0.12.0 | Apple Silicon macOS 14+ / WKWebView | Passed | Pending manual acceptance |
-| Python 3.11+ / PyObjC 12.2.2 | Apple Silicon macOS 14+ / WKWebView | Pending hosted run | Pending qualification |
+| Python 3.11+ / PyObjC 12.2.2 | Apple Silicon macOS 14+ / WKWebView | Passed | Pending manual acceptance |
 
 Automated qualification covers compilation, real-window startup, the shared
 frontend contract, navigation denial, lifecycle, persistence, and profile
@@ -82,8 +82,8 @@ Connext binary architecture even when a newer compatible Xcode builds the
 application.
 
 Python requires Python 3.11+ and the companion's pinned PyObjC 12.2.2 Cocoa
-and WebKit bindings. This path remains pending until its hosted automated run
-passes, followed by manual acceptance.
+and WebKit bindings. Its hosted automated qualification has passed; manual
+acceptance remains required.
 
 ## Python Installation and Use
 

@@ -5,7 +5,7 @@
 Windows Python/C++ and macOS C++ have passed hosted compilation, real-engine,
 lifecycle, navigation, persistence/isolation, and shared frontend conformance.
 They remain release candidates pending the manual gates below. macOS Python
-now uses a direct PyObjC Cocoa host rather than a pywebview fork and awaits its
+uses a direct PyObjC Cocoa host rather than a pywebview fork and has passed its
 hosted qualification run.
 
 This work is intentionally separate from the Linux implementation pull request.
@@ -15,7 +15,7 @@ Connext releases:
 | RTI architecture | Combination | Qualification status |
 | --- | --- | --- |
 | `arm64Darwin23clang16.0` | C++17 / Apple Silicon macOS 14+ / current compatible Xcode | Automated gates passed; manual acceptance pending |
-| `arm64Darwin23clang16.0` | Python 3.11+ / Apple Silicon macOS 14+ | Direct PyObjC host implemented; hosted qualification pending |
+| `arm64Darwin23clang16.0` | Python 3.11+ / Apple Silicon macOS 14+ | Automated gates passed; manual acceptance pending |
 | `x64Linux4gcc8.3.0` | Python 3.11+ and C++17 / Ubuntu 22.04+ / GCC 11+ or Clang 14+ | Supported |
 | `x64Win64VS2017` | Python 3.11+ and C++17 / Windows 10/11 / VS2022 | Automated gates passed; manual acceptance pending |
 
@@ -260,3 +260,15 @@ These results qualify the automated contract. They do not replace interactive
 Windows 10/11 and Apple Silicon macOS checks for accessibility, native chrome,
 hardware GPU behavior, DPI/multi-monitor behavior, and user-driven close and
 control handling.
+
+GitHub Actions run
+[`35361628970`](https://github.com/wcoleman-rti/rti-demo-ui/actions/runs/35361628970)
+extended that evidence on 2026-09-18:
+
+- The direct macOS Python/PyObjC host passed fake lifecycle/profile tests,
+  real-window smoke, shared conformance, dynamic-port persistence, and
+  application-ID isolation on macOS 14 / arm64.
+- The Windows Python/C++ job passed the same established gates after waiting
+  for transient WebView2 BrowserMetrics handles during test-workspace cleanup.
+- Every Linux native, core Python/C++, browser, and documentation regression
+  job passed.

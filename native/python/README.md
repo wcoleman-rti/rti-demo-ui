@@ -18,8 +18,8 @@ The 0.4.x release supports Python 3.11+ on Ubuntu 22.04+ with GTK 3,
 WebKitGTK 4.1, and pywebview 6.2.1. Windows 10/11 x64 with the Evergreen
 WebView2 Runtime has passed hosted automated qualification and is pending
 manual release acceptance. Apple Silicon macOS uses a direct PyObjC 12.2.2
-WKWebView host and is pending hosted automated qualification and manual
-acceptance.
+WKWebView host; hosted automated qualification has passed and manual
+acceptance remains pending.
 
 Download both wheels from the matching GitHub release and install their local
 paths:
