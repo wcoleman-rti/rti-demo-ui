@@ -61,7 +61,13 @@ class _Component:
 
 
 class Card:
-    """Titled grouping of components. Owned exclusively by DemoUiApp."""
+    """Titled grouping of SDK-owned components within a ``DemoUiApp``.
+
+    Cards are usually created with :meth:`rti_demo_ui.DemoUiApp.add_card`.
+    After :meth:`rti_demo_ui.DemoUiApp.run` starts, mutating methods must be
+    called on the app's owner event loop. Once the app stops, further mutations
+    raise :class:`RuntimeError`.
+    """
 
     def __init__(
         self,
@@ -71,6 +77,21 @@ class Card:
         area=CardArea.main,
         span: int = 1,
     ) -> None:
+        """Create a card.
+
+        Use :meth:`rti_demo_ui.DemoUiApp.add_card` instead of calling this
+        constructor directly.
+
+        Args:
+            model: Internal application model that owns the card.
+            card_id: Stable SDK-generated card identifier.
+            title: User-visible card title. Must be non-empty.
+            area: Initial placement area.
+            span: Initial card span from 1 to 3 columns.
+
+        Raises:
+            ValueError: If ``title``, ``area``, or ``span`` is invalid.
+        """
         require_non_empty(title, "title", "Card: ")
         area = coerce_card_area(area)
         require_card_span(span)
@@ -82,6 +103,17 @@ class Card:
         self._components: List[_Component] = []
 
     def set_area(self, area) -> None:
+        """Move the card between the ``main`` and ``sidebar`` areas.
+
+        Args:
+            area: New card area as a :class:`CardArea` or matching string.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``area`` is invalid, would create a second sidebar
+                card, or would leave ``sidebar-main`` without a sidebar card.
+        """
         area = coerce_card_area(area)
         self._model.check_owner()
         self._model.ensure_running()
@@ -104,6 +136,16 @@ class Card:
         self._model.commit_card_locked(self.id)
 
     def set_span(self, span: int) -> None:
+        """Set the card width in grid columns.
+
+        Args:
+            span: Integer span in the closed range ``[1, 3]``.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``span`` is not an integer from 1 to 3.
+        """
         require_card_span(span)
         self._model.check_owner()
         self._model.ensure_running()
@@ -122,6 +164,23 @@ class Card:
     def add_scene_2d(
         self, width: int, height: int, bounds: GridBounds
     ) -> "Scene2DViewport":
+        """Add a 2D scene viewport component to this card.
+
+        Args:
+            width: Canvas width in pixels. Must be a positive integer.
+            height: Canvas height in pixels. Must be a positive integer.
+            bounds: ``(x_min, x_max, y_min, y_max)`` world bounds with finite
+                values and strictly increasing minima/maxima.
+
+        Returns:
+            The attached scene component. Mutations update the application state
+            in place.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If any argument fails validation.
+        """
         require_positive_int(width, "width", "Scene2DViewport: ")
         require_positive_int(height, "height", "Scene2DViewport: ")
         require_valid_bounds(bounds, "Scene2DViewport: ")
@@ -143,6 +202,24 @@ class Card:
         background: str = "#0a0e17",
         grid: bool = False,
     ) -> "Scene3DViewport":
+        """Add a 3D scene viewport component to this card.
+
+        Args:
+            asset: Absolute same-origin ``.glb`` asset path. When the app has a
+                ``static_root``, the file must exist under that directory.
+            camera: Optional orbit-camera override dictionary.
+            background: Hex ``#RRGGBB`` scene background color.
+            grid: Whether the UI should render the reference grid.
+
+        Returns:
+            The attached scene component. Local node operations mutate it in
+            place.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If the asset path or scene configuration is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         scene = Scene3DViewport(
@@ -156,6 +233,24 @@ class Card:
         return self._add_component(scene)
 
     def add_table(self, columns, rows, empty_state: str = "") -> "Table":
+        """Add a table component to this card.
+
+        Args:
+            columns: Non-empty list of column objects with unique non-empty
+                ``id`` values and non-empty string ``label`` values.
+            rows: List of row objects with unique non-empty ``id`` values and a
+                ``cells`` mapping whose keys reference declared columns.
+            empty_state: Text displayed when the table has no rows.
+
+        Returns:
+            The attached table component. Column and row inputs are stored as
+            defensive JSON-compatible copies.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If columns or rows fail validation.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         table = Table(
@@ -168,6 +263,22 @@ class Card:
         return self._add_component(table)
 
     def add_metric(self, label: str, value, severity=None) -> "Metric":
+        """Add a scalar metric component to this card.
+
+        Args:
+            label: Non-empty metric label shown by the UI.
+            value: JSON-compatible metric value to serialize.
+            severity: Optional severity as a :class:`Severity` or matching
+                string.
+
+        Returns:
+            The attached metric component.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``label``, ``severity``, or ``value`` is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         metric = Metric(
@@ -180,6 +291,21 @@ class Card:
         return self._add_component(metric)
 
     def add_text(self, text: str, severity=None) -> "Text":
+        """Add a text component to this card.
+
+        Args:
+            text: Non-empty text to display.
+            severity: Optional severity as a :class:`Severity` or matching
+                string.
+
+        Returns:
+            The attached text component.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``text`` or ``severity`` is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         component = Text(
@@ -191,6 +317,21 @@ class Card:
         return self._add_component(component)
 
     def add_badge(self, text: str, severity=Severity.success) -> "Badge":
+        """Add a badge component to this card.
+
+        Args:
+            text: Non-empty badge text.
+            severity: Badge severity. When omitted, badges default to
+                :attr:`Severity.success`.
+
+        Returns:
+            The attached badge component.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``text`` or ``severity`` is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         component = Badge(
@@ -202,6 +343,24 @@ class Card:
         return self._add_component(component)
 
     def add_log(self, entries, empty_state: str = "", max_entries: int = 100) -> "Log":
+        """Add a bounded log component to this card.
+
+        Args:
+            entries: List of entry objects with unique non-empty ``id`` values,
+                non-empty string ``timestamp`` values, string ``message``
+                values, and optional valid severities.
+            empty_state: Text displayed when the log is empty.
+            max_entries: Positive maximum number of entries to retain. Older
+                entries are dropped from the front when the limit is exceeded.
+
+        Returns:
+            The attached log component.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If any argument fails validation.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         component = Log(
@@ -216,6 +375,23 @@ class Card:
     def add_custom_component(
         self, type: str, data, id: Optional[str] = None
     ) -> "CustomComponent":
+        """Add an application-defined JSON component to this card.
+
+        Args:
+            type: Non-empty component type string. ``scene2d``, ``table``,
+                ``metric``, ``text``, ``badge``, and ``log`` are reserved.
+            data: JSON-compatible payload stored as a defensive deep copy.
+            id: Optional component identifier. When omitted, the SDK generates
+                one.
+
+        Returns:
+            The attached custom component.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``type``, ``id``, or ``data`` is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         component_id = id or self._model.next_component_id("component")
@@ -223,6 +399,16 @@ class Card:
         return self._add_component(component)
 
     def to_dict(self) -> dict:
+        """Return a detached JSON-ready snapshot of this card and its children.
+
+        Returns:
+            A new dictionary containing the card metadata and component
+            snapshots in insertion order.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         return {
@@ -259,13 +445,25 @@ class _Entity:
 
 
 class Scene2DViewport(_Component):
-    """Entities and directed links in a bounded 2D scene."""
+    """Entities and directed links rendered inside a bounded 2D viewport."""
 
     _ERROR_PREFIX = "Scene2DViewport: "
 
     def __init__(
         self, model, scene_id: str, width: int, height: int, bounds: GridBounds
     ) -> None:
+        """Create a 2D scene viewport.
+
+        Use :meth:`Card.add_scene_2d` instead of calling this constructor
+        directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            scene_id: Stable SDK-generated component identifier.
+            width: Canvas width in pixels.
+            height: Canvas height in pixels.
+            bounds: ``(x_min, x_max, y_min, y_max)`` world bounds.
+        """
         super().__init__(model, scene_id, "scene2d")
         self.width = width
         self.height = height
@@ -283,6 +481,23 @@ class Scene2DViewport(_Component):
         status: Severity = Severity.success,
         freshness: Freshness = Freshness.fresh,
     ) -> None:
+        """Insert a new entity into the scene.
+
+        Args:
+            id: Unique non-empty entity identifier.
+            x: Finite x-coordinate in scene units.
+            y: Finite y-coordinate in scene units.
+            heading: Finite heading angle in degrees.
+            color: ``#RRGGBB`` or ``var(--token)`` entity color string.
+            status: Optional semantic status for the entity.
+            freshness: Optional freshness state that controls visual fading.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If validation fails or an entity with ``id`` already
+                exists.
+        """
         prefix = self._ERROR_PREFIX
         require_non_empty(id, "id", prefix)
         require_finite(x, "x", prefix)
@@ -307,6 +522,23 @@ class Scene2DViewport(_Component):
         status: Optional[Severity] = None,
         freshness: Optional[Freshness] = None,
     ) -> None:
+        """Update selected fields of an existing entity in place.
+
+        Only arguments set to a non-``None`` value are applied.
+
+        Args:
+            id: Existing entity identifier.
+            x: Optional replacement x-coordinate.
+            y: Optional replacement y-coordinate.
+            heading: Optional replacement heading in degrees.
+            status: Optional replacement severity.
+            freshness: Optional replacement freshness state.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``id`` does not exist or a supplied value is invalid.
+        """
         prefix = self._ERROR_PREFIX
         if x is not None:
             require_finite(x, "x", prefix)
@@ -332,6 +564,16 @@ class Scene2DViewport(_Component):
         self._mutated()
 
     def remove_entity(self, id: str) -> None:
+        """Remove an entity and any links that reference it.
+
+        Args:
+            id: Existing entity identifier.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``id`` does not exist.
+        """
         prefix = self._ERROR_PREFIX
         self._model.check_owner()
         self._model.ensure_running()
@@ -344,6 +586,18 @@ class Scene2DViewport(_Component):
     def add_link(
         self, source_id: str, target_id: str, status: Severity = Severity.success
     ) -> None:
+        """Add a directed link between two existing entities.
+
+        Args:
+            source_id: Existing source entity identifier.
+            target_id: Existing target entity identifier.
+            status: Optional semantic status for the link.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If either entity is missing or the link already exists.
+        """
         prefix = self._ERROR_PREFIX
         status = coerce_severity(status)
         self._model.check_owner()
@@ -363,6 +617,17 @@ class Scene2DViewport(_Component):
         self._mutated()
 
     def remove_link(self, source_id: str, target_id: str) -> None:
+        """Remove a directed link.
+
+        Args:
+            source_id: Existing source entity identifier.
+            target_id: Existing target entity identifier.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If the link does not exist.
+        """
         prefix = self._ERROR_PREFIX
         self._model.check_owner()
         self._model.ensure_running()
@@ -374,6 +639,12 @@ class Scene2DViewport(_Component):
         raise ValueError(f"{prefix}link ({source_id} -> {target_id}) does not exist")
 
     def to_dict(self) -> dict:
+        """Return a detached JSON-ready snapshot of the 2D scene state.
+
+        Returns:
+            A new dictionary containing viewport geometry, entity snapshots, and
+            link snapshots in insertion order.
+        """
         return self._envelope(
             {
                 "width": self.width,
@@ -393,13 +664,35 @@ class Scene2DViewport(_Component):
 
 
 class Scene3DViewport(_Component):
-    """GLB scene configuration and application-owned local node targets."""
+    """GLB scene configuration plus application-owned mutable node targets.
+
+    Instances are usually created with :meth:`Card.add_scene_3d`. Node
+    mutations are local SDK state layered on top of the referenced GLB asset.
+    After :meth:`rti_demo_ui.DemoUiApp.run` starts, call mutating methods only
+    on the app's owner event loop.
+    """
 
     _ERROR_PREFIX = "Scene3DViewport: "
     _PATH_ESCAPE = re.compile(r"^(?:[^~/]|~[01])+$")
     _MAX_BATCH_SIZE = 1000
 
     def __init__(self, model, scene_id, asset, camera, background, grid):
+        """Create a 3D scene viewport.
+
+        Use :meth:`Card.add_scene_3d` instead of calling this constructor
+        directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            scene_id: Stable SDK-generated component identifier.
+            asset: Absolute same-origin ``.glb`` path.
+            camera: Optional orbit-camera override dictionary.
+            background: Hex ``#RRGGBB`` background color.
+            grid: Whether the reference grid is enabled.
+
+        Raises:
+            ValueError: If the scene configuration is invalid.
+        """
         super().__init__(model, scene_id, "scene3d")
         self._config = self._make_config(
             asset, camera, background, grid, model.static_root
@@ -651,6 +944,25 @@ class Scene3DViewport(_Component):
         visible=True,
         status=Severity.success,
     ):
+        """Add a mutable target node overlay to the scene.
+
+        Args:
+            id: Non-empty node identifier. Removed IDs become stale and cannot
+                be added again.
+            path: Slash-delimited GLB node path. Segments must be non-empty and
+                use ``~0``/``~1`` escaping for literal ``~`` and ``/``.
+            position: Three finite coordinates.
+            rotation: Unit quaternion in ``[x, y, z, w]`` order.
+            scale: Three finite positive scale values.
+            visible: Whether the node should be visible.
+            status: Optional node severity.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If validation fails or ``id`` is already in use or
+                stale.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self._apply(
@@ -671,6 +983,23 @@ class Scene3DViewport(_Component):
     def update_node(
         self, id, position=None, rotation=None, scale=None, visible=None, status=None
     ):
+        """Update selected fields of an existing node overlay in place.
+
+        Only arguments set to a non-``None`` value are applied.
+
+        Args:
+            id: Existing node identifier.
+            position: Optional replacement position vector.
+            rotation: Optional replacement unit quaternion.
+            scale: Optional replacement scale vector.
+            visible: Optional replacement visibility flag.
+            status: Optional replacement severity.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``id`` is stale or any supplied value is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         operation = {"op": "update", "id": id}
@@ -686,16 +1015,55 @@ class Scene3DViewport(_Component):
         self._apply([operation])
 
     def remove_node(self, id):
+        """Remove a node overlay by ID.
+
+        Removed IDs remain stale and cannot be re-added later.
+
+        Args:
+            id: Existing node identifier.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``id`` does not exist.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self._apply([{"op": "remove", "id": id}])
 
     def apply_node_batch(self, batch):
+        """Apply a node batch atomically.
+
+        Args:
+            batch: Non-empty list of up to 1000 ``{"op", "id", ...}``
+                dictionaries. Supported operations are ``add``, ``update``, and
+                ``remove``.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If the batch is malformed, duplicates an ``(op, id)``
+                pair, references stale IDs, or contains an invalid operation. On
+                failure, no partial mutation is committed.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self._apply(batch)
 
     def set_config(self, asset, camera=None, background="#0a0e17", grid=False):
+        """Replace the scene configuration while preserving current node state.
+
+        Args:
+            asset: Absolute same-origin ``.glb`` path.
+            camera: Optional orbit-camera override dictionary.
+            background: Hex ``#RRGGBB`` background color.
+            grid: Whether the reference grid is enabled.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If the new scene configuration is invalid.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         replacement = self._make_config(
@@ -707,6 +1075,12 @@ class Scene3DViewport(_Component):
             self._mutated()
 
     def to_dict(self):
+        """Return a detached JSON-ready snapshot of the 3D scene state.
+
+        Returns:
+            A new dictionary containing the scene config and current node
+            overlays.
+        """
         data = dict(self._config)
         data["nodes"] = [dict(node) for node in self._nodes.values()]
         return self._envelope(data)
@@ -760,13 +1134,41 @@ def _validate_rows(rows, columns):
 
 
 class Table(_Component):
+    """Tabular component with validated columns and row dictionaries."""
+
     def __init__(self, model, component_id, columns, rows, empty_state):
+        """Create a table component.
+
+        Use :meth:`Card.add_table` instead of calling this constructor
+        directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            component_id: Stable SDK-generated component identifier.
+            columns: Non-empty list of validated column dictionaries.
+            rows: List of validated row dictionaries.
+            empty_state: Text displayed when the table has no rows.
+
+        Raises:
+            ValueError: If the column or row definitions are invalid.
+        """
         super().__init__(model, component_id, "table")
         self.columns = _validate_columns(columns)
         self.rows = _validate_rows(rows, self.columns)
         self.empty_state = empty_state
 
     def set_rows(self, rows):
+        """Replace the full row collection.
+
+        Args:
+            rows: List of row dictionaries whose IDs are unique within the new
+                collection and whose cells reference declared columns.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``rows`` fails validation.
+        """
         replacement = _validate_rows(rows, self.columns)
         self._model.check_owner()
         self._model.ensure_running()
@@ -774,6 +1176,17 @@ class Table(_Component):
         self._mutated()
 
     def upsert_row(self, row):
+        """Insert a new row or replace an existing row with the same ID.
+
+        Args:
+            row: Row dictionary with a non-empty ``id`` and valid ``cells``
+                mapping.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``row`` fails validation.
+        """
         replacement = _validate_rows([row], self.columns)[0]
         self._model.check_owner()
         self._model.ensure_running()
@@ -786,6 +1199,16 @@ class Table(_Component):
         self._mutated()
 
     def remove_row(self, id: str):
+        """Remove a row by ID.
+
+        Args:
+            id: Existing row identifier.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``id`` does not exist.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         for index, row in enumerate(self.rows):
@@ -796,6 +1219,7 @@ class Table(_Component):
         raise ValueError(f"Table: row '{id}' does not exist")
 
     def to_dict(self):
+        """Return a detached JSON-ready snapshot of the table state."""
         return self._envelope(
             {
                 "columns": copy_json_value(self.columns),
@@ -815,7 +1239,25 @@ class _ScalarComponent(_Component):
 
 
 class Metric(_ScalarComponent):
+    """Scalar value component with a fixed label and optional severity."""
+
     def __init__(self, model, component_id, label, value, severity):
+        """Create a metric component.
+
+        Use :meth:`Card.add_metric` instead of calling this constructor
+        directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            component_id: Stable SDK-generated component identifier.
+            label: Non-empty user-visible metric label.
+            value: JSON-compatible metric value.
+            severity: Optional severity as a :class:`Severity` or matching
+                string.
+
+        Raises:
+            ValueError: If ``label``, ``value``, or ``severity`` is invalid.
+        """
         require_non_empty(label, "label", "Metric: ")
         super().__init__(
             model,
@@ -829,6 +1271,18 @@ class Metric(_ScalarComponent):
         )
 
     def set_value(self, value, severity=None):
+        """Replace the metric value and optional severity.
+
+        Args:
+            value: JSON-compatible replacement value.
+            severity: Optional replacement severity. ``None`` clears any
+                previously stored severity.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``value`` or ``severity`` is invalid.
+        """
         replacement = {
             "label": self.data["label"],
             "value": copy_json_value(value),
@@ -839,9 +1293,29 @@ class Metric(_ScalarComponent):
         self.data = replacement
         self._mutated()
 
+    def to_dict(self):
+        """Return a detached JSON-ready snapshot of the metric state."""
+        return super().to_dict()
+
 
 class Text(_ScalarComponent):
+    """Scalar text component with optional severity styling."""
+
     def __init__(self, model, component_id, text, severity):
+        """Create a text component.
+
+        Use :meth:`Card.add_text` instead of calling this constructor directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            component_id: Stable SDK-generated component identifier.
+            text: Non-empty displayed text.
+            severity: Optional severity as a :class:`Severity` or matching
+                string.
+
+        Raises:
+            ValueError: If ``text`` or ``severity`` is invalid.
+        """
         require_non_empty(text, "text", "Text: ")
         super().__init__(
             model,
@@ -851,6 +1325,18 @@ class Text(_ScalarComponent):
         )
 
     def set_text(self, text, severity=None):
+        """Replace the text payload and optional severity.
+
+        Args:
+            text: Non-empty replacement text.
+            severity: Optional replacement severity. ``None`` clears any
+                previously stored severity.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``text`` or ``severity`` is invalid.
+        """
         require_non_empty(text, "text", "Text: ")
         replacement = {"text": text, "severity": _severity(severity)}
         self._model.check_owner()
@@ -858,14 +1344,50 @@ class Text(_ScalarComponent):
         self.data = replacement
         self._mutated()
 
+    def to_dict(self):
+        """Return a detached JSON-ready snapshot of the text state."""
+        return super().to_dict()
+
 
 class Badge(Text):
+    """Compact text badge with severity-driven styling.
+
+    Badges always carry a severity. When one is omitted, the value defaults to
+    :attr:`Severity.success`.
+    """
+
     def __init__(self, model, component_id, text, severity):
+        """Create a badge component.
+
+        Use :meth:`Card.add_badge` instead of calling this constructor directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            component_id: Stable SDK-generated component identifier.
+            text: Non-empty badge text.
+            severity: Optional badge severity. ``None`` defaults to
+                :attr:`Severity.success`.
+
+        Raises:
+            ValueError: If ``text`` or ``severity`` is invalid.
+        """
         require_non_empty(text, "text", "Badge: ")
         _Component.__init__(self, model, component_id, "badge")
         self.data = {"text": text, "severity": _severity(severity or Severity.success)}
 
     def set_text(self, text, severity=None):
+        """Replace the badge text and severity.
+
+        Args:
+            text: Non-empty replacement text.
+            severity: Optional replacement severity. ``None`` resets the badge
+                to :attr:`Severity.success`.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``text`` or ``severity`` is invalid.
+        """
         require_non_empty(text, "text", "Badge: ")
         replacement = {
             "text": text,
@@ -875,6 +1397,10 @@ class Badge(Text):
         self._model.ensure_running()
         self.data = replacement
         self._mutated()
+
+    def to_dict(self):
+        """Return a detached JSON-ready snapshot of the badge state."""
+        return _ScalarComponent.to_dict(self)
 
 
 def _validate_log_entries(entries):
@@ -902,7 +1428,23 @@ def _validate_log_entries(entries):
 
 
 class Log(_Component):
+    """Bounded append-only log component."""
+
     def __init__(self, model, component_id, entries, empty_state, max_entries):
+        """Create a log component.
+
+        Use :meth:`Card.add_log` instead of calling this constructor directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            component_id: Stable SDK-generated component identifier.
+            entries: Initial list of validated entry dictionaries.
+            empty_state: Text displayed when the log is empty.
+            max_entries: Positive entry limit. Only the newest entries are kept.
+
+        Raises:
+            ValueError: If the entries or ``max_entries`` are invalid.
+        """
         super().__init__(model, component_id, "log")
         require_positive_int(max_entries, "max_entries", "Log: ")
         self.entries = _validate_log_entries(entries)
@@ -911,6 +1453,18 @@ class Log(_Component):
         self.entries = self.entries[-max_entries:]
 
     def append(self, entry):
+        """Append one entry, dropping the oldest entry if the log is full.
+
+        Args:
+            entry: Entry dictionary with a unique non-empty ``id``, non-empty
+                string ``timestamp``, string ``message``, and optional valid
+                severity.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``entry`` is invalid or reuses an existing ID.
+        """
         replacement = _validate_log_entries([entry])[0]
         self._model.check_owner()
         self._model.ensure_running()
@@ -920,12 +1474,19 @@ class Log(_Component):
         self._mutated()
 
     def clear(self):
+        """Remove all entries from the log.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self.entries = []
         self._mutated()
 
     def to_dict(self):
+        """Return a detached JSON-ready snapshot of the log state."""
         return self._envelope(
             {
                 "entries": copy_json_value(self.entries),
@@ -936,7 +1497,25 @@ class Log(_Component):
 
 
 class CustomComponent(_Component):
+    """Application-defined component backed by arbitrary JSON-compatible data."""
+
     def __init__(self, model, component_id, component_type, data):
+        """Create a custom component.
+
+        Use :meth:`Card.add_custom_component` instead of calling this
+        constructor directly.
+
+        Args:
+            model: Internal application model that owns the component.
+            component_id: Component identifier. Must be non-empty.
+            component_type: Non-empty custom type string. ``scene2d``, ``table``,
+                ``metric``, ``text``, ``badge``, and ``log`` are reserved.
+            data: JSON-compatible payload stored as a defensive deep copy.
+
+        Raises:
+            ValueError: If ``component_id``, ``component_type``, or ``data`` is
+                invalid.
+        """
         require_non_empty(component_id, "id", "CustomComponent: ")
         require_non_empty(component_type, "type", "CustomComponent: ")
         if component_type in {"scene2d", "table", "metric", "text", "badge", "log"}:
@@ -945,6 +1524,16 @@ class CustomComponent(_Component):
         self.data = copy_json_value(data, "CustomComponent: ")
 
     def set_data(self, data):
+        """Replace the full component payload with a deep-copied JSON value.
+
+        Args:
+            data: JSON-compatible replacement payload.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``data`` is not JSON-compatible.
+        """
         replacement = copy_json_value(data, "CustomComponent: ")
         self._model.check_owner()
         self._model.ensure_running()
@@ -952,10 +1541,27 @@ class CustomComponent(_Component):
         self._mutated()
 
     def update_data(self, path, value, create_missing=False):
+        """Update a nested object field inside the current payload.
+
+        Args:
+            path: Sequence of non-empty string keys. An empty sequence replaces
+                the complete payload.
+            value: JSON-compatible value written at the leaf key.
+            create_missing: When ``True``, missing intermediate objects are
+                created. When ``False``, every path segment must already exist.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`rti_demo_ui.DemoUiApp.run` starts, or after shutdown.
+            ValueError: If ``path`` is invalid, the current payload or an
+                intermediate segment is not an object, a required segment is
+                missing, or ``value`` is not JSON-compatible.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self.data = self._model.update_value(self.data, path, value, create_missing)
         self._mutated()
 
     def to_dict(self):
+        """Return a detached JSON-ready snapshot of the custom component."""
         return self._envelope(copy_json_value(self.data))

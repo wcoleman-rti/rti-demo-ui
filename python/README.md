@@ -12,51 +12,20 @@
 
 # RTI Demo UI (Python)
 
-RTI Demo UI for Python with a native `asyncio`/`aiohttp` backend.
-Provides the shared `DemoUiApp`, generic state components, and `Scene2DViewport`
-components described in the top-level repository README.
-
-## API and Frontends
-
-```python
-from pathlib import Path
-from rti_demo_ui import DemoUiApp
-
-app = DemoUiApp(
-    "Fleet monitor",
-    static_root=Path(__file__).parent / "web",
-)
-import asyncio
-
-asyncio.run(app.run())
-```
-
-`static_root` accepts a string or `os.PathLike[str]` directory containing
-`index.html`. The SDK reserves `/sdk/` and `/api/`, serves `/sdk/theme.css`,
-`/sdk/runtime.js`, and the framework-independent `/sdk/client.js`, and resolves
-other paths beneath the validated root. Port `0` selects an available loopback
-port; use `await app.wait_until_ready()` and `app.ready_info` to retrieve it.
-The client polls by default; custom frontends can explicitly select
-`createClient({transport: "sse"})`. Both `/api/state` and `/api/events` remain
-reserved SDK routes.
-Wheel and source-distribution installs load built-in assets from package
-resources; application-owned frontend files are deployed separately.
-
-See [../docs/api/python.md](../docs/api/python.md),
-[../docs/custom-frontends.md](../docs/custom-frontends.md), and
-[../docs/lifecycle.md](../docs/lifecycle.md) for the public API, route
-contract, security checks, and shutdown responsibilities.
+Python 3.11+ bindings for building local RTI Demo UI applications with
+`asyncio` and `aiohttp`.
 
 ## Installation
 
-Install the package from the repository root:
+From the repository root:
 
 ```bash
-pip install -e .
+python -m pip install -e .
+python examples/py/simple.py
 ```
 
-For contributor tooling (`pytest`, `playwright`):
-
-```bash
-pip install -e '.[dev]'
-```
+See the hosted [Python guide](https://wcoleman-rti.github.io/rti-demo-ui/api/python.html)
+and [API reference](https://wcoleman-rti.github.io/rti-demo-ui/reference/python.html)
+for application setup, components, custom frontends, lifecycle, and native
+window usage. Contributor setup remains in the repository's
+[contributing guide](../docs/development/contributing.md).

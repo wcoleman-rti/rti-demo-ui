@@ -1,0 +1,39 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commands</title>
+<link rel="stylesheet" href="/sdk/theme.css">
+</head>
+<body>
+<main class="sdk-app">
+  <h1>Validated command</h1>
+  <input id="name" value="World" aria-label="Name">
+  <button class="sdk-button" id="greet" type="button">Greet</button>
+  <p id="result"></p>
+</main>
+<script type="module">
+import {createClient} from "/sdk/client.js";
+
+const client = createClient();
+document.getElementById("greet").addEventListener("click", async () => {
+  const name = document.getElementById("name").value;
+  const result = await client.invokeCommand("greet", {name});
+  document.getElementById("result").textContent = result.message;
+});
+</script>
+</body>
+</html>

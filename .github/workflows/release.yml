@@ -16,72 +16,214 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
-permissions:
-  contents: write
+env:
+  FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.cache/fetchcontent
 
 jobs:
-  create-release:
+  validate:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Classify release tag
-        id: release_tag
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate release version
+        id: version
         env:
-          TAG: ${{ github.ref_name }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "create=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag $REF_NAME is not a stable SemVer release tag"
+              exit 1
+            fi
+            version="${REF_NAME#v}"
           else
-            echo "create=false" >> "$GITHUB_OUTPUT"
-            echo "Tag $TAG is not a release tag; skipping release creation."
+            version="$(
+              python -c \
+                'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])'
+            )"
           fi
-      - uses: actions/checkout@v4
-        if: steps.release_tag.outputs.create == 'true'
-      - uses: actions/setup-python@v5
-        if: steps.release_tag.outputs.create == 'true'
-        with:
-          python-version: "3.11"
-      - name: Build Python release artifacts
-        if: steps.release_tag.outputs.create == 'true'
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          python - <<'PY'
+
+          VERSION="$version" python - <<'PY'
           import os
           import pathlib
+          import re
           import tomllib
 
-          tag_version = os.environ["TAG"].removeprefix("v")
-          manifests = [pathlib.Path("pyproject.toml"),
-                       pathlib.Path("native/python/pyproject.toml")]
-          versions = {
+          version = os.environ["VERSION"]
+          python_manifests = (
+              pathlib.Path("pyproject.toml"),
+              pathlib.Path("native/python/pyproject.toml"),
+          )
+          actual = {
               path.as_posix(): tomllib.loads(path.read_text())["project"]["version"]
-              for path in manifests
+              for path in python_manifests
           }
+          cmake_files = (
+              pathlib.Path("native/cpp/CMakeLists.txt"),
+          )
+          for path in cmake_files:
+              match = re.search(
+                  r"project\([^)]*\bVERSION\s+([0-9]+\.[0-9]+\.[0-9]+)",
+                  path.read_text(),
+                  re.DOTALL,
+              )
+              if not match:
+                  raise SystemExit(f"no project version found in {path}")
+              actual[path.as_posix()] = match.group(1)
+          version_file = pathlib.Path("cmake/rti-demo-ui-version.cmake")
+          match = re.search(
+              r"set\(RTI_DEMO_UI_VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)\)",
+              version_file.read_text(),
+          )
+          if not match:
+              raise SystemExit(f"no SDK version found in {version_file}")
+          actual[version_file.as_posix()] = match.group(1)
+
           mismatches = {
-              path: version
-              for path, version in versions.items()
-              if version != tag_version
+              path: found for path, found in actual.items() if found != version
           }
           if mismatches:
               raise SystemExit(
-                  f"tag version {tag_version} does not match package versions "
-                  f"{mismatches}"
+                  f"release version {version} does not match manifests {mismatches}"
               )
           PY
-          python -m pip install build==1.2.2
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build-python:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Build and validate Python packages
+        run: |
+          set -euo pipefail
+          python -m pip install build==1.2.2 twine==6.2.0
           python -m build --outdir dist/core .
           python -m build --outdir dist/native native/python
+          python -m twine check dist/core/* dist/native/*
+
+          python -m venv wheel-smoke
+          wheel-smoke/bin/python -m pip install dist/core/*.whl
+          wheel-smoke/bin/python -m pip install --no-deps dist/native/*.whl
+          wheel-smoke/bin/python - <<'PY'
+          from importlib.resources import files
+
+          import rti_demo_ui
+          import rti_demo_ui_native
+
+          assert (files(rti_demo_ui) / "_assets" / "runtime.js").is_file()
+          assert callable(rti_demo_ui_native.run_native)
+          PY
           mkdir -p dist/release
           cp dist/core/* dist/native/* dist/release/
+      - name: Upload Python release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-distributions
+          path: dist/release/*
+          if-no-files-found: error
 
+  build-cpp:
+    needs: validate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build and test C++ package
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/release \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
+            -DRTI_DEMO_BUILD_EXAMPLES=OFF
+          cmake --build build/release --parallel
+          ctest --test-dir build/release --output-on-failure
+
+          package="rti-demo-ui-cpp-${VERSION}-linux-x86_64-gcc11"
+          cmake -S tests/cpp/add_subdirectory_consumer \
+            -B build/add-subdirectory-consumer \
+            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
+            -DRTI_DEMO_UI_SOURCE_DIR="$PWD"
+          cmake --install build/release --prefix "dist/$package"
+          test -f "dist/$package/share/rti-demo-ui/licenses/LICENSE-rti-demo-ui"
+          test -f "dist/$package/share/rti-demo-ui/licenses/LICENSE-cpp-httplib"
+          test -f "dist/$package/share/rti-demo-ui/licenses/LICENSE-nlohmann-json"
+          cmake -S tests/cpp/installed_consumer \
+            -B build/installed-consumer \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$PWD/dist/$package"
+          cmake --build build/installed-consumer --parallel
+          ./build/installed-consumer/rti_demo_ui_installed_consumer
+
+          tar --sort=name \
+            --mtime="@${SOURCE_DATE_EPOCH:-0}" \
+            --owner=0 --group=0 --numeric-owner \
+            -C dist -cf - "$package" |
+            gzip --no-name > "dist/${package}.tar.gz"
+      - name: Upload C++ release artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cpp-linux-x86_64-gcc11
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  integrity:
+    needs: [validate, build-python, build-cpp]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: "*"
+          path: release
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS
+      - name: Attest release artifacts
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: release/*
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-release
+          path: release/*
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [validate, integrity]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: verified-release
+          path: release
       - name: Create GitHub release
-        if: steps.release_tag.outputs.create == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" dist/release/* \
+          gh release create "$TAG" release/* \
             --repo "$GITHUB_REPOSITORY" \
             --generate-notes \
-            --title "$TAG"
+            --title "$TAG" \
+            --verify-tag
