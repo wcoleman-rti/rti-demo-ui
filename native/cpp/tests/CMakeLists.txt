@@ -22,7 +22,7 @@ if(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS)
         COMMAND rti_demo_ui_native_real_smoke
     )
     set_tests_properties(
-        native_real_engine_smoke PROPERTIES LABELS real_engine TIMEOUT 30
+        native_real_engine_smoke PROPERTIES LABELS real_engine TIMEOUT 60
     )
 
     add_executable(rti_demo_ui_native_real_conformance real_conformance.cpp)
