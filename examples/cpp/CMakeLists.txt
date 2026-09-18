@@ -14,6 +14,7 @@ cmake_minimum_required(VERSION 3.16)
 
 add_executable(rti_demo_ui_simple simple.cpp)
 target_link_libraries(rti_demo_ui_simple PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_simple PRIVATE _USE_MATH_DEFINES)
 
 add_executable(rti_demo_ui_components components.cpp)
 target_link_libraries(rti_demo_ui_components PRIVATE rti_demo_ui::core)
@@ -79,4 +80,5 @@ if(BUILD_CONNEXT_EXAMPLE)
         rti_demo_ui::core
         RTIConnextDDS::cpp2_api
     )
+    target_compile_definitions(rti_demo_ui_connext PRIVATE _USE_MATH_DEFINES)
 endif()
