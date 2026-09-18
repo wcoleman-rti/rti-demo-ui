@@ -90,7 +90,6 @@ from rti_demo_ui_native import run_native
 
 run_native(
     app,
-    application_id="com.example.fleet-demo",
     async_main=receive_samples,
     width=1280,
     height=800,
@@ -100,9 +99,10 @@ run_native(
 `async_main(app)` starts on the app owner loop after readiness. A normal return
 closes the native window; an exception is re-raised after all managed work is
 joined. Browser mode remains the default and does not import pywebview. See
-[Native Webview Mode](../native-webview.md) for installation, profiles,
-qualification status, and troubleshooting. Python native mode on macOS uses a
-direct PyObjC WKWebView host and awaits manual release acceptance. The
+[Native Webview Mode](../native-webview.md) for installation, browser storage,
+qualification status, and troubleshooting. Python native mode uses pywebview
+on Linux, Windows, and macOS; Windows and macOS await manual release
+acceptance. The
 [native Python API reference](../reference/native-python.rst) documents the
 runner contract and validation errors.
 

@@ -11,13 +11,9 @@
 #
 
 import argparse
-from contextlib import contextmanager
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
-import time
 from pathlib import Path
 
 
@@ -51,22 +47,6 @@ def find_cpp_conformance(build_dir):
     return matches[0]
 
 
-@contextmanager
-def temporary_workspace():
-    path = Path(tempfile.mkdtemp(prefix="rti-native-conformance-"))
-    try:
-        yield path
-    finally:
-        for attempt in range(20):
-            try:
-                shutil.rmtree(path)
-                break
-            except PermissionError:
-                if attempt == 19:
-                    raise
-                time.sleep(0.5)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-dir", required=True, type=Path)
@@ -77,65 +57,20 @@ def main():
     static_root = args.static_root.resolve()
     cpp_conformance = find_cpp_conformance(build_dir)
 
-    with temporary_workspace() as work:
-        environment = {
-            **os.environ,
-            "APPDATA": str(work / "appdata"),
-            "LOCALAPPDATA": str(work / "local-appdata"),
-            "XDG_DATA_HOME": str(work / "xdg-data"),
-        }
+    environment = dict(os.environ)
+    run([str(cpp_conformance)], environment=environment)
 
-        run([str(cpp_conformance), "__absent__", "first"], environment=environment)
-        run([str(cpp_conformance), "first", "second"], environment=environment)
-
-        isolated = work / f"isolated-{cpp_conformance.name}"
-        shutil.copy2(cpp_conformance, isolated)
-        run([str(isolated), "__absent__", "isolated"], environment=environment)
-
-        if sys.platform in {"darwin", "win32"}:
-            python_conformance = Path(__file__).with_name("real_conformance.py")
-            base = [
+    if sys.platform in {"darwin", "win32"}:
+        python_conformance = Path(__file__).with_name("real_conformance.py")
+        run(
+            [
                 sys.executable,
                 str(python_conformance),
                 "--static-root",
                 str(static_root),
-            ]
-            run(
-                [
-                    *base,
-                    "--application-id",
-                    "org.rti.native-hosted-same",
-                    "--expected",
-                    "__absent__",
-                    "--write",
-                    "first",
-                ],
-                environment=environment,
-            )
-            run(
-                [
-                    *base,
-                    "--application-id",
-                    "org.rti.native-hosted-same",
-                    "--expected",
-                    "first",
-                    "--write",
-                    "second",
-                ],
-                environment=environment,
-            )
-            run(
-                [
-                    *base,
-                    "--application-id",
-                    "org.rti.native-hosted-isolated",
-                    "--expected",
-                    "__absent__",
-                    "--write",
-                    "isolated",
-                ],
-                environment=environment,
-            )
+            ],
+            environment=environment,
+        )
 
 
 if __name__ == "__main__":

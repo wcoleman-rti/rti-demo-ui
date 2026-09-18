@@ -151,8 +151,8 @@ void validate_report(const rti::demo::ui::Json& payload) {
     using rti::demo::ui::Json;
     static const std::set<std::string> expected_checks{
         "canvas",             "command_origin", "dynamic_import",
-        "keyboard_focus",     "module_worker",    "navigation_policy",
-        "persistent_storage", "resize_observation", "runtime3d_import",
+        "keyboard_focus",     "module_worker",
+        "resize_observation", "runtime3d_import",
         "snapshot",           "sse",                "theme_asset",
         "webgl",
     };

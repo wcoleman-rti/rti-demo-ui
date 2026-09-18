@@ -23,6 +23,12 @@ qualification is tracked in
 this completed Linux plan is historical evidence, not the current
 cross-platform support matrix.
 
+The later cross-platform work also simplified the production contract:
+backend-owned default storage replaced SDK-managed profile isolation, and
+frontend navigation became application-owned. Profile and navigation results
+below remain historical evidence from the stricter Linux qualification, not
+current production guarantees.
+
 This is a program plan with separate agent-session scopes. Phase 0 is one
 spike scope and must update this document with the completed six-combination
 support matrix before production implementation begins. Subsequent scopes are

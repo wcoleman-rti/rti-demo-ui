@@ -18,25 +18,20 @@ using rti::demo::ui::Json;
 const std::set<std::string> expected_checks{
     "snapshot",          "sse",             "dynamic_import",
     "runtime3d_import",  "module_worker",   "theme_asset",
-    "persistent_storage", "canvas",          "webgl",
-    "keyboard_focus",    "resize_observation", "navigation_policy",
-    "command_origin",
+    "canvas",            "webgl",          "keyboard_focus",
+    "resize_observation", "command_origin",
 };
 
 }  // namespace
 
-int main(int argc, char** argv) {
-    if (argc != 3) {
-        std::cerr << "usage: real_conformance STORAGE_EXPECTED STORAGE_WRITE\n";
+int main(int argc, char**) {
+    if (argc != 1) {
+        std::cerr << "usage: real_conformance\n";
         return 2;
     }
 
     DemoUiApp app("Native Phase 2 conformance", 0, "127.0.0.1",
                   NATIVE_CONFORMANCE_STATIC_ROOT);
-    app.set_data(Json{{"native_storage_key", "phase2-production"},
-                      {"native_storage_expected", argv[1]},
-                      {"native_storage_write", argv[2]}});
-
     std::mutex mutex;
     std::condition_variable report_cv;
     Json report;

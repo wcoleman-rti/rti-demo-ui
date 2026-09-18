@@ -14,16 +14,15 @@ native companion package.
 | Python 3.11+ / pywebview 6.2.1 | Windows 10/11 x64 / Evergreen WebView2 | Passed | Pending manual acceptance |
 | C++17 / webview 0.12.0 | Windows 10/11 x64 / Evergreen WebView2 | Passed | Pending manual acceptance |
 | C++17 / webview 0.12.0 | Apple Silicon macOS 14+ / WKWebView | Passed | Pending manual acceptance |
-| Python 3.11+ / PyObjC 12.2.2 | Apple Silicon macOS 14+ / WKWebView | Passed | Pending manual acceptance |
+| Python 3.11+ / pywebview 6.2.1 | Apple Silicon macOS 14+ / Cocoa/WKWebView | Passed | Pending manual acceptance |
 
 Automated qualification covers compilation, real-window startup, the shared
-frontend contract, navigation denial, lifecycle, persistence, and profile
-isolation on the target hosted operating systems. Windows and macOS do not
-become release-supported until the manual checklist below is recorded.
+frontend contract, lifecycle, shutdown, and rendering on the target hosted
+operating systems. Windows and macOS do not become release-supported until the
+manual checklist below is recorded.
 
-Python on macOS uses a direct PyObjC Cocoa host so the companion owns the named
-data store and delegates without patching or forking pywebview. pywebview
-remains pinned to 6.2.1 for Linux and Windows.
+Python uses pywebview 6.2.1 on all three platforms: GTK on Linux, Edge Chromium
+on Windows, and Cocoa/WKWebView on macOS.
 
 ## Platform Prerequisites
 
@@ -81,9 +80,9 @@ AppKit, and WebKit. The `arm64Darwin23clang16.0` RTI architecture remains the
 Connext binary architecture even when a newer compatible Xcode builds the
 application.
 
-Python requires Python 3.11+ and the companion's pinned PyObjC 12.2.2 Cocoa
-and WebKit bindings. Its hosted automated qualification has passed; manual
-acceptance remains required.
+Python requires Python 3.11+ and pywebview 6.2.1, which installs its Cocoa
+dependencies. Its hosted automated qualification has passed; manual acceptance
+remains required.
 
 ## Python Installation and Use
 
@@ -120,7 +119,6 @@ app = DemoUiApp("Fleet Telemetry")
 app.add_card("Status").add_metric("Vehicles", 12)
 run_native(
     app,
-    application_id="com.example.fleet-telemetry",
     async_main=application_work,
     width=1280,
     height=800,
@@ -128,10 +126,11 @@ run_native(
 )
 ```
 
-`application_id` is a required lowercase reverse-DNS identifier and selects
-the persistent browser profile on Linux and Windows. `async_main` runs on the
-app's owner event loop after the server is ready. A normal return closes the
-window; an exception is re-raised on the calling thread after cleanup.
+`application_id` is an optional lowercase reverse-DNS identifier retained for
+source compatibility; it does not select or isolate a browser profile.
+`async_main` runs on the app's owner event loop after the server is ready. A
+normal return closes the window; an exception is re-raised on the calling
+thread after cleanup.
 
 ## C++ Build and Use
 
@@ -161,11 +160,6 @@ options.height = 800;
 rti::demo::ui::native::run(app, options);
 ```
 
-On Linux and Windows, the executable filename is the C++ application identity.
-Packagers must give unrelated applications distinct executable filenames.
-On macOS, packaged applications use their bundle identity; an unbundled
-development executable falls back to executable identity.
-
 ## Browser Fallback
 
 The application model is identical in both modes. Do not import or link the
@@ -175,7 +169,7 @@ native companion when selecting browser mode:
 if use_native:
     from rti_demo_ui_native import run_native
 
-    run_native(app, application_id="com.example.fleet")
+    run_native(app)
 else:
     await app.run()
 ```
@@ -184,30 +178,26 @@ For C++, call `native::run(app)` only in a target linked to the companion.
 Core-only targets continue to call `app.run()`. See the dual-mode examples
 under `native/python/examples` and `native/cpp/examples`.
 
-## Profiles and Navigation
+## Browser Storage and Navigation
 
-Python stores its Linux profile under
-`$XDG_DATA_HOME/rti-demo-ui-native/<application-id>`, falling back to
-`~/.local/share`, and its Windows profile under
-`%LOCALAPPDATA%/rti-demo-ui-native/<application-id>`.
+Native mode uses each backend's default persistent storage behavior:
 
-C++ stores Linux cookies under
-`$XDG_DATA_HOME/rti-demo-ui-native/<executable-filename>/cookies.sqlite`.
-Pinned webview stores Windows WebView2 data under
-`%APPDATA%/<executable-filename>`. WKWebView uses the packaged application's
-default persistent website data store on macOS.
+- Python delegates to pywebview's GTK, Edge Chromium, or Cocoa backend.
+- C++ delegates to webview's WebKitGTK, WebView2, or WKWebView backend.
 
-Cookies can preserve browser-owned preferences across the dynamic loopback
-ports selected on different runs. `localStorage` and IndexedDB are scoped to
-the complete origin, including the port, and therefore are not guaranteed to
-survive a port change. Applications remain responsible for larger or
-sensitive configuration. The SDK does not intentionally persist snapshots,
-SSE payloads, command capabilities or results, credentials, or operational
-state.
+The SDK does not select a profile directory or promise persistence across
+dynamic ports, isolation between applications, or portability between
+platforms. Applications needing deterministic preferences or durable state
+must store them in the application and expose them through the normal model or
+command APIs. The SDK does not intentionally persist snapshots, SSE payloads,
+command capabilities or results, credentials, or operational state.
 
-The embedded window permits top-level navigation only within the exact bound
-loopback origin. External and new-window navigation is blocked, developer
-tools are disabled by default, and no JavaScript-native bridge is exposed.
+Navigation initiated by custom frontend content follows the selected backend's
+default behavior. Native mode does not provide a security boundary or guarantee
+that external navigation and popups are blocked. Applications are responsible
+for keeping native-mode frontends within their intended navigation model.
+Developer tools remain disabled by default, and the SDK does not expose an
+application JavaScript-native API.
 
 ## Shutdown and Troubleshooting
 
@@ -219,8 +209,8 @@ the process's previous handlers after the native runner returns.
 
 Common failures:
 
-- **Missing PyObjC on macOS**: reinstall the companion so its pinned Cocoa and
-  WebKit bindings are present.
+- **Missing Cocoa dependencies on macOS**: reinstall the companion and verify
+  pywebview 6.2.1 can initialize its Cocoa backend.
 - **Missing WebView2 Runtime on Windows**: install the Evergreen WebView2
   Runtime and retry from an interactive desktop session.
 - **Missing pywebview 6.2.1**: install `rti-demo-ui-native` and the Python
@@ -228,12 +218,10 @@ Common failures:
 - **GTK/WebKitGTK initialization failure**: install the 4.1 development/runtime
   packages and launch from a graphical session. CI needs both Xvfb and a D-Bus
   session.
-- **Invalid application ID**: use a lowercase reverse-DNS value such as
-  `com.example.demo`.
+- **Invalid application ID**: omit it or use a lowercase reverse-DNS value such
+  as `com.example.demo`.
 - **Literal loopback required**: leave the host at `127.0.0.1` or use `::1`;
   `localhost` and remote bind addresses are intentionally rejected.
-- **Profile cannot be created**: verify that `XDG_DATA_HOME` on Linux or
-  `LOCALAPPDATA` on Windows resolves to an absolute writable path.
 - **A reused app cannot run**: each `DemoUiApp` instance is single-use in both
   browser and native modes.
 
@@ -247,10 +235,10 @@ For each supported engine and release candidate, record:
 4. Accessibility-tree inspection with the platform tool.
 5. Standard and high-DPI behavior, including moving between monitors.
 6. Normal close and Ctrl-C cleanup.
-7. Blocked external-link and new-window behavior.
+7. Application-owned links and navigation behave as intended.
 8. Canvas and WebGL rendering on a hardware GPU.
 
 Automated conformance covers snapshot/SSE, commands, imports, themes, Canvas,
-WebGL pixel readback, focus, resize observation, navigation policy,
-profile reuse/isolation, signal shutdown, joined contexts, and released ports.
-The manual record is still required before publishing a release candidate.
+WebGL pixel readback, focus, resize observation, signal shutdown, joined
+contexts, and released ports. The manual record is still required before
+publishing a release candidate.

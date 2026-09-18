@@ -2,11 +2,14 @@
 
 ## Status
 
-Windows Python/C++ and macOS C++ have passed hosted compilation, real-engine,
-lifecycle, navigation, persistence/isolation, and shared frontend conformance.
-They remain release candidates pending the manual gates below. macOS Python
-uses a direct PyObjC Cocoa host rather than a pywebview fork and has passed its
-hosted qualification run.
+Windows and macOS Python/C++ have passed hosted compilation, real-engine,
+lifecycle, and shared frontend conformance. They remain release candidates
+pending the manual gates below.
+
+The final implementation intentionally follows a thin-shell contract:
+pywebview 6.2.1 supplies GTK, Edge Chromium, and Cocoa for Python, while
+webview 0.12.0 supplies the corresponding C++ engines. Browser storage and
+frontend navigation use backend defaults rather than SDK-owned policy layers.
 
 This work is intentionally separate from the Linux implementation pull request.
 It targets the RTI development-host architectures that are relevant to recent
@@ -42,51 +45,39 @@ The additional platforms must preserve the completed Linux contract:
   requests before the window is created.
 - Window close, programmatic stop, server failure, and process control requests
   converge on one idempotent joined cleanup path.
-- Top-level and new-window navigation outside the exact bound origin is
-  blocked. No privileged JavaScript-native bridge is exposed.
-- A persistent application-scoped profile supports cookies across changing
-  loopback ports and isolates distinct application identities.
+- The SDK exposes no application JavaScript-native API.
+- Browser storage persistence and frontend navigation are backend-owned.
+  Applications needing deterministic storage or navigation restrictions
+  implement them in application state and frontend behavior.
 - Built-in, custom, and adapter-provided frontends use the same HTTP, snapshot,
   SSE, command, theme, Canvas, WebGL, focus, and resize contracts.
 
-The latest stable pywebview release remains 6.2.1. Its Cocoa backend does not
-honor `storage_path`, expose a pre-construction WKWebView configuration hook,
-or provide cancellable navigation/new-window callbacks or safe delegate
-composition. No newer stable version can remove the macOS Python blocker.
-Linux and Windows retain pywebview 6.2.1; C++ retains webview 0.12.0.
+The latest stable pywebview release remains 6.2.1 and is used on all three
+Python platforms. C++ retains webview 0.12.0.
 
-## Application Identity and Profiles
+## Application Identity, Storage, and Navigation
 
-Python retains the required reverse-DNS `application_id` on every platform:
+Python retains the optional reverse-DNS `application_id` for source
+compatibility. It does not select a browser profile.
 
-- Windows:
-  `%LOCALAPPDATA%/rti-demo-ui-native/<application_id>`
-- macOS direct host: derive a stable UUID from `application_id` and select the
-  corresponding macOS 14 named persistent `WKWebsiteDataStore`.
-- Linux:
-  the existing XDG data location
+Python and C++ use the default persistent-storage behavior of the selected
+backend. The exact directory, persistence lifetime, and sharing boundary are
+platform/library details and are not SDK guarantees. In particular, dynamic
+loopback ports make origin-scoped `localStorage` and IndexedDB unsuitable for
+portable application state.
 
-C++ uses packaged application identity:
-
-- Windows: executable filename, rooted below `%APPDATA%` by pinned webview.
-- macOS application bundle: `CFBundleIdentifier`.
-- Unbundled macOS development executable: executable filename.
-- Linux: the existing executable filename identity.
-
-The macOS unbundled fallback is a development behavior, not an application
-packaging recommendation. Two applications requiring isolation must use
-distinct bundle IDs or executable filenames.
+Custom frontends are trusted application code. The SDK does not intercept
+top-level navigation or popup requests and does not claim to be a browser
+security boundary. Applications must keep their native-mode frontend within
+the navigation model they intend to support.
 
 ## Windows Direction
 
 ### Python
 
 - Select pywebview's Edge Chromium backend explicitly.
-- Pass the application-scoped storage path with persistent/private mode
-  disabled.
-- Disable pywebview's external-browser handling before creating the window.
-- Attach WebView2 navigation and new-window cancellation before initial
-  application content can leave the bound origin.
+- Disable private mode while leaving the user-data directory and navigation
+  behavior to pywebview/WebView2 defaults.
 - Translate missing pythonnet, WebView2 Runtime, and initialization failures
   into `NativeWebviewError` with a concrete installation action.
 - Use a Windows console control handler that only sets a Win32 event. A managed
@@ -97,12 +88,7 @@ distinct bundle IDs or executable filenames.
 
 - Build the pinned webview backend with Visual Studio 2022 and the current
   Windows SDK.
-- Qualify pinned webview's persistent `%APPDATA%/<executable-filename>`
-  WebView2 user-data folder. The pin has no public pre-creation profile API;
-  the stock executable-scoped path satisfies the selected identity policy
-  without relying on loader environment overrides.
-- Obtain `ICoreWebView2` from the public native controller handle.
-- Cancel disallowed `NavigationStarting` and every `NewWindowRequested` event.
+- Use pinned webview's stock WebView2 user-data and navigation behavior.
 - Keep COM initialization, window creation, and the Win32 message loop on the
   calling main thread.
 - Use `SetConsoleCtrlHandler` only to signal a Win32 event; a managed watcher
@@ -114,35 +100,25 @@ distinct bundle IDs or executable filenames.
 
 ### Python
 
-- Implement a direct PyObjC host in the companion package.
-- Create and run `NSApplication`, `NSWindow`, and `WKWebView` on the main
-  thread while retaining the common Python server/lifecycle owner.
-- Select a macOS 14 named persistent `WKWebsiteDataStore` derived from
-  `application_id` before constructing WKWebView.
-- Own `WKNavigationDelegate` and `WKUIDelegate`; enforce exact-origin
-  top-level navigation and deny every new-window request before initial load.
-- Expose no JavaScript-native bridge.
-- Translate missing PyObjC/framework and initialization failures into
-  actionable `NativeWebviewError`.
+- Select pywebview's Cocoa backend explicitly and disable private mode.
+- Use its default `WKWebsiteDataStore`, delegates, navigation behavior, and
+  AppKit main-thread loop.
+- Expose no application JavaScript API.
+- Translate missing pywebview Cocoa dependencies and initialization failures
+  into actionable `NativeWebviewError`.
 - POSIX handlers only set an event; the managed watcher schedules close on the
   AppKit main queue and restores prior handlers.
 
 Do not use pywebview private `BrowserView` state or replace its private
-delegates. Re-evaluate pywebview only when a stable release provides datastore
-selection and supported cancellable policy composition.
+delegates.
 
 ### C++
 
 - Compile the platform host as Objective-C++ and link AppKit and WebKit.
 - Keep `NSApplication`, `NSWindow`, and `WKWebView` creation and execution on
   the calling main thread.
-- Use `CFBundleIdentifier` as packaged identity, with executable filename only
-  for unbundled development.
-- Verify that the default persistent WKWebsiteDataStore is isolated by the
-  packaged bundle identity. The pinned webview API cannot select the macOS 14
-  named data store before WKWebView construction.
-- Interpose navigation and UI delegates without breaking webview's own delegate
-  behavior; cancel external top-level and new-window requests.
+- Use pinned webview's stock default `WKWebsiteDataStore`, navigation behavior,
+  and application identity.
 - Dispatch termination onto the AppKit main queue. POSIX handlers retain the
   common event-only contract.
 
@@ -150,14 +126,13 @@ selection and supported cancellable policy composition.
 
 The following may be completed without Windows or macOS development hosts:
 
-1. Isolate exact-origin matching, profile-path derivation, validation, lifecycle,
-   and control-watcher seams from native engine calls.
+1. Isolate lifecycle and control-watcher seams from native engine calls.
 2. Select platform sources and dependencies in CMake without changing the core
    graph.
 3. Add Python platform configuration and dependency markers without eager
    pywebview imports.
-4. Add deterministic tests for profile paths, application identities,
-   navigation decisions, lifecycle races, and handler restoration.
+4. Add deterministic tests for backend selection, lifecycle races, and handler
+   restoration.
 5. Add compile/fake-lifecycle CI jobs where hosted architecture and toolchains
    exist. Such jobs are preparation evidence and do not advertise support.
 6. Reuse the production conformance page and structured result schema for
@@ -178,19 +153,16 @@ requires all of:
 4. Snapshot, idle/active SSE, commands with exact Origin, dynamic imports,
    workers, themes/layouts, Canvas known pixels, WebGL known pixels, focus, and
    narrow resizing.
-5. Exact-origin top-level navigation and new-window blocking.
-6. Same-identity persistent cookie reuse across dynamic ports and
-   distinct-identity isolation.
-7. Startup failure before/after bind, normal close, programmatic stop,
+5. Startup failure before/after bind, normal close, programmatic stop,
    simultaneous close, server failure, signal/console control, active command,
    and active SSE teardown.
-8. Released bound port and joined server, watcher, event-loop, and GUI-owned
+6. Released bound port and joined server, watcher, event-loop, and GUI-owned
    work on every exit.
-9. Required hosted or maintained self-hosted real-engine CI with retained
+7. Required hosted or maintained self-hosted real-engine CI with retained
    diagnostics.
-10. Interactive validation of native chrome, keyboard input, accessibility,
-    standard/high DPI, multi-monitor movement, hardware GPU rendering, close,
-    control handling, and external-link behavior.
+8. Interactive validation of native chrome, keyboard input, accessibility,
+   standard/high DPI, multi-monitor movement, hardware GPU rendering, close,
+   control handling, and application-owned link behavior.
 
 ## Required Hosts
 
@@ -256,7 +228,8 @@ passed on 2026-09-18:
   conformance, dynamic-port persistence, and executable identity isolation.
 - Linux native, core Python/C++, browser, and documentation regression jobs.
 
-These results qualify the automated contract. They do not replace interactive
+These historical results exceeded the current thin-shell contract by also
+testing profile isolation and navigation denial. They do not replace interactive
 Windows 10/11 and Apple Silicon macOS checks for accessibility, native chrome,
 hardware GPU behavior, DPI/multi-monitor behavior, and user-driven close and
 control handling.
@@ -265,10 +238,14 @@ GitHub Actions run
 [`35361628970`](https://github.com/wcoleman-rti/rti-demo-ui/actions/runs/35361628970)
 extended that evidence on 2026-09-18:
 
-- The direct macOS Python/PyObjC host passed fake lifecycle/profile tests,
-  real-window smoke, shared conformance, dynamic-port persistence, and
+- The former direct macOS Python/PyObjC host passed fake lifecycle/profile
+  tests, real-window smoke, shared conformance, dynamic-port persistence, and
   application-ID isolation on macOS 14 / arm64.
 - The Windows Python/C++ job passed the same established gates after waiting
   for transient WebView2 BrowserMetrics handles during test-workspace cleanup.
 - Every Linux native, core Python/C++, browser, and documentation regression
   job passed.
+
+That direct-host result is retained as historical evidence. The subsequent
+thin-shell revision replaced it with pywebview Cocoa and removed profile
+isolation and navigation denial from the production contract.

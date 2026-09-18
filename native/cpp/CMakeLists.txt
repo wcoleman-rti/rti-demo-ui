@@ -59,7 +59,6 @@ FetchContent_MakeAvailable(webview)
 
 add_library(rti_demo_ui_native_webview STATIC
     ${RTI_DEMO_NATIVE_PLATFORM_SOURCES}
-    src/navigation.cpp
     src/runner.cpp
 )
 set_target_properties(

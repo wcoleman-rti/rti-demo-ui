@@ -74,18 +74,14 @@ the same loopback frontend in a native window. Linux Python/C++ is supported;
 Windows Python/C++ and macOS C++ have passed automated qualification and await
 manual release acceptance:
 
-- Python runs pywebview 6.2.1 on Linux and Windows on the calling main thread
-  and owns the app's asyncio loop in one joined worker. macOS Python requires
-  a future direct PyObjC host because pywebview's Cocoa backend lacks the
-  required public policy and profile controls.
+- Python runs pywebview 6.2.1 with GTK, Edge Chromium, or Cocoa on the calling
+  main thread and owns the app's asyncio loop in one joined worker.
 - C++ runs webview 0.12.0 on the calling main thread and owns blocking
   `DemoUiApp::run()` in one joined worker.
-- Both wait for listener readiness before initial navigation, permit only the
-  exact bound origin for top-level/new-window navigation, and expose no
-  JavaScript-native bridge.
-- Browser-owned preference cookies persist by explicit Python application ID
-  or C++ executable filename. Dynamic ports prevent a guarantee for
-  origin-scoped localStorage or IndexedDB.
+- Both wait for listener readiness before initial navigation and expose no
+  application JavaScript-native API.
+- Browser storage and frontend navigation use backend defaults. Native mode is
+  a presentation shell, not a navigation or storage-isolation boundary.
 - Signal handlers only set async-safe primitives; managed watchers dispatch
   close and previous handlers are restored.
 

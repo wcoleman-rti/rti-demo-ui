@@ -16,18 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import os
 import queue
 import re
 import signal
 import sys
 import threading
-import uuid
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Awaitable, Callable, Protocol
-from urllib.parse import urlsplit
 
 from rti_demo_ui import DemoUiApp
 
@@ -47,11 +43,10 @@ AsyncMain = Callable[[DemoUiApp], Awaitable[None]]
 
 @dataclass(frozen=True)
 class _Options:
-    application_id: str
+    application_id: str | None
     width: int
     height: int
     devtools: bool
-    profile_path: Path | None
 
 
 class _WindowHost(Protocol):
@@ -71,16 +66,14 @@ class _WindowHost(Protocol):
 
 
 class _PyWebviewHost:
-    def __init__(self, webview_module, profile_path: Path) -> None:
+    def __init__(self, webview_module, gui: str) -> None:
         self._webview = webview_module
-        self._profile_path = profile_path
+        self._gui = gui
         self._window = None
         self._started = threading.Event()
         self._close_requested = threading.Event()
         self._close_error: list[BaseException] = []
         self._devtools = False
-        self._allowed_origin = ""
-        self._gui = "gtk"
 
     def create(
         self,
@@ -92,8 +85,6 @@ class _PyWebviewHost:
         devtools: bool,
     ) -> None:
         self._devtools = devtools
-        self._allowed_origin = _origin(url)
-        self._webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
         self._window = self._webview.create_window(
             title,
             url,
@@ -101,41 +92,6 @@ class _PyWebviewHost:
             height=height,
             resizable=True,
         )
-        policy_event = self._navigation_policy_event()
-        policy_event += self._install_navigation_policy
-
-    def _navigation_policy_event(self):
-        return self._window.events.before_show
-
-    def _install_navigation_policy(self) -> None:
-        def find_webview(widget):
-            if widget.__gtype__.name == "WebKitWebView":
-                return widget
-            get_children = getattr(widget, "get_children", None)
-            if get_children is not None:
-                for child in get_children():
-                    if (found := find_webview(child)) is not None:
-                        return found
-            return None
-
-        browser = find_webview(self._window.native)
-        if browser is None:
-            raise NativeWebviewError(
-                "WebKitWebView native child was not found; verify pywebview "
-                "6.2.1 is using the GTK backend"
-            )
-
-        def block_external_navigation(_browser, decision, _decision_type):
-            get_action = getattr(decision, "get_navigation_action", None)
-            if get_action is None:
-                return False
-            uri = get_action().get_request().get_uri()
-            if _same_origin(uri, self._allowed_origin):
-                return False
-            decision.ignore()
-            return True
-
-        browser.connect("decide-policy", block_external_navigation)
 
     def _on_started(self) -> None:
         self._started.set()
@@ -160,93 +116,9 @@ class _PyWebviewHost:
             gui=self._gui,
             debug=self._devtools,
             private_mode=False,
-            storage_path=str(self._profile_path),
         )
         if self._close_error:
             raise self._close_error[0]
-
-
-class _WindowsPyWebviewHost(_PyWebviewHost):
-    def __init__(self, webview_module, profile_path: Path) -> None:
-        super().__init__(webview_module, profile_path)
-        self._gui = "edgechromium"
-        self._navigation_handler = None
-        self._new_window_handler = None
-
-    def _navigation_policy_event(self):
-        return self._window.events.before_load
-
-    def _install_navigation_policy(self) -> None:
-        native = self._window.native
-        webview_control = getattr(native, "webview", None)
-        browser = getattr(webview_control, "CoreWebView2", None)
-        if browser is None:
-            raise NativeWebviewError(
-                "WebView2 native controller was not initialized; verify "
-                "pywebview 6.2.1 is using the Edge Chromium backend"
-            )
-
-        def block_external_navigation(_sender, args):
-            if not _same_origin(str(args.Uri), self._allowed_origin):
-                args.Cancel = True
-
-        def block_new_window(_sender, args):
-            args.Handled = True
-
-        self._navigation_handler = block_external_navigation
-        self._new_window_handler = block_new_window
-        browser.NavigationStarting += self._navigation_handler
-        browser.NewWindowRequested += self._new_window_handler
-
-
-def _origin(url: str) -> str:
-    parsed = urlsplit(url)
-    if parsed.scheme != "http" or not parsed.netloc:
-        raise NativeWebviewError("native window URL must be an HTTP loopback origin")
-    return f"{parsed.scheme}://{parsed.netloc}"
-
-
-def _same_origin(url: str, allowed_origin: str) -> bool:
-    try:
-        return _origin(url) == allowed_origin
-    except NativeWebviewError:
-        return False
-
-
-def _cocoa_profile_identifier(application_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"rti-demo-ui:{application_id}"))
-
-
-def _profile_path(application_id: str) -> Path | None:
-    if sys.platform == "linux":
-        data_root = os.environ.get("XDG_DATA_HOME")
-        root = (
-            Path(data_root).expanduser()
-            if data_root
-            else Path.home() / ".local" / "share"
-        )
-        if not root.is_absolute():
-            raise NativeWebviewError(
-                "XDG_DATA_HOME must be an absolute path for native profile storage"
-            )
-    elif sys.platform == "win32":
-        local_app_data = os.environ.get("LOCALAPPDATA")
-        if not local_app_data:
-            raise NativeWebviewError(
-                "LOCALAPPDATA is required for native profile storage on Windows"
-            )
-        root = Path(local_app_data)
-        if not root.is_absolute():
-            raise NativeWebviewError(
-                "LOCALAPPDATA must be an absolute path for native profile storage"
-            )
-    elif sys.platform == "darwin":
-        return None
-    else:
-        raise NativeWebviewError(
-            f"native webview mode is not prepared for platform '{sys.platform}'"
-        )
-    return root / "rti-demo-ui-native" / application_id
 
 
 def _require_supported_production_platform() -> None:
@@ -259,7 +131,7 @@ def _require_supported_production_platform() -> None:
 
 def _native_prerequisite_hint() -> str:
     if sys.platform == "darwin":
-        return "verify PyObjC 12.2.2 and macOS 14 WKWebView are available"
+        return "verify pywebview 6.2.1 and macOS WKWebView are available"
     if sys.platform == "win32":
         return "verify pywebview 6.2.1 and the WebView2 Runtime are installed"
     return "verify GTK 3 and WebKitGTK 4.1 are installed"
@@ -269,7 +141,9 @@ def _load_pywebview():
     try:
         return importlib.import_module("webview")
     except (ImportError, OSError) as error:
-        if sys.platform == "win32":
+        if sys.platform == "darwin":
+            requirement = "pywebview 6.2.1 with its Cocoa dependencies is required"
+        elif sys.platform == "win32":
             requirement = (
                 "pywebview 6.2.1 with pythonnet and the Evergreen WebView2 "
                 "Runtime is required"
@@ -286,7 +160,7 @@ def _load_pywebview():
 
 def _validate_options(
     app: DemoUiApp,
-    application_id: str,
+    application_id: str | None,
     async_main: AsyncMain | None,
     width: int,
     height: int,
@@ -296,12 +170,13 @@ def _validate_options(
         raise NativeWebviewError("run_native() must be called on the main thread")
     if not isinstance(app, DemoUiApp):
         raise NativeWebviewError("app must be an rti_demo_ui.DemoUiApp instance")
-    if not isinstance(application_id, str) or not _APPLICATION_ID.fullmatch(
-        application_id
+    if application_id is not None and (
+        not isinstance(application_id, str)
+        or not _APPLICATION_ID.fullmatch(application_id)
     ):
         raise NativeWebviewError(
-            "application_id must be a lowercase reverse-DNS identifier such as "
-            "'com.example.factory-dashboard'"
+            "application_id must be None or a lowercase reverse-DNS identifier "
+            "such as 'com.example.factory-dashboard'"
         )
     for name, value in (("width", width), ("height", height)):
         if (
@@ -326,16 +201,7 @@ def _validate_options(
         raise NativeWebviewError(
             "DemoUiApp has already started; create a new app for run_native()"
         )
-    profile_path = _profile_path(application_id)
-    if profile_path is not None:
-        try:
-            profile_path.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            raise NativeWebviewError(
-                f"cannot create native profile directory '{profile_path}'; "
-                "check application data directory permissions"
-            ) from error
-    return _Options(application_id, width, height, devtools, profile_path)
+    return _Options(application_id, width, height, devtools)
 
 
 def _run_with_host(
@@ -498,7 +364,7 @@ def _run_with_host(
 def _run_native(
     app: DemoUiApp,
     *,
-    application_id: str,
+    application_id: str | None,
     async_main: AsyncMain | None,
     width: int,
     height: int,
@@ -515,7 +381,7 @@ def _run_native(
 def run_native(
     app: DemoUiApp,
     *,
-    application_id: str,
+    application_id: str | None = None,
     async_main: AsyncMain | None = None,
     width: int = 1280,
     height: int = 800,
@@ -531,8 +397,9 @@ def run_native(
 
     Args:
         app: Configured, single-use application to host.
-        application_id: Lowercase reverse-DNS identifier used to select the
-            persistent browser profile.
+        application_id: Optional stable lowercase reverse-DNS identifier kept
+            for source compatibility. Native browser storage remains owned by
+            the selected platform backend.
         async_main: Optional application coroutine started on the application
             owner loop after the server becomes ready. Returning from it closes
             the window.
@@ -547,23 +414,13 @@ def run_native(
     """
 
     def create_host(options: _Options) -> _WindowHost:
-        if sys.platform == "darwin":
-            try:
-                from .cocoa import CocoaWindowHost
-            except (ImportError, OSError) as error:
-                raise NativeWebviewError(
-                    "PyObjC 12.2.2 with Cocoa and WebKit is required for "
-                    "native webview mode on macOS"
-                ) from error
-            return CocoaWindowHost(options.application_id)
-        if options.profile_path is None:
-            raise NativeWebviewError(
-                "the selected native backend requires a profile path"
-            )
         webview_module = _load_pywebview()
-        if sys.platform == "win32":
-            return _WindowsPyWebviewHost(webview_module, options.profile_path)
-        return _PyWebviewHost(webview_module, options.profile_path)
+        gui = {
+            "darwin": "cocoa",
+            "linux": "gtk",
+            "win32": "edgechromium",
+        }[sys.platform]
+        return _PyWebviewHost(webview_module, gui)
 
     _require_supported_production_platform()
     _run_native(

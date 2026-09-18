@@ -19,7 +19,6 @@
 #include <string>
 #include <thread>
 
-#include "navigation.hpp"
 #include "runner.hpp"
 
 using namespace rti::demo::ui;
@@ -253,18 +252,6 @@ void test_validation() {
     }
 }
 
-void test_navigation_origin_is_exact() {
-    const auto allowed = native_detail::origin("http://127.0.0.1:42000/");
-    CHECK(native_detail::same_origin("http://127.0.0.1:42000/dashboard",
-                                     allowed));
-    CHECK(native_detail::same_origin("http://127.0.0.1:42000/?view=main",
-                                     allowed));
-    CHECK(!native_detail::same_origin("http://127.0.0.1:42001/", allowed));
-    CHECK(!native_detail::same_origin("http://localhost:42000/", allowed));
-    CHECK(!native_detail::same_origin("https://example.invalid/", allowed));
-    CHECK(!native_detail::same_origin("about:blank", allowed));
-}
-
 void test_app_is_single_use() {
     DemoUiApp app("Single use");
     FakeWindowHost first;
@@ -287,7 +274,6 @@ int main() {
     test_server_stop_closes_window();
     test_signal_closes_window();
     test_validation();
-    test_navigation_origin_is_exact();
     test_app_is_single_use();
     return failures == 0 ? 0 : 1;
 }

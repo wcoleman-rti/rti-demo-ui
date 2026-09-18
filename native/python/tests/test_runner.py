@@ -26,12 +26,7 @@ import pytest
 from rti_demo_ui import DemoUiApp
 from rti_demo_ui_native import NativeWebviewError
 from rti_demo_ui_native import runner
-from rti_demo_ui_native.runner import (
-    _load_pywebview,
-    _origin,
-    _run_native,
-    _same_origin,
-)
+from rti_demo_ui_native.runner import _load_pywebview, _run_native
 
 
 class FakeWindowHost:
@@ -113,7 +108,6 @@ def test_import_is_lazy_for_pywebview():
         ("demo", "reverse-DNS"),
         ("Com.Example.Demo", "reverse-DNS"),
         ("com.example.-demo", "reverse-DNS"),
-        (None, "reverse-DNS"),
     ],
 )
 def test_invalid_application_id_is_actionable(application_id, message):
@@ -123,6 +117,18 @@ def test_invalid_application_id_is_actionable(application_id, message):
             FakeWindowHost(),
             application_id=application_id,
         )
+
+
+def test_application_id_is_optional():
+    _run_native(
+        DemoUiApp("optional identity"),
+        application_id=None,
+        async_main=None,
+        width=1280,
+        height=800,
+        devtools=False,
+        host_factory=lambda _options: FakeWindowHost(close_immediately=True),
+    )
 
 
 @pytest.mark.parametrize(
@@ -157,53 +163,25 @@ def test_unknown_production_platform_is_actionable(monkeypatch):
         )
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux path semantics")
-def test_linux_profile_path_is_application_scoped(monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-    assert runner._profile_path("com.example.demo") == (
-        tmp_path / "rti-demo-ui-native" / "com.example.demo"
-    )
+@pytest.mark.parametrize(
+    ("platform", "gui"),
+    [("darwin", "cocoa"), ("linux", "gtk"), ("win32", "edgechromium")],
+)
+def test_run_native_selects_platform_pywebview_backend(monkeypatch, platform, gui):
+    fake_webview = object()
+    captured = {}
 
+    def capture_run(_app, **kwargs):
+        captured["host"] = kwargs["host_factory"](None)
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux path semantics")
-def test_linux_profile_path_uses_xdg_fallback(monkeypatch, tmp_path):
-    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-    monkeypatch.setattr(runner.Path, "home", lambda: tmp_path)
-    assert runner._profile_path("com.example.demo") == (
-        tmp_path / ".local" / "share" / "rti-demo-ui-native" / "com.example.demo"
-    )
+    monkeypatch.setattr(runner.sys, "platform", platform)
+    monkeypatch.setattr(runner, "_load_pywebview", lambda: fake_webview)
+    monkeypatch.setattr(runner, "_run_native", capture_run)
 
+    runner.run_native(DemoUiApp("backend"))
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows path semantics")
-def test_windows_profile_path_is_application_scoped(monkeypatch, tmp_path):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert runner._profile_path("com.example.demo") == (
-        tmp_path / "rti-demo-ui-native" / "com.example.demo"
-    )
-
-
-def test_macos_uses_named_store_instead_of_filesystem_profile(monkeypatch):
-    monkeypatch.setattr(runner.sys, "platform", "darwin")
-    assert runner._profile_path("com.example.demo") is None
-
-
-def test_macos_profile_identifier_is_stable_and_application_scoped():
-    first = runner._cocoa_profile_identifier("com.example.first")
-    assert first == runner._cocoa_profile_identifier("com.example.first")
-    assert first != runner._cocoa_profile_identifier("com.example.second")
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows environment")
-def test_windows_profile_requires_local_app_data(monkeypatch):
-    monkeypatch.delenv("LOCALAPPDATA", raising=False)
-    with pytest.raises(NativeWebviewError, match="LOCALAPPDATA"):
-        runner._profile_path("com.example.demo")
-
-
-def test_unknown_profile_platform_is_actionable(monkeypatch):
-    monkeypatch.setattr(runner.sys, "platform", "plan9")
-    with pytest.raises(NativeWebviewError, match="not prepared"):
-        runner._profile_path("com.example.demo")
+    assert captured["host"]._webview is fake_webview
+    assert captured["host"]._gui == gui
 
 
 def test_missing_pywebview_is_actionable(monkeypatch):
@@ -232,102 +210,29 @@ def test_run_native_requires_main_thread():
     assert "main thread" in str(errors[0])
 
 
-def test_navigation_origin_is_exact():
-    origin = _origin("http://127.0.0.1:42000/")
-    assert _same_origin("http://127.0.0.1:42000/dashboard", origin)
-    assert _same_origin("http://127.0.0.1:42000/?view=main", origin)
-    assert not _same_origin("http://127.0.0.1:42001/", origin)
-    assert not _same_origin("http://localhost:42000/", origin)
-    assert not _same_origin("https://example.invalid/", origin)
-    assert not _same_origin("about:blank", origin)
-
-
-def test_pywebview_external_browser_navigation_is_disabled(tmp_path):
-    class EventHook:
-        def __iadd__(self, _callback):
-            return self
-
-    fake_window = SimpleNamespace(
-        events=SimpleNamespace(before_show=EventHook()),
-    )
-    fake_webview = SimpleNamespace(
-        settings={"OPEN_EXTERNAL_LINKS_IN_BROWSER": True},
-        create_window=lambda *args, **kwargs: fake_window,
-    )
-    host = runner._PyWebviewHost(fake_webview, tmp_path)
-    host.create(
-        title="navigation",
-        url="http://127.0.0.1:42000/",
-        width=1280,
-        height=800,
-        devtools=False,
-    )
-    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
-
-
-def test_windows_pywebview_policy_blocks_navigation_and_new_windows(tmp_path):
-    class Event:
-        def __init__(self):
-            self.handlers = []
-
-        def __iadd__(self, handler):
-            self.handlers.append(handler)
-            return self
-
-    class BeforeShow:
-        def __init__(self):
-            self.handler = None
-
-        def __iadd__(self, handler):
-            self.handler = handler
-            return self
-
-    navigation = Event()
-    new_window = Event()
-    browser = SimpleNamespace(
-        NavigationStarting=navigation,
-        NewWindowRequested=new_window,
-    )
-    before_show = BeforeShow()
-    fake_window = SimpleNamespace(
-        events=SimpleNamespace(before_load=before_show),
-        native=SimpleNamespace(
-            webview=SimpleNamespace(CoreWebView2=browser),
-        ),
-    )
+@pytest.mark.parametrize("gui", ["cocoa", "edgechromium", "gtk"])
+def test_pywebview_uses_platform_defaults(gui):
+    fake_window = SimpleNamespace()
     starts = []
     fake_webview = SimpleNamespace(
         settings={"OPEN_EXTERNAL_LINKS_IN_BROWSER": True},
         create_window=lambda *args, **kwargs: fake_window,
         start=lambda *args, **kwargs: starts.append(kwargs),
     )
-    host = runner._WindowsPyWebviewHost(fake_webview, tmp_path)
+    host = runner._PyWebviewHost(fake_webview, gui)
     host.create(
-        title="navigation",
+        title="defaults",
         url="http://127.0.0.1:42000/",
         width=1280,
         height=800,
         devtools=False,
     )
-    before_show.handler()
-
-    same_origin = SimpleNamespace(Uri="http://127.0.0.1:42000/dashboard", Cancel=False)
-    external = SimpleNamespace(Uri="https://example.invalid/", Cancel=False)
-    popup = SimpleNamespace(Handled=False)
-    navigation.handlers[0](None, same_origin)
-    navigation.handlers[0](None, external)
-    new_window.handlers[0](None, popup)
-
-    assert same_origin.Cancel is False
-    assert external.Cancel is True
-    assert popup.Handled is True
-    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is False
-
     host._close_requested.set()
     host.run()
-    assert starts[0]["gui"] == "edgechromium"
+    assert starts[0]["gui"] == gui
     assert starts[0]["private_mode"] is False
-    assert starts[0]["storage_path"] == str(tmp_path)
+    assert "storage_path" not in starts[0]
+    assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is True
 
 
 def test_window_close_joins_owner_and_releases_port():
@@ -443,24 +348,7 @@ def test_app_instance_cannot_run_twice():
         run_fake(app, FakeWindowHost(close_immediately=True))
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="Linux XDG validation")
-def test_relative_xdg_data_home_is_rejected(monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", "relative")
-    with pytest.raises(NativeWebviewError, match="absolute path"):
-        run_fake(DemoUiApp("profile"), FakeWindowHost(close_immediately=True))
-
-
-def test_profile_namespace_uses_application_id(tmp_path, monkeypatch):
-    if sys.platform == "linux":
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        root = tmp_path
-    elif sys.platform == "win32":
-        monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-        root = tmp_path
-    elif sys.platform == "darwin":
-        root = None
-    else:
-        pytest.skip("native profile storage is not prepared")
+def test_application_id_remains_part_of_validated_options():
     captured = []
     host = FakeWindowHost(close_immediately=True)
     _run_native(
@@ -472,10 +360,4 @@ def test_profile_namespace_uses_application_id(tmp_path, monkeypatch):
         devtools=False,
         host_factory=lambda options: captured.append(options) or host,
     )
-    if root is None:
-        assert captured[0].profile_path is None
-    else:
-        assert captured[0].profile_path == (
-            root / "rti-demo-ui-native" / "com.example.factory-dashboard"
-        )
-        assert captured[0].profile_path.is_dir()
+    assert captured[0].application_id == "com.example.factory-dashboard"

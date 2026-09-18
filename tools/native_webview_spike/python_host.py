@@ -23,8 +23,6 @@ EXPECTED_CHECKS = {
     "dynamic_import",
     "keyboard_focus",
     "module_worker",
-    "navigation_policy",
-    "persistent_storage",
     "resize_observation",
     "runtime3d_import",
     "snapshot",
@@ -82,7 +80,9 @@ def main() -> int:
 
     app.register_command("spike-report", {"type": "object"}, record_report)
     app.register_command(
-        "spike-origin", {"type": "object"}, lambda payload: {"origin": payload["origin"]}
+        "spike-origin",
+        {"type": "object"},
+        lambda payload: {"origin": payload["origin"]},
     )
 
     async def owner_main() -> None:

@@ -1,6 +1,3 @@
-#import <AppKit/AppKit.h>
-#import <WebKit/WebKit.h>
-
 #include <webview/webview.h>
 
 #include <atomic>
@@ -8,66 +5,8 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <utility>
 
-#include "navigation.hpp"
 #include "runner.hpp"
-
-@interface RTIDemoNavigationDelegate : NSObject <WKNavigationDelegate, WKUIDelegate> {
-    std::string _allowedOrigin;
-    id<WKUIDelegate> _forwardingUIDelegate;
-}
-- (instancetype)initWithAllowedOrigin:(std::string)allowedOrigin
-                 forwardingUIDelegate:(id<WKUIDelegate>)forwardingUIDelegate;
-@end
-
-@implementation RTIDemoNavigationDelegate
-
-- (instancetype)initWithAllowedOrigin:(std::string)allowedOrigin
-                 forwardingUIDelegate:(id<WKUIDelegate>)forwardingUIDelegate {
-    self = [super init];
-    if (self != nil) {
-        _allowedOrigin = std::move(allowedOrigin);
-        _forwardingUIDelegate = [forwardingUIDelegate retain];
-    }
-    return self;
-}
-
-- (void)dealloc {
-    [_forwardingUIDelegate release];
-    [super dealloc];
-}
-
-- (void)webView:(WKWebView*)webView
-    decidePolicyForNavigationAction:(WKNavigationAction*)navigationAction
-                    decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
-    NSString* absoluteString = navigationAction.request.URL.absoluteString;
-    const char* utf8 = absoluteString.UTF8String;
-    const bool allowed =
-        utf8 != nullptr && rti::demo::ui::native::detail::same_origin(utf8, _allowedOrigin);
-    decisionHandler(allowed ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
-}
-
-- (WKWebView*)webView:(WKWebView*)webView
-    createWebViewWithConfiguration:(WKWebViewConfiguration*)configuration
-               forNavigationAction:(WKNavigationAction*)navigationAction
-                    windowFeatures:(WKWindowFeatures*)windowFeatures {
-    return nil;
-}
-
-- (id)forwardingTargetForSelector:(SEL)selector {
-    if ([_forwardingUIDelegate respondsToSelector:selector]) {
-        return _forwardingUIDelegate;
-    }
-    return [super forwardingTargetForSelector:selector];
-}
-
-- (BOOL)respondsToSelector:(SEL)selector {
-    return
-        [super respondsToSelector:selector] || [_forwardingUIDelegate respondsToSelector:selector];
-}
-
-@end
 
 namespace rti::demo::ui::native {
 namespace detail {
@@ -82,27 +21,10 @@ namespace {
 
 class WebviewHost final : public detail::WindowHost {
    public:
-    ~WebviewHost() override {
-        if (view_ != nil) {
-            view_.navigationDelegate = nil;
-            view_.UIDelegate = forwarding_ui_delegate_;
-        }
-        [delegate_ release];
-    }
-
     void create(const std::string& title, const std::string& url,
                 const NativeWindowOptions& options) override {
         std::lock_guard<std::mutex> guard(mutex_);
         window_ = std::make_unique<webview::webview>(options.devtools, nullptr);
-        auto controller = window_->browser_controller();
-        controller.ensure_ok();
-        view_ = (WKWebView*)controller.value();
-        forwarding_ui_delegate_ = view_.UIDelegate;
-        delegate_ =
-            [[RTIDemoNavigationDelegate alloc] initWithAllowedOrigin:detail::origin(url)
-                                                forwardingUIDelegate:forwarding_ui_delegate_];
-        view_.navigationDelegate = delegate_;
-        view_.UIDelegate = delegate_;
         window_->set_title(title).ensure_ok();
         window_->set_size(options.width, options.height, WEBVIEW_HINT_NONE).ensure_ok();
         window_->navigate(url).ensure_ok();
@@ -151,9 +73,6 @@ class WebviewHost final : public detail::WindowHost {
 
     std::mutex mutex_;
     std::unique_ptr<webview::webview> window_;
-    WKWebView* view_ = nil;
-    id<WKUIDelegate> forwarding_ui_delegate_ = nil;
-    RTIDemoNavigationDelegate* delegate_ = nil;
     std::atomic<bool> close_requested_{false};
     std::exception_ptr close_error_;
 };
