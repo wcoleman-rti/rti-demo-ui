@@ -191,7 +191,31 @@ def _native_prerequisite_hint() -> str:
         return "verify pywebview 6.2.1 and macOS WKWebView are available"
     if sys.platform == "win32":
         return "verify pywebview 6.2.1 and the WebView2 Runtime are installed"
-    return "verify GTK 3 and WebKitGTK 4.1 are installed"
+    return (
+        "verify the active Python can import PyGObject (`gi`) and that GTK 3 "
+        "and WebKitGTK 4.1 are installed"
+    )
+
+
+def _require_linux_gtk_bindings() -> None:
+    try:
+        importlib.import_module("gi")
+    except (ImportError, OSError) as error:
+        if sys.version_info >= (3, 13):
+            setup = (
+                "on Ubuntu, install `python3-gi` and recreate the virtual "
+                "environment with `python3 -m venv --system-site-packages "
+                ".venv` using the matching distro Python"
+            )
+        else:
+            setup = (
+                "install PyGObject for this Python using the prerequisites "
+                "in docs/native-webview.md"
+            )
+        raise NativeWebviewError(
+            "Linux native mode requires the PyGObject `gi` module in the "
+            f"active Python environment; {setup}"
+        ) from error
 
 
 def _load_pywebview():
@@ -472,6 +496,8 @@ def run_native(
 
     def create_host(options: _Options) -> _WindowHost:
         webview_module = _load_pywebview()
+        if sys.platform == "linux":
+            _require_linux_gtk_bindings()
         gui = {
             "darwin": "cocoa",
             "linux": "gtk",

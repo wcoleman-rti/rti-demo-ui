@@ -151,7 +151,9 @@ cmake --build build-native --parallel
 ./build-native/native/examples/rti_demo_ui_native_dual_mode --native
 ```
 
-Use `--browser` instead of `--native` to run the same example in browser mode.
+Both C++ and Python dual-mode examples accept `--native` and `--browser` and
+default to browser mode. Python also accepts `--mode native` and
+`--mode browser` for compatibility.
 Native examples follow `RTI_DEMO_BUILD_EXAMPLES` by default. Set
 `RTI_DEMO_NATIVE_BUILD_EXAMPLES=OFF` to build core examples without the native
 example.
@@ -242,6 +244,10 @@ Common failures:
   Runtime and retry from an interactive desktop session.
 - **Missing pywebview 6.2.1**: install `rti-demo-ui-native` and the Python
   platform prerequisites above in the active environment.
+- **Python reports that GTK or Qt extensions are missing**: on Ubuntu with
+  Python 3.13+, install `python3-gi` and recreate the virtual environment with
+  `python3 -m venv --system-site-packages .venv` using the matching distro
+  Python. The system `gi` binding is not visible to a regular isolated venv.
 - **GTK/WebKitGTK initialization failure**: install the 4.1 development/runtime
   packages and launch from a graphical session. The native runner filters
   Snap-provided GTK/GIO paths when launched from a Snap-packaged developer

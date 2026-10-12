@@ -202,6 +202,7 @@ def test_run_native_selects_platform_pywebview_backend(monkeypatch, platform, gu
 
     monkeypatch.setattr(runner.sys, "platform", platform)
     monkeypatch.setattr(runner, "_load_pywebview", lambda: fake_webview)
+    monkeypatch.setattr(runner, "_require_linux_gtk_bindings", lambda: None)
     monkeypatch.setattr(runner, "_run_native", capture_run)
 
     runner.run_native(DemoUiApp("backend"))
@@ -217,6 +218,20 @@ def test_missing_pywebview_is_actionable(monkeypatch):
     monkeypatch.setattr(runner.importlib, "import_module", missing)
     with pytest.raises(NativeWebviewError, match="pywebview 6.2.1"):
         _load_pywebview()
+
+
+def test_missing_linux_gtk_bindings_is_actionable(monkeypatch):
+    def missing(_name):
+        raise ModuleNotFoundError("gi is absent")
+
+    app = DemoUiApp("missing GTK bindings")
+    monkeypatch.setattr(runner.sys, "platform", "linux")
+    monkeypatch.setattr(runner, "_load_pywebview", lambda: object())
+    monkeypatch.setattr(runner.importlib, "import_module", missing)
+
+    with pytest.raises(NativeWebviewError, match="PyGObject `gi` module"):
+        runner.run_native(app)
+    assert not app.run_started
 
 
 def test_run_native_requires_main_thread():

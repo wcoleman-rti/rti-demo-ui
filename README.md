@@ -41,10 +41,23 @@ cmake --build build --target rti_demo_ui_simple
 
 C++17 and a network connection for the first dependency fetch are required.
 
-To build the optional native companion and its example in the same build tree,
-enable it explicitly. Linux builds also require GTK 3 and WebKitGTK 4.1
-development packages; see the
-[native webview guide](docs/native-webview.md#top-level-cmake-build):
+## Native webview quick start
+
+Native mode is optional. The following Python setup is for Ubuntu 26.04 with
+Python 3.13+ and uses the distro's PyGObject binding. The virtual environment
+must include system site packages so Python can import `gi`:
+
+```bash
+sudo apt-get install \
+  build-essential cmake gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
+  libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config python3-gi
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install . ./native/python
+.venv/bin/python native/python/examples/dual_mode.py --native
+```
+
+Use `--browser` instead of `--native` to run either dual-mode example in a
+browser. To build and launch the C++ native example in the same build tree:
 
 ```bash
 cmake -S . -B build-native \
@@ -53,6 +66,9 @@ cmake -S . -B build-native \
 cmake --build build-native --parallel
 ./build-native/native/examples/rti_demo_ui_native_dual_mode --native
 ```
+
+For Python 3.11/3.12, other supported platforms, and detailed troubleshooting,
+see the [native webview guide](docs/native-webview.md).
 
 ## What you can build
 
