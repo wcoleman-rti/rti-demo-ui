@@ -49,8 +49,7 @@ development packages; see the
 ```bash
 cmake -S . -B build-native \
   -DRTI_DEMO_BUILD_NATIVE_WEBVIEW=ON \
-  -DRTI_DEMO_BUILD_EXAMPLES=ON \
-  -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON
+  -DRTI_DEMO_BUILD_EXAMPLES=ON
 cmake --build build-native --parallel
 ./build-native/native/examples/rti_demo_ui_native_dual_mode --native
 ```

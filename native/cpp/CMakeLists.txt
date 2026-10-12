@@ -8,8 +8,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS
        "Build real native-window smoke coverage" OFF)
-option(RTI_DEMO_NATIVE_BUILD_EXAMPLES
-       "Build native companion examples" OFF)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
@@ -46,6 +44,16 @@ if(NOT RTI_DEMO_UI_CORE_VERSION MATCHES "^0\\.4\\.")
         "rti_demo_ui_native 0.4 requires an rti_demo_ui::core 0.4.x target"
     )
 endif()
+
+if(RTI_DEMO_BUILD_EXAMPLES)
+    set(RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT ON)
+else()
+    set(RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT OFF)
+endif()
+option(RTI_DEMO_NATIVE_BUILD_EXAMPLES
+       "Build native companion examples"
+       ${RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT})
+unset(RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT)
 
 set(WEBVIEW_WEBKITGTK_API 4.1 CACHE STRING "" FORCE)
 set(WEBVIEW_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)

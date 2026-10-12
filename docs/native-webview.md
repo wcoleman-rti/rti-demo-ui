@@ -146,13 +146,15 @@ builds do not require GTK or WebKitGTK:
 ```bash
 cmake -S . -B build-native \
   -DRTI_DEMO_BUILD_NATIVE_WEBVIEW=ON \
-  -DRTI_DEMO_BUILD_EXAMPLES=ON \
-  -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON
+  -DRTI_DEMO_BUILD_EXAMPLES=ON
 cmake --build build-native --parallel
 ./build-native/native/examples/rti_demo_ui_native_dual_mode --native
 ```
 
 Use `--browser` instead of `--native` to run the same example in browser mode.
+Native examples follow `RTI_DEMO_BUILD_EXAMPLES` by default. Set
+`RTI_DEMO_NATIVE_BUILD_EXAMPLES=OFF` to build core examples without the native
+example.
 The native companion's lifecycle tests are included in the top-level CTest
 suite when native support is enabled. Real-window conformance remains opt-in
 through `RTI_DEMO_NATIVE_REAL_ENGINE_TESTS`.
