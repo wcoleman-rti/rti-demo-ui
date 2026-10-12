@@ -49,9 +49,9 @@ def main() -> None:
         report_event.set()
         return {"recorded": True}
 
-    app.register_command("spike-report", {"type": "object"}, record_report)
+    app.register_command("conformance-report", {"type": "object"}, record_report)
     app.register_command(
-        "spike-origin",
+        "conformance-origin",
         {"type": "object"},
         lambda payload: {"origin": payload["origin"]},
     )

@@ -60,17 +60,16 @@ def main():
     environment = dict(os.environ)
     run([str(cpp_conformance)], environment=environment)
 
-    if sys.platform in {"darwin", "win32"}:
-        python_conformance = Path(__file__).with_name("real_conformance.py")
-        run(
-            [
-                sys.executable,
-                str(python_conformance),
-                "--static-root",
-                str(static_root),
-            ],
-            environment=environment,
-        )
+    python_conformance = Path(__file__).with_name("real_conformance.py")
+    run(
+        [
+            sys.executable,
+            str(python_conformance),
+            "--static-root",
+            str(static_root),
+        ],
+        environment=environment,
+    )
 
 
 if __name__ == "__main__":

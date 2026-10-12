@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Protocol
 from rti_demo_ui import DemoUiApp
 
 
-class NativeSpikeError(RuntimeError):
+class NativeWebviewPrototypeError(RuntimeError):
     pass
 
 
@@ -56,7 +56,10 @@ def run_with_host(
                 startup.put(("error", error))
             else:
                 startup.put(
-                    ("error", NativeSpikeError("server stopped before readiness"))
+                    (
+                        "error",
+                        NativeWebviewPrototypeError("server stopped before readiness"),
+                    )
                 )
             return
 
@@ -105,15 +108,17 @@ def run_with_host(
             with suppress(queue.Full):
                 startup.put_nowait(("error", error))
 
-    thread = threading.Thread(target=run_owner, name="native-spike-owner")
+    thread = threading.Thread(target=run_owner, name="native-prototype-owner")
     thread.start()
     try:
         try:
             kind, payload = startup.get(timeout=timeout)
         except queue.Empty as error:
-            raise NativeSpikeError("server readiness timed out") from error
+            raise NativeWebviewPrototypeError("server readiness timed out") from error
         if kind == "error":
-            raise NativeSpikeError("server failed before readiness") from payload
+            raise NativeWebviewPrototypeError(
+                "server failed before readiness"
+            ) from payload
         host.create(f"{payload}/")
         host.run()
     finally:
@@ -121,9 +126,11 @@ def run_with_host(
         thread.join(timeout)
 
     if thread.is_alive():
-        raise NativeSpikeError("owner event loop did not join")
+        raise NativeWebviewPrototypeError("owner event loop did not join")
     if owner_error:
-        raise NativeSpikeError("server failed after readiness") from owner_error[0]
+        raise NativeWebviewPrototypeError(
+            "server failed after readiness"
+        ) from owner_error[0]
     if async_error:
         raise async_error[0]
     return {

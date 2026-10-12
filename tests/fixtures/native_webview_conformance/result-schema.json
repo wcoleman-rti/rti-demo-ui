@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Native webview spike browser result",
+  "title": "Native webview conformance browser result",
   "type": "object",
   "required": ["results"],
   "properties": {

@@ -24,7 +24,7 @@ bool wait_for_health(const rti::demo::ui::ReadyInfo& ready) {
 int main(int argc, char** argv) {
     const bool immediate_stop =
         argc == 2 && std::string_view(argv[1]) == "--immediate-stop";
-    rti::demo::ui::DemoUiApp app("C++ native lifecycle spike");
+    rti::demo::ui::DemoUiApp app("C++ native lifecycle prototype");
     std::thread server([&app]() { app.run(); });
     app.wait_until_ready();
     const auto ready = app.ready_info();

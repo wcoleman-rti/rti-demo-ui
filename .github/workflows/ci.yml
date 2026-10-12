@@ -101,13 +101,60 @@ jobs:
         run: playwright install chromium
       - run: PYTHONPATH=python pytest tests/browser -v
 
-  native-webview-spike:
+  native-python-wheel-package:
+    name: Native Python wheel package
     runs-on: ubuntu-22.04
-    env:
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
-      CCACHE_MAXSIZE: 500M
-      CCACHE_NOHASHDIR: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build Python wheels
+        run: |
+          wheel_dir="$RUNNER_TEMP/native-wheels"
+          mkdir -p "$wheel_dir"
+          python -m pip wheel --no-deps --wheel-dir "$wheel_dir" . native/python
+      - name: Smoke-test installed wheel packages
+        run: |
+          wheel_dir="$RUNNER_TEMP/native-wheels"
+          core_wheel="$(find "$wheel_dir" -maxdepth 1 -name 'rti_demo_ui-*.whl' -print -quit)"
+          native_wheel="$(find "$wheel_dir" -maxdepth 1 -name 'rti_demo_ui_native-*.whl' -print -quit)"
+          test -n "$core_wheel"
+          test -n "$native_wheel"
+          venv="$RUNNER_TEMP/native-wheel-smoke"
+          python -m venv "$venv"
+          "$venv/bin/python" -m pip install "$core_wheel"
+          "$venv/bin/python" -m pip install --no-deps "$native_wheel"
+          (
+            cd "$RUNNER_TEMP"
+            "$venv/bin/python" - <<'PY'
+          import sys
+
+          from rti_demo_ui import DemoUiApp
+          from rti_demo_ui_native import run_native
+
+          app = DemoUiApp("Native wheel package smoke")
+          assert not app.run_started
+          assert callable(run_native)
+          assert "webview" not in sys.modules
+          PY
+          )
+      - name: Upload native Python wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-python-wheels
+          path: ${{ runner.temp }}/native-wheels/*.whl
+          if-no-files-found: error
+
+  native-webview-platforms:
+    name: Native webview (${{ matrix.os }})
+    needs: native-python-wheel-package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-14]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -127,18 +174,11 @@ jobs:
               'cpp/CMakeLists.txt',
               'native/cpp/CMakeLists.txt'
             ) }}
-      - name: Cache native C++ compilation
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.os }}-native-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-native-ccache-
-      - name: Install native engine prerequisites
+      - name: Install Linux native-engine prerequisites
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ccache \
             dbus-x11 \
             gir1.2-gtk-3.0 \
             gir1.2-webkit2-4.1 \
@@ -149,169 +189,94 @@ jobs:
             libwebkit2gtk-4.1-dev \
             pkg-config \
             xvfb
-      - name: Install Python native dependencies
-        run: |
-          python -m pip install \
-            -e . \
-            -e native/python \
-            pytest==8.4.2
-      - name: Build production C++ native host and consumer
-        run: |
-          cmake -S native/cpp \
-            -B build/native-phase2 \
-            -DBUILD_TESTING=ON \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
-            -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON \
-            -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
-          cmake --build build/native-phase2 --parallel
-          cmake -S native/cpp/tests/consumer \
-            -B build/native-consumer \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR" \
-            -DRTI_DEMO_UI_SOURCE_DIR="$PWD"
-          cmake --build build/native-consumer --parallel
-      - name: Run native lifecycle tests
-        run: |
-          PYTHONPATH=python:native/python/src \
-            python -m pytest native/python/tests -q
-          ctest --test-dir build/native-phase2 \
-            --output-on-failure \
-            -LE real_engine
-      - name: Run real native engine conformance
+      - name: Install Python test and native-host dependencies
+        run: >
+          python -m pip install -e . -e native/python
+          pytest==8.4.2 pytest-asyncio==1.4.0
+      - name: Configure native companion and examples
+        run: >-
+          cmake -S native/cpp -B build/native-platform
+          -DBUILD_TESTING=ON
+          -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON
+          -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
+          "-DFETCHCONTENT_BASE_DIR=${{ env.FETCHCONTENT_BASE_DIR }}"
+      - name: Build native companion and examples
+        run: cmake --build build/native-platform --config Release --parallel
+      - name: Configure external C++ consumer
+        run: >-
+          cmake -S native/cpp/tests/consumer -B build/native-consumer
+          "-DRTI_DEMO_UI_SOURCE_DIR=${{ github.workspace }}"
+          "-DFETCHCONTENT_BASE_DIR=${{ env.FETCHCONTENT_BASE_DIR }}"
+      - name: Build external C++ consumer
+        run: cmake --build build/native-consumer --config Release --parallel
+      - name: Download native Python wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: native-python-wheels
+          path: ${{ runner.temp }}/native-wheels
+      - name: Run Python lifecycle tests
+        run: python -m pytest native/python/tests -q
+      - name: Run C++ lifecycle tests
+        run: >-
+          ctest --test-dir build/native-platform
+          -C Release
+          --output-on-failure
+          -LE real_engine
+      - name: Install built wheels for native-host tests
+        run: >-
+          python -c "import glob, os, subprocess, sys; wheels=glob.glob(os.path.join(os.environ['RUNNER_TEMP'], 'native-wheels', '*.whl')); assert len(wheels) == 2, wheels; subprocess.run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--force-reinstall', *wheels], check=True)"
+      - name: Run Linux native-host tests
+        if: runner.os == 'Linux'
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" \
             bash -euo pipefail <<'SCRIPT'
           work="$RUNNER_TEMP/native-webview"
-          production_cpp="./build/native-phase2/tests/rti_demo_ui_native_real_conformance"
-          rm -rf "$work"
           mkdir -p "$work"
 
-          XDG_DATA_HOME="$work/phase2-python-smoke" \
-            timeout 40s python - <<'PY'
-          import asyncio
-
-          from rti_demo_ui import DemoUiApp
-          from rti_demo_ui_native import run_native
-
-          async def close_after_start(_app):
-              await asyncio.sleep(0.5)
-
-          run_native(
-              DemoUiApp("Native Phase 2 Python smoke"),
-              application_id="org.rti.phase2-smoke",
-              async_main=close_after_start,
-          )
-          PY
-          XDG_DATA_HOME="$work/phase2-python-signal" \
+          XDG_DATA_HOME="$work/python-signal" \
             timeout --kill-after=5s --preserve-status --signal=INT 4s \
             python - <<'PY'
           from rti_demo_ui import DemoUiApp
           from rti_demo_ui_native import run_native
 
           run_native(
-              DemoUiApp("Native Phase 2 Python signal smoke"),
-              application_id="org.rti.phase2-signal",
+              DemoUiApp("Native Python signal smoke"),
+              application_id="org.rti.python-signal",
           )
           PY
-          XDG_DATA_HOME="$work/phase2-cpp-signal" \
-            ctest --test-dir build/native-phase2 \
-              --output-on-failure \
-              -L real_engine
-          XDG_DATA_HOME="$work/phase3-cpp-consumer" \
-            timeout 40s ./build/native-consumer/rti_demo_ui_native_consumer
 
-          mkdir -p "$work/wheels"
-          python -m pip wheel --no-deps \
-            --wheel-dir "$work/wheels" . native/python
-          python -m venv --system-site-packages "$work/release-venv"
-          "$work/release-venv/bin/pip" install --no-deps "$work"/wheels/*.whl
-          (
-            cd "$work"
-            XDG_DATA_HOME="$work/phase3-python-wheel" \
-              timeout 40s "$work/release-venv/bin/python" - <<'PY'
-          import asyncio
-
-          from rti_demo_ui import DemoUiApp
-          from rti_demo_ui_native import run_native
-
-          async def close_after_start(_app):
-              await asyncio.sleep(0.5)
-
-          run_native(
-              DemoUiApp("Installed native wheel smoke"),
-              application_id="org.rti.phase3-wheel-smoke",
-              async_main=close_after_start,
-          )
-          PY
-          )
-
-          XDG_DATA_HOME="$work/production-python" \
-            timeout 40s python native/python/tests/real_conformance.py \
-              --static-root tools/native_webview_spike/conformance \
-              | tee "$work/production-python.log"
-
-          XDG_DATA_HOME="$work/production-cpp" \
-            timeout 40s "$production_cpp" \
-              | tee "$work/production-cpp.log"
+          XDG_DATA_HOME="$work/cpp-lifecycle" \
+            ctest --test-dir build/native-platform \
+              -C Release --output-on-failure -L real_engine
+          XDG_DATA_HOME="$work/cpp-consumer" \
+            ctest --test-dir build/native-consumer \
+              -C Release --output-on-failure -L real_engine
+          XDG_DATA_HOME="$work/installed-wheel" \
+            timeout 40s python \
+              "$GITHUB_WORKSPACE/native/python/tests/real_host_smoke.py"
+          XDG_DATA_HOME="$work/conformance" \
+            timeout 90s python native/python/tests/hosted_conformance.py \
+              --build-dir build/native-platform \
+              --static-root tests/fixtures/native_webview_conformance \
+              | tee "$work/conformance.log"
           SCRIPT
-      - name: Report native C++ cache statistics
-        if: always()
-        run: ccache --show-stats
+      - name: Run macOS and Windows native-host tests
+        if: runner.os != 'Linux'
+        run: |
+          ctest --test-dir build/native-platform -C Release --output-on-failure -L real_engine
+          ctest --test-dir build/native-consumer -C Release --output-on-failure -L real_engine
+          python native/python/tests/hosted_conformance.py \
+            --build-dir build/native-platform \
+            --static-root tests/fixtures/native_webview_conformance
+      - name: Run installed-wheel native-host smoke
+        if: runner.os != 'Linux'
+        working-directory: ${{ runner.temp }}
+        run: python "$GITHUB_WORKSPACE/native/python/tests/real_host_smoke.py"
       - name: Retain native diagnostics
-        if: failure()
+        if: failure() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: native-webview-logs
           path: ${{ runner.temp }}/native-webview/*.log
-
-  native-cross-platform-preparation:
-    name: Native preparation (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022, macos-14]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install host-independent test dependencies
-        run: |
-          python -m pip install -e . pytest==8.4.2 pytest-asyncio==1.4.0
-      - name: Install native companion dependencies
-        run: python -m pip install -e native/python
-      - name: Record preparation host
-        run: python -c "import platform; print(platform.platform(), platform.machine())"
-      - name: Run fake lifecycle and profile policy tests
-        run: python -m pytest native/python/tests -q
-      - name: Configure native C++ companion
-        run: >
-          cmake -S native/cpp -B build/native-cross-platform
-          -DBUILD_TESTING=ON
-          -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
-      - name: Build native C++ companion
-        run: cmake --build build/native-cross-platform --config Release --parallel
-      - name: Run native C++ fake lifecycle tests
-        run: >
-          ctest --test-dir build/native-cross-platform
-          -C Release
-          --output-on-failure
-          -LE real_engine
-      - name: Run native C++ real-engine smoke
-        run: >
-          ctest --test-dir build/native-cross-platform
-          -C Release
-          --output-on-failure
-          -L real_engine
-      - name: Run Python real-engine smoke
-        run: python native/python/tests/real_host_smoke.py
-      - name: Run native real-engine conformance
-        run: >
-          python native/python/tests/hosted_conformance.py
-          --build-dir build/native-cross-platform
-          --static-root tools/native_webview_spike/conformance

@@ -430,10 +430,10 @@ Phase 1 verification commands:
 
 ```bash
 PYTHONPATH=python:native/python/src \
-  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   -m pytest native/python/tests -q
 
-/tmp/rti-demo-ui-native-spike-venv/bin/python -m pip wheel \
+/tmp/rti-demo-ui-native-prototype-venv/bin/python -m pip wheel \
   --no-deps --wheel-dir /tmp/rti-native-phase1-wheel native/python
 
 cmake -S native/cpp -B build/native-phase1 \
@@ -505,7 +505,7 @@ Phase 2 verification commands:
 
 ```bash
 PYTHONPATH=python:native/python/src \
-  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   -m pytest tests/py native/python/tests -q
 
 cmake -S native/cpp -B build/native-phase2 \
@@ -526,21 +526,21 @@ rm -rf /tmp/rti-demo-ui-phase2-production
 mkdir -p /tmp/rti-demo-ui-phase2-production
 export XDG_DATA_HOME=/tmp/rti-demo-ui-phase2-production/python-data
 PYTHONPATH=python:native/python/src \
-  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   native/python/tests/real_conformance.py \
   --application-id org.rti.phase2.same --expected __absent__ --write first \
-  --static-root tools/native_webview_spike/conformance
+  --static-root tests/fixtures/native_webview_conformance
 PYTHONPATH=python:native/python/src \
-  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   native/python/tests/real_conformance.py \
   --application-id org.rti.phase2.same --expected first --write second \
-  --static-root tools/native_webview_spike/conformance
+  --static-root tests/fixtures/native_webview_conformance
 PYTHONPATH=python:native/python/src \
-  /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   native/python/tests/real_conformance.py \
   --application-id org.rti.phase2.isolated \
   --expected __absent__ --write isolated \
-  --static-root tools/native_webview_spike/conformance
+  --static-root tests/fixtures/native_webview_conformance
 
 export XDG_DATA_HOME=/tmp/rti-demo-ui-phase2-production/cpp-data
 production_cpp=./build/native-phase2/tests/rti_demo_ui_native_real_conformance
@@ -553,16 +553,16 @@ cp "$production_cpp" \
 SCRIPT
 
 RTI_DEMO_CPP_ARM3D="$PWD/build/phase2-full/cpp/examples/rti_demo_ui_arm3d" \
-  PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  PYTHONPATH=python /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   -m pytest tests/browser -q
 
-/tmp/rti-demo-ui-native-spike-venv/bin/python -m pip wheel \
+/tmp/rti-demo-ui-native-prototype-venv/bin/python -m pip wheel \
   --no-deps --wheel-dir /tmp/rti-demo-ui-phase2-wheel native/python
 
 cmake -S cpp -B build/phase2-core-isolation -DBUILD_TESTING=OFF
 cmake --build build/phase2-core-isolation --parallel
 sha256sum --check assets/runtime3d.sha256
-/tmp/rti-demo-ui-native-spike-venv/bin/pre-commit run --all-files
+/tmp/rti-demo-ui-native-prototype-venv/bin/pre-commit run --all-files
 ```
 
 ### Phase 3: Documentation and Release
@@ -761,7 +761,7 @@ platform floor was selected. The Linux C++ prototype uses webview's public
 native browser handle to configure WebKitGTK's supported persistent cookie
 store and navigation-policy signal before navigation; no private API or fork is
 required. The prototype dependencies remain isolated in
-`tools/native_webview_spike/`; core dependency manifests are unchanged.
+`tools/native_webview_prototype/`; core dependency manifests are unchanged.
 
 ### Six-Combination Support Matrix
 
@@ -782,9 +782,10 @@ Linux combinations satisfy that rule.
 
 ### Prototype and Lifecycle Evidence
 
-The experimental prototype contains:
+The experimental prototype tools contain:
 
-- one same-origin conformance page and JSON result schema shared by both hosts;
+- Python and C++ hosts that share the conformance page and JSON result schema
+  at `tests/fixtures/native_webview_conformance/`;
 - a Python host that runs the app owner asyncio loop on a background thread and
   pywebview's GTK loop on the main thread;
 - a C++ webview host source pinned to webview 0.12.0 and a GUI-independent C++
@@ -837,7 +838,7 @@ remains application-owned.
 | Main-thread and owner-loop rules documented and represented | Pass for prototype shape: both hosts put the GUI loop on the main thread and server ownership on a managed, joined background context. |
 | Origin, SSE, adapter loading, navigation policy, and WebGL verified | **Partial:** all pass in both Linux real engines; macOS and Windows did not run. |
 | Same-application persistence and distinct-profile isolation verified | **Partial:** both pass across dynamic ports for Linux Python and C++; macOS, Windows, simultaneous-instance, and relocation behavior remain unverified. |
-| Optional packaging leaves core unaffected | Pass for spike scope: core manifests have no native dependency/probe, core CMake tests and Python tests pass, and the native dependency exists only in the spike directory. |
+| Optional packaging leaves core unaffected | Pass for prototype scope: core manifests have no native dependency/probe, core CMake tests and Python tests pass, and the native dependency exists only in the prototype directory. |
 | Every supported combination has repeatable prerequisites, CI smoke, and manual checklist | Pass for the two supported Linux combinations: prerequisites and manual checks pass, and the checked-in Ubuntu 22.04 job passed in GitHub Actions. |
 
 The user manually accepted native chrome, responsive resizing, readable visual
@@ -873,34 +874,34 @@ git merge --no-edit origin/develop
 # merged develop commit 5647f40 as merge commit 2339ec2
 
 python3 -m venv --system-site-packages \
-  /tmp/rti-demo-ui-native-spike-venv
-/tmp/rti-demo-ui-native-spike-venv/bin/pip install \
-  -e . -r tools/native_webview_spike/requirements.txt
-/tmp/rti-demo-ui-native-spike-venv/bin/pip install -e '.[dev]'
+  /tmp/rti-demo-ui-native-prototype-venv
+/tmp/rti-demo-ui-native-prototype-venv/bin/pip install \
+  -e . -r tools/native_webview_prototype/requirements.txt
+/tmp/rti-demo-ui-native-prototype-venv/bin/pip install -e '.[dev]'
 
-PYTHONPATH=tools/native_webview_spike \
-  /tmp/rti-demo-ui-native-spike-venv/bin/python -m unittest -v \
-  tools/native_webview_spike/test_python_lifecycle.py \
-  tools/native_webview_spike/test_python_runner_prototype.py
+PYTHONPATH=tools/native_webview_prototype \
+  /tmp/rti-demo-ui-native-prototype-venv/bin/python -m unittest -v \
+  tools/native_webview_prototype/test_python_lifecycle.py \
+  tools/native_webview_prototype/test_python_runner_prototype.py
 # 10 passed
 
 set -o pipefail
 rm -rf /tmp/rti-demo-ui-native-dynamic-app-a \
   /tmp/rti-demo-ui-native-dynamic-app-b
-timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
-  tools/native_webview_spike/python_host.py --timeout 20 \
+timeout 40s /tmp/rti-demo-ui-native-prototype-venv/bin/python \
+  tools/native_webview_prototype/python_host.py --timeout 20 \
   --storage-path /tmp/rti-demo-ui-native-dynamic-app-a \
   --storage-key rti-demo-ui-dynamic-python \
   --storage-expected __absent__ --storage-write app-a-first \
   | tee /tmp/native-python-dynamic-a1.log
-timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
-  tools/native_webview_spike/python_host.py --timeout 20 \
+timeout 40s /tmp/rti-demo-ui-native-prototype-venv/bin/python \
+  tools/native_webview_prototype/python_host.py --timeout 20 \
   --storage-path /tmp/rti-demo-ui-native-dynamic-app-a \
   --storage-key rti-demo-ui-dynamic-python \
   --storage-expected app-a-first --storage-write app-a-second \
   | tee /tmp/native-python-dynamic-a2.log
-timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
-  tools/native_webview_spike/python_host.py --timeout 20 \
+timeout 40s /tmp/rti-demo-ui-native-prototype-venv/bin/python \
+  tools/native_webview_prototype/python_host.py --timeout 20 \
   --storage-path /tmp/rti-demo-ui-native-dynamic-app-b \
   --storage-key rti-demo-ui-dynamic-python \
   --storage-expected __absent__ --storage-write app-b-first \
@@ -908,27 +909,27 @@ timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
 # all exit 0 on different ports; persistence, isolation, and navigation pass
 
 rm -rf /tmp/rti-demo-ui-native-python-signal
-timeout 40s /tmp/rti-demo-ui-native-spike-venv/bin/python \
-  tools/native_webview_spike/python_host.py --timeout 20 --signal-after 4 \
+timeout 40s /tmp/rti-demo-ui-native-prototype-venv/bin/python \
+  tools/native_webview_prototype/python_host.py --timeout 20 --signal-after 4 \
   --storage-path /tmp/rti-demo-ui-native-python-signal \
   --storage-key rti-demo-ui-python-signal \
   --storage-expected __absent__ --storage-write signal-run \
   | tee /tmp/native-python-signal.log
 # exit 0; signal_observed=true and teardown checks pass
 
-cmake -S tools/native_webview_spike \
-  -B build/native-webview-spike-fake \
-  -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=OFF
-cmake --build build/native-webview-spike-fake \
+cmake -S tools/native_webview_prototype \
+  -B build/native-webview-prototype-fake \
+  -DNATIVE_WEBVIEW_PROTOTYPE_BUILD_REAL_HOST=OFF
+cmake --build build/native-webview-prototype-fake \
   --target native_webview_cpp_lifecycle --parallel
 timeout 10s \
-  ./build/native-webview-spike-fake/native_webview_cpp_lifecycle
+  ./build/native-webview-prototype-fake/native_webview_cpp_lifecycle
 # exit 0
 
 passes=0; timeouts=0; failures=0
 for i in $(seq 1 100); do
   timeout 2s \
-    ./build/native-webview-spike-fake/native_webview_cpp_lifecycle \
+    ./build/native-webview-prototype-fake/native_webview_cpp_lifecycle \
     --immediate-stop >"/tmp/native-cpp-race-$i.log" 2>&1
   rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -950,7 +951,7 @@ from pathlib import Path
 import jsonschema
 
 schema = json.loads(
-    Path("tools/native_webview_spike/conformance/result-schema.json").read_text()
+    Path("tests/fixtures/native_webview_conformance/result-schema.json").read_text()
 )
 trace = json.loads(
     Path("/tmp/native-python-dynamic-a2.log").read_text().splitlines()[-1]
@@ -969,17 +970,17 @@ rm -rf /tmp/rti-demo-ui-native-dynamic-app-a \
   /tmp/rti-demo-ui-native-dynamic-app-b \
   /tmp/rti-demo-ui-native-python-signal
 
-cmake -S tools/native_webview_spike \
-  -B build/native-webview-spike-real \
-  -DNATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST=ON \
+cmake -S tools/native_webview_prototype \
+  -B build/native-webview-prototype-real \
+  -DNATIVE_WEBVIEW_PROTOTYPE_BUILD_REAL_HOST=ON \
   -DWEBVIEW_WEBKITGTK_API=4.1
-cmake --build build/native-webview-spike-real \
+cmake --build build/native-webview-prototype-real \
   --target native_webview_cpp_host --parallel
 # succeeds with WebKitGTK 4.1 version 2.52.6 and GTK 3.24.52
 
 rm -rf /tmp/rti-demo-ui-native-cpp-app-a \
   /tmp/rti-demo-ui-native-cpp-app-b
-cpp_host=./build/native-webview-spike-real/native_webview_cpp_host
+cpp_host=./build/native-webview-prototype-real/native_webview_cpp_host
 timeout 40s "$cpp_host" \
   --storage-path /tmp/rti-demo-ui-native-cpp-app-a \
   --storage-key rti-demo-ui-dynamic-cpp \
@@ -1007,7 +1008,7 @@ timeout --kill-after=5s --preserve-status --signal=INT 4s "$cpp_host" \
 # exit 0; signal_observed=true and teardown checks pass
 
 # The exact Xvfb/D-Bus/Mesa sequence is the
-# native-webview-spike job's "Run real native engine conformance" block.
+# native-webview-platforms job's "Run Linux native-host tests" step.
 # The complete block exited 0 locally and in GitHub Actions run 33436766073.
 
 cmake -S . -B build -DBUILD_TESTING=ON
@@ -1015,13 +1016,13 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 # 6/6 passed
 
-PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
+PYTHONPATH=python /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   -m pytest tests/py -q
 # 72 passed
 
-/tmp/rti-demo-ui-native-spike-venv/bin/playwright install chromium
+/tmp/rti-demo-ui-native-prototype-venv/bin/playwright install chromium
 RTI_DEMO_CPP_ARM3D="$PWD/build/cpp/examples/rti_demo_ui_arm3d" \
-  PYTHONPATH=python /tmp/rti-demo-ui-native-spike-venv/bin/python \
+  PYTHONPATH=python /tmp/rti-demo-ui-native-prototype-venv/bin/python \
   -m pytest tests/browser -q
 # 33 passed
 
@@ -1032,6 +1033,6 @@ git diff --exit-code -- assets/runtime3d.js assets/runtime3d.sha256
 node --version
 # exit 127: node not found; runtime rebuild unavailable
 
-/tmp/rti-demo-ui-native-spike-venv/bin/pre-commit run --all-files
+/tmp/rti-demo-ui-native-prototype-venv/bin/pre-commit run --all-files
 # all configured hooks passed
 ```

@@ -24,7 +24,7 @@ void on_signal(int) { signal_requested = 1; }
 struct Options {
     int port = 0;
     std::string storage_expected = "__absent__";
-    std::string storage_key = "rti-demo-ui-native-spike";
+    std::string storage_key = "rti-demo-ui-native-prototype";
     std::filesystem::path storage_path;
     std::string storage_write = "phase-zero";
     bool wait_for_signal = false;
@@ -213,15 +213,15 @@ int main(int argc, char** argv) {
         std::cerr << error.what() << '\n';
         return 1;
     }
-    DemoUiApp app("Native webview spike", options.port, "127.0.0.1",
-                  SPIKE_STATIC_ROOT);
+    DemoUiApp app("Native webview prototype", options.port, "127.0.0.1",
+                  NATIVE_CONFORMANCE_STATIC_ROOT);
     std::mutex report_mutex;
     std::condition_variable report_cv;
     Json report;
     bool report_received = false;
     bool server_failed = false;
     bool window_closed = false;
-    app.register_command("spike-report",
+    app.register_command("conformance-report",
                          CommandSchema(Json{{"type", "object"}}),
                          [&](const Json& payload) {
                              validate_report(payload);
@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
                              return Json{{"recorded", true}};
                          });
     app.register_command(
-        "spike-origin", CommandSchema(Json{{"type", "object"}}),
+        "conformance-origin", CommandSchema(Json{{"type", "object"}}),
         [](const Json& payload) { return Json{{"origin", payload["origin"]}}; });
 
     std::exception_ptr server_error;
@@ -260,7 +260,7 @@ int main(int argc, char** argv) {
         configure_persistent_cookies(window, options.storage_path);
         NavigationPolicy navigation_policy{ready.url};
         configure_navigation_policy(window, navigation_policy);
-        window.set_title("Native webview spike");
+        window.set_title("Native webview prototype");
         window.set_size(1280, 800, WEBVIEW_HINT_NONE);
         window.navigate(ready.url + "/?storage_key=" + options.storage_key +
                         "&storage_expected=" + options.storage_expected +
