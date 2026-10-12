@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import posixpath
 import queue
 import re
 import signal
@@ -136,7 +137,7 @@ class _PyWebviewHost:
 
 
 def _is_snap_path(path: str, roots: tuple[str, ...]) -> bool:
-    normalized = os.path.normpath(path)
+    normalized = posixpath.normpath(path)
     return any(
         normalized == root or normalized.startswith(f"{root}{os.sep}") for root in roots
     )
@@ -150,7 +151,7 @@ def _host_gtk_environment() -> Iterator[None]:
 
     roots = ["/snap"]
     if home := os.environ.get("HOME"):
-        roots.append(os.path.join(home, "snap"))
+        roots.append(posixpath.join(home, "snap"))
 
     changed: dict[str, tuple[str, str]] = {}
     try:
@@ -158,9 +159,9 @@ def _host_gtk_environment() -> Iterator[None]:
             original = os.environ.get(name)
             if original is None:
                 continue
-            filtered = os.pathsep.join(
+            filtered = ":".join(
                 path
-                for path in original.split(os.pathsep)
+                for path in original.split(":")
                 if path and not _is_snap_path(path, tuple(roots))
             )
             if filtered == original:
