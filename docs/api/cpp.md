@@ -60,6 +60,18 @@ rti::demo::ui::DemoUiApp app(
     "Monitor", 0, "127.0.0.1", std::filesystem::path("web"));
 ```
 
+The ready message defaults to `RTI Demo UI listening on <url>`. Pass a
+`listening_message_prefix` as the final constructor argument to customize the
+text before the URL, or pass `std::nullopt` to suppress the announcement. An
+empty prefix prints only the URL:
+
+```cpp
+rti::demo::ui::DemoUiApp app(
+    "Arm Controller", 0, "127.0.0.1", {}, rti::demo::ui::Theme::dark,
+    rti::demo::ui::Layout::automatic,
+    std::string("ArmController listening on"));
+```
+
 The SDK embeds its own assets. The consuming project deploys `web/` and passes
 that directory as `static_root`; it is never copied into the SDK library.
 `stop()` is idempotent and is the programmatic shutdown API. `Card` also owns

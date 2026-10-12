@@ -69,6 +69,9 @@ cmake --build build-native --parallel
 
 For Python 3.11/3.12, other supported platforms, and detailed troubleshooting,
 see the [native webview guide](docs/native-webview.md).
+Set `listening_message_prefix` on `DemoUiApp` to customize the startup URL
+announcement, or to `None` in Python / `std::nullopt` in C++ to suppress it;
+see the [Python](docs/api/python.md) and [C++](docs/api/cpp.md) guides.
 
 ## What you can build
 

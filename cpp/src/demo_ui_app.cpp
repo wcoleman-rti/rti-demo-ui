@@ -806,9 +806,11 @@ std::vector<Json> CommandSchema::validate(const Json& value) const {
 
 DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
                      std::filesystem::path static_root, Theme theme,
-                     Layout layout)
+                     Layout layout,
+                     std::optional<std::string> listening_message_prefix)
     : host_(std::move(host)),
       port_(port),
+      listening_message_prefix_(std::move(listening_message_prefix)),
       model_(std::move(title), static_root, theme, layout),
       sse_manager_(std::make_unique<detail::SseManager>(model_)) {
     to_string(theme);
@@ -1358,7 +1360,12 @@ void DemoUiApp::run() {
         return;
     }
     readiness_cv_.notify_all();
-    std::cout << "RTI Demo UI listening on " << info.url << "/" << std::endl;
+    if (listening_message_prefix_) {
+        if (!listening_message_prefix_->empty()) {
+            std::cout << *listening_message_prefix_ << " ";
+        }
+        std::cout << info.url << "/" << std::endl;
+    }
     if (!listener.get() && !stopped_) {
         throw std::runtime_error("DemoUiApp: failed to listen on " + host_ +
                                  ":" + std::to_string(bound_port));

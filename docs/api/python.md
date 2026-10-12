@@ -58,6 +58,18 @@ Component factory and mutation methods remain synchronous, but after
 startup they must run on the app's owner event loop and thread. A foreign
 thread must schedule its work with `loop.call_soon_threadsafe`.
 
+By default, startup prints `RTI Demo UI listening on <url>`. Set
+`listening_message_prefix` to change the text before the URL or to `None` to
+suppress the announcement. The prefix is followed by a space and the URL;
+an empty prefix prints only the URL:
+
+```python
+app = DemoUiApp(
+    "Fleet demo",
+    listening_message_prefix="ArmController listening on",
+)
+```
+
 ## Structured Async Applications
 
 Application coroutines own periodic work and DDS integration through a

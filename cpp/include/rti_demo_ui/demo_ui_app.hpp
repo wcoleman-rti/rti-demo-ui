@@ -306,13 +306,17 @@ class DemoUiApp {
      * regular `index.html`; an empty path selects the built-in frontend.
      * @param theme Initial built-in theme.
      * @param layout Initial card layout.
+     * @param listening_message_prefix Text printed before the bound URL when
+     * the server is ready; `std::nullopt` suppresses the announcement.
      * @throws std::invalid_argument if any argument is invalid.
      */
     explicit DemoUiApp(std::string title, int port = 0,
                        std::string host = "127.0.0.1",
                        std::filesystem::path static_root = {},
                        Theme theme = Theme::dark,
-                       Layout layout = Layout::automatic);
+                       Layout layout = Layout::automatic,
+                       std::optional<std::string> listening_message_prefix =
+                           std::string("RTI Demo UI listening on"));
     ~DemoUiApp();
 
     DemoUiApp(const DemoUiApp&) = delete;
@@ -441,6 +445,7 @@ class DemoUiApp {
     std::string host_;
     int port_;
     std::filesystem::path static_root_;
+    std::optional<std::string> listening_message_prefix_;
     detail::Model model_;
     std::unique_ptr<detail::SseManager> sse_manager_;
     std::unique_ptr<httplib::Server> server_;
