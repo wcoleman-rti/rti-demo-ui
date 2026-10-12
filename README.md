@@ -25,7 +25,9 @@ frontend process at runtime.
 ## Start with Python
 
 ```bash
-python -m pip install -e .
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 python examples/py/simple.py
 ```
 
@@ -34,37 +36,45 @@ Open the URL printed by the example. Python 3.11 or newer is required.
 ## Start with C++
 
 ```bash
-cmake -S . -B build
-cmake --build build --target rti_demo_ui_simple
+cmake -B build
+cmake --build build
 ./build/cpp/examples/rti_demo_ui_simple
 ```
 
 C++17 and a network connection for the first dependency fetch are required.
 
-## Native webview quick start
+## Start with Python native webview
 
-Native mode is optional. The following Python setup is for Ubuntu 26.04 with
-Python 3.13+ and uses the distro's PyGObject binding. The virtual environment
-must include system site packages so Python can import `gi`:
+Native mode is optional. These Python commands target Ubuntu 26.04 with Python
+3.13+, using the distro's PyGObject binding. The virtual environment includes
+system packages so it can import `gi`:
 
 ```bash
-sudo apt-get install \
-  build-essential cmake gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
-  libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config python3-gi
-python3 -m venv --system-site-packages .venv
-.venv/bin/pip install . ./native/python
-.venv/bin/python native/python/examples/dual_mode.py --native
+sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+python -m venv --system-site-packages .venv
+source .venv/bin/activate
+pip install -e . -e native/python
+python native/python/examples/dual_mode.py --native
 ```
 
 Use `--browser` instead of `--native` to run either dual-mode example in a
-browser. To build and launch the C++ native example in the same build tree:
+browser.
+
+## Start with C++ native webview
+
+The C++ native companion builds against the host's GTK and WebKitGTK
+development libraries:
 
 ```bash
-cmake -S . -B build-native \
+sudo apt install \
+  build-essential cmake pkg-config \
+  gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
+  libgtk-3-dev libwebkit2gtk-4.1-dev
+cmake -B build \
   -DRTI_DEMO_BUILD_NATIVE_WEBVIEW=ON \
   -DRTI_DEMO_BUILD_EXAMPLES=ON
-cmake --build build-native --parallel
-./build-native/native/examples/rti_demo_ui_native_dual_mode --native
+cmake --build build --parallel
+./build/native/examples/rti_demo_ui_native_dual_mode --native
 ```
 
 For Python 3.11/3.12, other supported platforms, and detailed troubleshooting,
@@ -72,6 +82,13 @@ see the [native webview guide](docs/native-webview.md).
 Set `listening_message_prefix` on `DemoUiApp` to customize the startup URL
 announcement, or to `None` in Python / `std::nullopt` in C++ to suppress it;
 see the [Python](docs/api/python.md) and [C++](docs/api/cpp.md) guides.
+
+Install both local projects from this checkout with
+`pip install -e . -e native/python`. Python package extras declare dependencies;
+they do not include a sibling local project in the distribution. The companion
+also depends on the core package, so making the core package depend back on it
+would create a dependency cycle. Keeping the companion separate lets
+browser-only users avoid native dependencies.
 
 ## What you can build
 
