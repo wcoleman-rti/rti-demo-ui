@@ -139,7 +139,9 @@ class _PyWebviewHost:
 def _is_snap_path(path: str, roots: tuple[str, ...]) -> bool:
     normalized = posixpath.normpath(path)
     return any(
-        normalized == root or normalized.startswith(f"{root}{os.sep}") for root in roots
+        normalized == root
+        or normalized.startswith(f"{root}{posixpath.sep}")
+        for root in roots
     )
 
 
