@@ -11,14 +11,21 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <csignal>
 #include <cstdio>
 #include <mutex>
+#include <optional>
 #include <rti_demo_ui_native/native_webview.hpp>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
+#ifdef __linux__
+#include "gtk_environment.hpp"
+#endif
 #include "runner.hpp"
 
 using namespace rti::demo::ui;
@@ -264,6 +271,64 @@ void test_app_is_single_use() {
                       "already started"));
 }
 
+#ifdef __linux__
+void test_snap_gtk_environment_is_restored() {
+    const char* names[] = {
+        "GSETTINGS_SCHEMA_DIR",
+        "GTK_PATH",
+        "GIO_MODULE_DIR",
+        "XDG_DATA_DIRS",
+    };
+    std::vector<std::pair<std::string, std::optional<std::string>>> original;
+    for (const auto* name : names) {
+        const auto* value = std::getenv(name);
+        original.emplace_back(name, value ? std::optional<std::string>(value)
+                                          : std::nullopt);
+    }
+
+    const auto* home = std::getenv("HOME");
+    const std::string snap_home =
+        std::string(home ? home : "/tmp") + "/snap/editor";
+    setenv("GSETTINGS_SCHEMA_DIR",
+           (snap_home + "/1/schemas").c_str(), 1);
+    setenv("GTK_PATH", "/snap/editor/1/gtk:/usr/lib/gtk-3.0", 1);
+    setenv("GIO_MODULE_DIR", (snap_home + "/common/gio").c_str(), 1);
+    setenv("XDG_DATA_DIRS",
+           (snap_home + "/1/share:/snap/editor/1/usr/share:/usr/share").c_str(),
+           1);
+    {
+        native_detail::ScopedGtkEnvironment environment;
+        CHECK(std::getenv("GSETTINGS_SCHEMA_DIR") == nullptr);
+        const auto* gtk_path = std::getenv("GTK_PATH");
+        CHECK(gtk_path && std::string(gtk_path) == "/usr/lib/gtk-3.0");
+        CHECK(std::getenv("GIO_MODULE_DIR") == nullptr);
+        const auto* data_dirs = std::getenv("XDG_DATA_DIRS");
+        CHECK(data_dirs && std::string(data_dirs) == "/usr/share");
+    }
+
+    const auto* schema_dir = std::getenv("GSETTINGS_SCHEMA_DIR");
+    CHECK(schema_dir && std::string(schema_dir) == snap_home + "/1/schemas");
+    const auto* gtk_path = std::getenv("GTK_PATH");
+    CHECK(gtk_path &&
+          std::string(gtk_path) == "/snap/editor/1/gtk:/usr/lib/gtk-3.0");
+    const auto* gio_module_dir = std::getenv("GIO_MODULE_DIR");
+    CHECK(gio_module_dir &&
+          std::string(gio_module_dir) == snap_home + "/common/gio");
+    const auto* data_dirs = std::getenv("XDG_DATA_DIRS");
+    CHECK(data_dirs && std::string(data_dirs) ==
+                           snap_home +
+                               "/1/share:/snap/editor/1/usr/share:/usr/share");
+
+    for (const auto& variable : original) {
+        if (variable.second) {
+            setenv(variable.first.c_str(), variable.second->c_str(), 1);
+        } else {
+            unsetenv(variable.first.c_str());
+        }
+    }
+}
+#endif
+
 }  // namespace
 
 int main() {
@@ -275,5 +340,8 @@ int main() {
     test_signal_closes_window();
     test_validation();
     test_app_is_single_use();
+#ifdef __linux__
+    test_snap_gtk_environment_is_restored();
+#endif
     return failures == 0 ? 0 : 1;
 }

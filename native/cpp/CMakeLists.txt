@@ -81,7 +81,9 @@ add_library(
     rti_demo_ui_native::native_webview ALIAS rti_demo_ui_native_webview
 )
 
-if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(BUILD_TESTING AND
+   (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR
+    RTI_DEMO_TOP_LEVEL_BUILD))
     add_subdirectory(tests)
 endif()
 if(RTI_DEMO_NATIVE_BUILD_EXAMPLES)

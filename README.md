@@ -41,6 +41,20 @@ cmake --build build --target rti_demo_ui_simple
 
 C++17 and a network connection for the first dependency fetch are required.
 
+To build the optional native companion and its example in the same build tree,
+enable it explicitly. Linux builds also require GTK 3 and WebKitGTK 4.1
+development packages; see the
+[native webview guide](docs/native-webview.md#top-level-cmake-build):
+
+```bash
+cmake -S . -B build-native \
+  -DRTI_DEMO_BUILD_NATIVE_WEBVIEW=ON \
+  -DRTI_DEMO_BUILD_EXAMPLES=ON \
+  -DRTI_DEMO_NATIVE_BUILD_EXAMPLES=ON
+cmake --build build-native --parallel
+./build-native/native/examples/rti_demo_ui_native_dual_mode --native
+```
+
 ## What you can build
 
 - Dashboards using tables, metrics, text, badges, logs, and governed layouts.

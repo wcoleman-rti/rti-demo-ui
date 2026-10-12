@@ -102,6 +102,32 @@ def test_import_is_lazy_for_pywebview():
     assert result.returncode == 0
 
 
+def test_snap_gtk_paths_are_filtered_and_restored(monkeypatch):
+    home = "/home/native-test"
+    monkeypatch.setattr(runner.sys, "platform", "linux")
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("GSETTINGS_SCHEMA_DIR", f"{home}/snap/code/1/schemas")
+    monkeypatch.setenv("GTK_PATH", "/snap/code/1/gtk:/usr/lib/gtk-3.0")
+    monkeypatch.setenv("GIO_MODULE_DIR", f"{home}/snap/code/common/gio")
+    monkeypatch.setenv(
+        "XDG_DATA_DIRS",
+        f"{home}/snap/code/1/share:/snap/code/1/usr/share:/usr/share",
+    )
+
+    with runner._host_gtk_environment():
+        assert "GSETTINGS_SCHEMA_DIR" not in os.environ
+        assert os.environ["GTK_PATH"] == "/usr/lib/gtk-3.0"
+        assert "GIO_MODULE_DIR" not in os.environ
+        assert os.environ["XDG_DATA_DIRS"] == "/usr/share"
+
+    assert os.environ["GSETTINGS_SCHEMA_DIR"] == f"{home}/snap/code/1/schemas"
+    assert os.environ["GTK_PATH"] == "/snap/code/1/gtk:/usr/lib/gtk-3.0"
+    assert os.environ["GIO_MODULE_DIR"] == f"{home}/snap/code/common/gio"
+    assert os.environ["XDG_DATA_DIRS"] == (
+        f"{home}/snap/code/1/share:/snap/code/1/usr/share:/usr/share"
+    )
+
+
 @pytest.mark.parametrize(
     ("application_id", "message"),
     [

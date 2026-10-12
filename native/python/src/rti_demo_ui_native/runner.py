@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import queue
 import re
 import signal
 import sys
 import threading
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Iterator, Protocol
 
 from rti_demo_ui import DemoUiApp
 
@@ -32,6 +33,19 @@ _APPLICATION_ID = re.compile(
 )
 _MAX_WINDOW_DIMENSION = 16384
 _STARTUP_TIMEOUT_SECONDS = 10.0
+_GTK_PATH_ENVIRONMENT = (
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GDK_PIXBUF_MODULEDIR",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GTK_IM_MODULE_FILE",
+    "GIO_MODULE_DIR",
+    "GIO_EXTRA_MODULES",
+    "GI_TYPELIB_PATH",
+    "XDG_DATA_DIRS",
+)
 
 
 class NativeWebviewError(RuntimeError):
@@ -119,6 +133,49 @@ class _PyWebviewHost:
         )
         if self._close_error:
             raise self._close_error[0]
+
+
+def _is_snap_path(path: str, roots: tuple[str, ...]) -> bool:
+    normalized = os.path.normpath(path)
+    return any(
+        normalized == root or normalized.startswith(f"{root}{os.sep}") for root in roots
+    )
+
+
+@contextmanager
+def _host_gtk_environment() -> Iterator[None]:
+    if sys.platform != "linux":
+        yield
+        return
+
+    roots = ["/snap"]
+    if home := os.environ.get("HOME"):
+        roots.append(os.path.join(home, "snap"))
+
+    changed: dict[str, tuple[str, str]] = {}
+    try:
+        for name in _GTK_PATH_ENVIRONMENT:
+            original = os.environ.get(name)
+            if original is None:
+                continue
+            filtered = os.pathsep.join(
+                path
+                for path in original.split(os.pathsep)
+                if path and not _is_snap_path(path, tuple(roots))
+            )
+            if filtered == original:
+                continue
+            changed[name] = (original, filtered)
+            if filtered:
+                os.environ[name] = filtered
+            else:
+                os.environ.pop(name, None)
+        yield
+    finally:
+        for name, (original, filtered) in changed.items():
+            if os.environ.get(name) != (filtered or None):
+                continue
+            os.environ[name] = original
 
 
 def _require_supported_production_platform() -> None:
@@ -423,12 +480,13 @@ def run_native(
         return _PyWebviewHost(webview_module, gui)
 
     _require_supported_production_platform()
-    _run_native(
-        app,
-        application_id=application_id,
-        async_main=async_main,
-        width=width,
-        height=height,
-        devtools=devtools,
-        host_factory=create_host,
-    )
+    with _host_gtk_environment():
+        _run_native(
+            app,
+            application_id=application_id,
+            async_main=async_main,
+            width=width,
+            height=height,
+            devtools=devtools,
+            host_factory=create_host,
+        )

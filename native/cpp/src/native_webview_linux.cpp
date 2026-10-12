@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 
+#include "gtk_environment.hpp"
 #include "runner.hpp"
 
 namespace rti::demo::ui::native {
@@ -83,6 +84,7 @@ class WebviewHost final : public detail::WindowHost {
 }  // namespace
 
 void run(DemoUiApp& app, NativeWindowOptions options) {
+    detail::ScopedGtkEnvironment gtk_environment;
     WebviewHost host;
     detail::run_with_signals(app, options, host);
 }
