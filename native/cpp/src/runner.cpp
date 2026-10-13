@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <exception>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -28,6 +29,17 @@ void validate(DemoUiApp& app, const NativeWindowOptions& options) {
     }
     if (options.height < 1 || options.height > kMaximumWindowDimension) {
         throw NativeWebviewError("height must be between 1 and 16384");
+    }
+    if (!options.icon.empty()) {
+        std::error_code icon_error;
+        if (!std::filesystem::is_regular_file(options.icon, icon_error) ||
+            icon_error) {
+            throw NativeWebviewError("icon must be a readable image file");
+        }
+        std::ifstream icon(options.icon, std::ios::binary);
+        if (!icon) {
+            throw NativeWebviewError("icon must be a readable image file");
+        }
     }
     if (app.host() != "127.0.0.1" && app.host() != "::1") {
         throw NativeWebviewError(

@@ -1,3 +1,5 @@
+#import <AppKit/AppKit.h>
+
 #include <webview/webview.h>
 
 #include <atomic>
@@ -27,6 +29,16 @@ class WebviewHost final : public detail::WindowHost {
         window_ = std::make_unique<webview::webview>(options.devtools, nullptr);
         window_->set_title(title).ensure_ok();
         window_->set_size(options.width, options.height, WEBVIEW_HINT_NONE).ensure_ok();
+        if (!options.icon.empty()) {
+            const auto icon_path = options.icon.string();
+            NSString* path = [NSString stringWithUTF8String:icon_path.c_str()];
+            NSImage* icon = [NSImage imageWithContentsOfFile:path];
+            if (icon == nil) {
+                throw NativeWebviewError("failed to load macOS application icon; use an image "
+                                         "supported by NSImage such as PNG or ICNS");
+            }
+            [[NSApplication sharedApplication] setApplicationIconImage:icon];
+        }
         window_->navigate(url).ensure_ok();
         if (close_requested_) {
             dispatch_close_locked();
