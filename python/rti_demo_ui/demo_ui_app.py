@@ -647,6 +647,7 @@ class DemoUiApp:
         *,
         theme=Theme.dark,
         layout=Layout.auto,
+        listening_message_prefix: str | None = "RTI Demo UI listening on",
     ) -> None:
         """Create an application model and HTTP server wrapper.
 
@@ -660,6 +661,8 @@ class DemoUiApp:
                 and any same-origin assets referenced by the UI.
             theme: Initial built-in theme.
             layout: Initial built-in layout.
+            listening_message_prefix: Text printed before the bound URL when
+                the server is ready. Set to ``None`` to suppress the message.
 
         Raises:
             ValueError: If any argument is invalid or ``static_root`` is not an
@@ -667,6 +670,12 @@ class DemoUiApp:
         """
         require_non_empty(title, "title", "DemoUiApp: ")
         require_non_empty(host, "host", "DemoUiApp: ")
+        if listening_message_prefix is not None and not isinstance(
+            listening_message_prefix, str
+        ):
+            raise ValueError(
+                "DemoUiApp: listening_message_prefix must be a string or None"
+            )
         theme = coerce_theme(theme)
         layout = coerce_layout(layout)
         if not (0 <= port <= 65535):
@@ -676,6 +685,7 @@ class DemoUiApp:
         self._assets = _load_assets()
         self._host = host
         self._port = port
+        self._listening_message_prefix = listening_message_prefix
         self._state = self._NEW
         self._run_started = False
         self._owner_loop = None
@@ -1293,7 +1303,13 @@ class DemoUiApp:
             self._events.start(loop)
             self._state = self._RUNNING
             self._ready_event.set()
-            print(f"RTI Demo UI listening on {self._ready_info.url}/")
+            if self._listening_message_prefix is not None:
+                prefix = (
+                    f"{self._listening_message_prefix} "
+                    if self._listening_message_prefix
+                    else ""
+                )
+                print(f"{prefix}{self._ready_info.url}/")
             await self._shutdown_event.wait()
         except asyncio.CancelledError:
             cancelled = True

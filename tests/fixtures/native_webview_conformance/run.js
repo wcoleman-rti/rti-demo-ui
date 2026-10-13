@@ -45,7 +45,7 @@ await check('sse', () => new Promise((resolve, reject) => {
 
 await check('dynamic_import', async () => {
     const module = await import('./adapter.js');
-    if (module.adapterMarker !== 'native-webview-spike-adapter') {
+    if (module.adapterMarker !== 'native-webview-conformance-adapter') {
         throw new Error(`unexpected marker ${module.adapterMarker}`);
     }
     return module.adapterMarker;
@@ -68,7 +68,7 @@ await check('module_worker', () => new Promise((resolve, reject) => {
     worker.onmessage = (event) => {
         clearTimeout(timeout);
         worker.terminate();
-        if (event.data !== 'native-webview-spike-adapter') {
+        if (event.data !== 'native-webview-conformance-adapter') {
             reject(new Error(`unexpected worker result ${event.data}`));
             return;
         }
@@ -153,7 +153,7 @@ try {
     if (!capabilityResponse.ok || !capabilityBody.capability) {
         throw new Error(`capability status=${capabilityResponse.status}`);
     }
-    const response = await fetch('/api/commands/spike-origin', {
+    const response = await fetch('/api/commands/conformance-origin', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -170,7 +170,7 @@ try {
     results.command_origin = { passed: false, evidence: String(error) };
 }
 
-const finalReport = await fetch('/api/commands/spike-report', {
+const finalReport = await fetch('/api/commands/conformance-report', {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',

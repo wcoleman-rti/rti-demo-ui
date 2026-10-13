@@ -8,11 +8,11 @@ from rti_demo_ui import DemoUiApp
 from python_host import EXPECTED_CHECKS, validate_report
 
 
-class PythonOwnerLoopSpike(unittest.TestCase):
+class PythonOwnerLoopPrototype(unittest.TestCase):
     def test_background_owner_loop_stops_and_releases_port(self):
         ready = threading.Event()
         state = {}
-        app = DemoUiApp("Python native lifecycle spike")
+        app = DemoUiApp("Python native lifecycle prototype")
 
         async def owner_main():
             run_task = asyncio.create_task(app.run())

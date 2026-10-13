@@ -22,24 +22,87 @@ needed, or opt into a native window through separate Python and C++
 companions. The core SDK does not require Connext, Node.js, or a separate
 frontend process at runtime.
 
-## Start with Python
+## Prerequisites
+
+- Python 3.11 or newer for Python examples.
+- A C++17 compiler and CMake for C++ examples.
+- A network connection for the first CMake configure, which fetches pinned
+  dependencies.
+
+Browser mode is the default and needs no native webview packages. Native mode
+uses the operating system's webview and has additional platform prerequisites,
+listed below.
+
+## Start with Python in a browser
 
 ```bash
-python -m pip install -e .
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 python examples/py/simple.py
 ```
 
-Open the URL printed by the example. Python 3.11 or newer is required.
+On Windows PowerShell, activate the environment with
+`.venv\Scripts\Activate.ps1`. Open the URL printed by the example.
 
-## Start with C++
+## Start with C++ in a browser
 
 ```bash
-cmake -S . -B build
-cmake --build build --target rti_demo_ui_simple
+cmake -B build
+cmake --build build
 ./build/cpp/examples/rti_demo_ui_simple
 ```
 
-C++17 and a network connection for the first dependency fetch are required.
+## Native webview prerequisites
+
+Install only the native prerequisites for the platform and language you plan
+to use. The general compiler and CMake requirements above also apply to C++
+native builds.
+
+| Platform | Python native webview | C++ native webview |
+| --- | --- | --- |
+| Ubuntu 22.04/24.04 | Python 3.11/3.12: install the PyGObject build prerequisites from the [native guide](docs/native-webview.md#linux). | `sudo apt install libwebkit2gtk-4.1-dev` |
+| Ubuntu 26.04+ | Install `python3-gi` and `gir1.2-webkit2-4.1`; create the venv with `--system-site-packages` so it can import the distro's `gi` binding. | `sudo apt install libwebkit2gtk-4.1-dev` |
+| Windows 10/11 | Install the Evergreen WebView2 Runtime if absent: `winget install --id Microsoft.EdgeWebView2Runtime --exact`. Pip installs pywebview and pythonnet. | Install Visual Studio 2022 with the C++ workload and Windows SDK using Visual Studio Installer. Install the Evergreen WebView2 Runtime if absent: `winget install --id Microsoft.EdgeWebView2Runtime --exact`. |
+| macOS 14+ (Apple Silicon) | No separate webview package; pip installs pywebview's Cocoa dependencies. | WebKit and AppKit are built in. Install Apple's C++ command-line tools if needed: `xcode-select --install`. |
+
+Ubuntu 22.04/24.04 Python native setup also requires development headers for
+the selected Python. See the [native webview guide](docs/native-webview.md)
+for exact prerequisites, supported versions, and troubleshooting.
+
+## Start with Python native webview
+
+On Ubuntu 26.04+, create the environment with
+`python -m venv --system-site-packages .venv` so it can import the distro's
+PyGObject binding. Use the regular venv command on other platforms.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e . -e native/python
+python native/python/examples/dual_mode.py --native
+```
+
+On Windows PowerShell, activate the environment with
+`.venv\Scripts\Activate.ps1`. The native Python companion is a separate local
+project, so install both it and the core package. The Ubuntu `python3-webview`
+package currently provides pywebview 6.1, while the companion pins 6.2.1; pip
+installs the pinned version. Use `--browser` instead of `--native` to run this
+example in a browser.
+
+## Start with C++ native webview
+
+```bash
+cmake -B build \
+  -DRTI_DEMO_BUILD_NATIVE_WEBVIEW=ON \
+  -DRTI_DEMO_BUILD_EXAMPLES=ON
+cmake --build build --parallel
+./build/native/examples/rti_demo_ui_native_dual_mode --native
+```
+
+Set `listening_message_prefix` on `DemoUiApp` to customize the startup URL
+announcement, or to `None` in Python / `std::nullopt` in C++ to suppress it;
+see the [Python](docs/api/python.md) and [C++](docs/api/cpp.md) guides.
 
 ## What you can build
 

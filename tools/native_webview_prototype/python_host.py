@@ -53,7 +53,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--signal-after", type=float)
     parser.add_argument("--storage-expected", default="__absent__")
-    parser.add_argument("--storage-key", default="rti-demo-ui-native-spike")
+    parser.add_argument("--storage-key", default="rti-demo-ui-native-prototype")
     parser.add_argument("--storage-path", type=Path, required=True)
     parser.add_argument("--storage-write", default="phase-zero")
     parser.add_argument("--timeout", type=float, default=15.0)
@@ -63,14 +63,17 @@ def main() -> int:
     import webview
 
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
-    root = Path(__file__).resolve().parent / "conformance"
+    root = (
+        Path(__file__).resolve().parents[2]
+        / "tests/fixtures/native_webview_conformance"
+    )
     report_event = threading.Event()
     signal_event = threading.Event()
     close_event = threading.Event()
     ready_queue: queue.Queue[tuple[asyncio.AbstractEventLoop, str]] = queue.Queue()
     report: dict = {}
     owner_thread_id = None
-    app = DemoUiApp("Native webview spike", args.port, static_root=root)
+    app = DemoUiApp("Native webview prototype", args.port, static_root=root)
 
     def record_report(payload: dict) -> dict:
         validate_report(payload)
@@ -78,9 +81,9 @@ def main() -> int:
         report_event.set()
         return {"recorded": True}
 
-    app.register_command("spike-report", {"type": "object"}, record_report)
+    app.register_command("conformance-report", {"type": "object"}, record_report)
     app.register_command(
-        "spike-origin",
+        "conformance-origin",
         {"type": "object"},
         lambda payload: {"origin": payload["origin"]},
     )
@@ -104,7 +107,7 @@ def main() -> int:
             report_event.set()
 
     server_thread = threading.Thread(
-        target=run_server, name="native-spike-python-server"
+        target=run_server, name="native-prototype-python-server"
     )
     server_thread.start()
     owner_loop, url = ready_queue.get(timeout=args.timeout)
@@ -119,7 +122,7 @@ def main() -> int:
         }
     )
     window = webview.create_window(
-        "Native webview spike",
+        "Native webview prototype",
         f"{url}/?{query}",
         width=1280,
         height=800,
@@ -185,7 +188,7 @@ def main() -> int:
             time.sleep(0.05)
         window.destroy()
 
-    closer = threading.Thread(target=close_when_done, name="native-spike-closer")
+    closer = threading.Thread(target=close_when_done, name="native-prototype-closer")
     closer.start()
     if args.signal_after is not None:
         signal_timer = threading.Timer(

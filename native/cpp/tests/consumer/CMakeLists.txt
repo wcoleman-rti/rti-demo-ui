@@ -14,3 +14,9 @@ add_executable(rti_demo_ui_native_consumer main.cpp)
 target_link_libraries(
     rti_demo_ui_native_consumer PRIVATE rti_demo_ui_native::native_webview
 )
+
+enable_testing()
+add_test(NAME native_consumer_smoke COMMAND rti_demo_ui_native_consumer)
+set_tests_properties(
+    native_consumer_smoke PROPERTIES LABELS real_engine TIMEOUT 30
+)

@@ -102,6 +102,32 @@ def test_import_is_lazy_for_pywebview():
     assert result.returncode == 0
 
 
+def test_snap_gtk_paths_are_filtered_and_restored(monkeypatch):
+    home = "/home/native-test"
+    monkeypatch.setattr(runner.sys, "platform", "linux")
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("GSETTINGS_SCHEMA_DIR", f"{home}/snap/code/1/schemas")
+    monkeypatch.setenv("GTK_PATH", "/snap/code/1/gtk:/usr/lib/gtk-3.0")
+    monkeypatch.setenv("GIO_MODULE_DIR", f"{home}/snap/code/common/gio")
+    monkeypatch.setenv(
+        "XDG_DATA_DIRS",
+        f"{home}/snap/code/1/share:/snap/code/1/usr/share:/usr/share",
+    )
+
+    with runner._host_gtk_environment():
+        assert "GSETTINGS_SCHEMA_DIR" not in os.environ
+        assert os.environ["GTK_PATH"] == "/usr/lib/gtk-3.0"
+        assert "GIO_MODULE_DIR" not in os.environ
+        assert os.environ["XDG_DATA_DIRS"] == "/usr/share"
+
+    assert os.environ["GSETTINGS_SCHEMA_DIR"] == f"{home}/snap/code/1/schemas"
+    assert os.environ["GTK_PATH"] == "/snap/code/1/gtk:/usr/lib/gtk-3.0"
+    assert os.environ["GIO_MODULE_DIR"] == f"{home}/snap/code/common/gio"
+    assert os.environ["XDG_DATA_DIRS"] == (
+        f"{home}/snap/code/1/share:/snap/code/1/usr/share:/usr/share"
+    )
+
+
 @pytest.mark.parametrize(
     ("application_id", "message"),
     [
@@ -176,6 +202,7 @@ def test_run_native_selects_platform_pywebview_backend(monkeypatch, platform, gu
 
     monkeypatch.setattr(runner.sys, "platform", platform)
     monkeypatch.setattr(runner, "_load_pywebview", lambda: fake_webview)
+    monkeypatch.setattr(runner, "_require_linux_gtk_bindings", lambda: None)
     monkeypatch.setattr(runner, "_run_native", capture_run)
 
     runner.run_native(DemoUiApp("backend"))
@@ -191,6 +218,20 @@ def test_missing_pywebview_is_actionable(monkeypatch):
     monkeypatch.setattr(runner.importlib, "import_module", missing)
     with pytest.raises(NativeWebviewError, match="pywebview 6.2.1"):
         _load_pywebview()
+
+
+def test_missing_linux_gtk_bindings_is_actionable(monkeypatch):
+    def missing(_name):
+        raise ModuleNotFoundError("gi is absent")
+
+    app = DemoUiApp("missing GTK bindings")
+    monkeypatch.setattr(runner.sys, "platform", "linux")
+    monkeypatch.setattr(runner, "_load_pywebview", lambda: object())
+    monkeypatch.setattr(runner.importlib, "import_module", missing)
+
+    with pytest.raises(NativeWebviewError, match="PyGObject `gi` module"):
+        runner.run_native(app)
+    assert not app.run_started
 
 
 def test_run_native_requires_main_thread():

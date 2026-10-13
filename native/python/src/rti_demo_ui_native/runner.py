@@ -16,14 +16,16 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
+import posixpath
 import queue
 import re
 import signal
 import sys
 import threading
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Iterator, Protocol
 
 from rti_demo_ui import DemoUiApp
 
@@ -32,6 +34,19 @@ _APPLICATION_ID = re.compile(
 )
 _MAX_WINDOW_DIMENSION = 16384
 _STARTUP_TIMEOUT_SECONDS = 10.0
+_GTK_PATH_ENVIRONMENT = (
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GDK_PIXBUF_MODULEDIR",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GTK_IM_MODULE_FILE",
+    "GIO_MODULE_DIR",
+    "GIO_EXTRA_MODULES",
+    "GI_TYPELIB_PATH",
+    "XDG_DATA_DIRS",
+)
 
 
 class NativeWebviewError(RuntimeError):
@@ -121,6 +136,51 @@ class _PyWebviewHost:
             raise self._close_error[0]
 
 
+def _is_snap_path(path: str, roots: tuple[str, ...]) -> bool:
+    normalized = posixpath.normpath(path)
+    return any(
+        normalized == root
+        or normalized.startswith(f"{root}{posixpath.sep}")
+        for root in roots
+    )
+
+
+@contextmanager
+def _host_gtk_environment() -> Iterator[None]:
+    if sys.platform != "linux":
+        yield
+        return
+
+    roots = ["/snap"]
+    if home := os.environ.get("HOME"):
+        roots.append(posixpath.join(home, "snap"))
+
+    changed: dict[str, tuple[str, str]] = {}
+    try:
+        for name in _GTK_PATH_ENVIRONMENT:
+            original = os.environ.get(name)
+            if original is None:
+                continue
+            filtered = ":".join(
+                path
+                for path in original.split(":")
+                if path and not _is_snap_path(path, tuple(roots))
+            )
+            if filtered == original:
+                continue
+            changed[name] = (original, filtered)
+            if filtered:
+                os.environ[name] = filtered
+            else:
+                os.environ.pop(name, None)
+        yield
+    finally:
+        for name, (original, filtered) in changed.items():
+            if os.environ.get(name) != (filtered or None):
+                continue
+            os.environ[name] = original
+
+
 def _require_supported_production_platform() -> None:
     if sys.platform in {"darwin", "linux", "win32"}:
         return
@@ -134,7 +194,31 @@ def _native_prerequisite_hint() -> str:
         return "verify pywebview 6.2.1 and macOS WKWebView are available"
     if sys.platform == "win32":
         return "verify pywebview 6.2.1 and the WebView2 Runtime are installed"
-    return "verify GTK 3 and WebKitGTK 4.1 are installed"
+    return (
+        "verify the active Python can import PyGObject (`gi`) and that GTK 3 "
+        "and WebKitGTK 4.1 are installed"
+    )
+
+
+def _require_linux_gtk_bindings() -> None:
+    try:
+        importlib.import_module("gi")
+    except (ImportError, OSError) as error:
+        if sys.version_info >= (3, 13):
+            setup = (
+                "on Ubuntu, install `python3-gi` and recreate the virtual "
+                "environment with `python3 -m venv --system-site-packages "
+                ".venv` using the matching distro Python"
+            )
+        else:
+            setup = (
+                "install PyGObject for this Python using the prerequisites "
+                "in docs/native-webview.md"
+            )
+        raise NativeWebviewError(
+            "Linux native mode requires the PyGObject `gi` module in the "
+            f"active Python environment; {setup}"
+        ) from error
 
 
 def _load_pywebview():
@@ -415,6 +499,8 @@ def run_native(
 
     def create_host(options: _Options) -> _WindowHost:
         webview_module = _load_pywebview()
+        if sys.platform == "linux":
+            _require_linux_gtk_bindings()
         gui = {
             "darwin": "cocoa",
             "linux": "gtk",
@@ -423,12 +509,13 @@ def run_native(
         return _PyWebviewHost(webview_module, gui)
 
     _require_supported_production_platform()
-    _run_native(
-        app,
-        application_id=application_id,
-        async_main=async_main,
-        width=width,
-        height=height,
-        devtools=devtools,
-        host_factory=create_host,
-    )
+    with _host_gtk_environment():
+        _run_native(
+            app,
+            application_id=application_id,
+            async_main=async_main,
+            width=width,
+            height=height,
+            devtools=devtools,
+            host_factory=create_host,
+        )

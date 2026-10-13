@@ -374,6 +374,39 @@ async def test_bind_failure_does_not_print_listening_url(capsys):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("options", "expected_prefix"),
+    [
+        ({}, "RTI Demo UI listening on"),
+        (
+            {"listening_message_prefix": "ArmController listening on"},
+            "ArmController listening on",
+        ),
+        ({"listening_message_prefix": ""}, ""),
+        ({"listening_message_prefix": None}, None),
+    ],
+)
+async def test_listening_message_prefix(options, expected_prefix, capsys):
+    app = DemoUiApp("Listening message", **options)
+    run_task = await start_app(app)
+    ready_info = app.ready_info
+    await app.stop()
+    await run_task
+
+    output = capsys.readouterr().out
+    if expected_prefix is None:
+        assert output == ""
+    else:
+        prefix = f"{expected_prefix} " if expected_prefix else ""
+        assert output == f"{prefix}{ready_info.url}/\n"
+
+
+def test_invalid_listening_message_prefix():
+    with pytest.raises(ValueError, match="listening_message_prefix"):
+        DemoUiApp("Invalid announcement", listening_message_prefix=12)
+
+
+@pytest.mark.asyncio
 async def test_immediate_restart_after_stop():
     for _ in range(2):
         app = make_app(19089)

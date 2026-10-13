@@ -37,7 +37,7 @@ int main(int argc, char**) {
     Json report;
     bool report_received = false;
     app.register_command(
-        "spike-report", CommandSchema(Json{{"type", "object"}}),
+        "conformance-report", CommandSchema(Json{{"type", "object"}}),
         [&](const Json& payload) {
             {
                 std::lock_guard<std::mutex> guard(mutex);
@@ -48,7 +48,7 @@ int main(int argc, char**) {
             return Json{{"recorded", true}};
         });
     app.register_command(
-        "spike-origin", CommandSchema(Json{{"type", "object"}}),
+        "conformance-origin", CommandSchema(Json{{"type", "object"}}),
         [](const Json& payload) { return Json{{"origin", payload["origin"]}}; });
 
     std::thread closer([&]() {

@@ -64,6 +64,11 @@ The C++ companion fetches the pinned webview 0.12.0 source during its first
 CMake configure. A network connection is needed only when that FetchContent
 dependency is not already cached.
 
+When launched from a Snap-packaged developer tool, both native companions
+temporarily remove Snap-provided GTK, GIO, and GSettings search paths so the
+host WebKitGTK uses matching system libraries and schemas. The original
+environment is restored when the native runner exits.
+
 ### Windows
 
 Python requires Python 3.11+, the companion wheel, and the Evergreen WebView2
@@ -131,6 +136,30 @@ source compatibility; it does not select or isolate a browser profile.
 `async_main` runs on the app's owner event loop after the server is ready. A
 normal return closes the window; an exception is re-raised on the calling
 thread after cleanup.
+
+## Top-Level CMake Build
+
+The repository's top-level CMake project can build the core, native companion,
+tests, and examples in one build tree. Native support is opt-in so core-only
+builds do not require GTK or WebKitGTK:
+
+```bash
+cmake -S . -B build-native \
+  -DRTI_DEMO_BUILD_NATIVE_WEBVIEW=ON \
+  -DRTI_DEMO_BUILD_EXAMPLES=ON
+cmake --build build-native --parallel
+./build-native/native/examples/rti_demo_ui_native_dual_mode --native
+```
+
+Both C++ and Python dual-mode examples accept `--native` and `--browser` and
+default to browser mode. Python also accepts `--mode native` and
+`--mode browser` for compatibility.
+Native examples follow `RTI_DEMO_BUILD_EXAMPLES` by default. Set
+`RTI_DEMO_NATIVE_BUILD_EXAMPLES=OFF` to build core examples without the native
+example.
+The native companion's lifecycle tests are included in the top-level CTest
+suite when native support is enabled. Real-window conformance remains opt-in
+through `RTI_DEMO_NATIVE_REAL_ENGINE_TESTS`.
 
 ## C++ Build and Use
 
@@ -215,9 +244,14 @@ Common failures:
   Runtime and retry from an interactive desktop session.
 - **Missing pywebview 6.2.1**: install `rti-demo-ui-native` and the Python
   platform prerequisites above in the active environment.
+- **Python reports that GTK or Qt extensions are missing**: on Ubuntu with
+  Python 3.13+, install `python3-gi` and recreate the virtual environment with
+  `python3 -m venv --system-site-packages .venv` using the matching distro
+  Python. The system `gi` binding is not visible to a regular isolated venv.
 - **GTK/WebKitGTK initialization failure**: install the 4.1 development/runtime
-  packages and launch from a graphical session. CI needs both Xvfb and a D-Bus
-  session.
+  packages and launch from a graphical session. The native runner filters
+  Snap-provided GTK/GIO paths when launched from a Snap-packaged developer
+  tool. CI needs both Xvfb and a D-Bus session.
 - **Invalid application ID**: omit it or use a lowercase reverse-DNS value such
   as `com.example.demo`.
 - **Literal loopback required**: leave the host at `127.0.0.1` or use `::1`;
