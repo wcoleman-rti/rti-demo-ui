@@ -1,8 +1,7 @@
 #include <gtk/gtk.h>
 
-#include <rti_demo_ui_native/native_webview.hpp>
-
 #include <iostream>
+#include <rti_demo_ui_native/native_webview.hpp>
 
 namespace {
 
@@ -25,7 +24,8 @@ gboolean inspect_window(gpointer data) {
     auto& probe = *static_cast<WindowSizeProbe*>(data);
     ++probe.attempts;
     GList* windows = gtk_window_list_toplevels();
-    for (GList* current = windows; current != nullptr; current = current->next) {
+    for (GList* current = windows; current != nullptr;
+         current = current->next) {
         auto* window = GTK_WINDOW(current->data);
         const auto* title = gtk_window_get_title(window);
         if (title != nullptr && title == std::string(kWindowTitle)) {
