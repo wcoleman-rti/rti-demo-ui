@@ -30,10 +30,12 @@ class WebviewHost final : public detail::WindowHost {
         auto* gtk_window = GTK_WINDOW(native_window.value());
         gtk_window_set_resizable(gtk_window, TRUE);
         window_->navigate(url).ensure_ok();
-        window_->dispatch([gtk_window, width = options.width,
-                           height = options.height]() {
-            gtk_window_resize(gtk_window, width, height);
-        }).ensure_ok();
+        window_
+            ->dispatch(
+                [gtk_window, width = options.width, height = options.height]() {
+                    gtk_window_resize(gtk_window, width, height);
+                })
+            .ensure_ok();
         if (close_requested_) {
             dispatch_close_locked();
         }
@@ -71,8 +73,8 @@ class WebviewHost final : public detail::WindowHost {
         }
     }
 
-    private:
-     void dispatch_close_locked() {
+   private:
+    void dispatch_close_locked() {
         auto* window = window_.get();
         window->dispatch([window]() { window->terminate().ensure_ok(); })
             .ensure_ok();
