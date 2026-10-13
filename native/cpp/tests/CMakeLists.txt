@@ -25,6 +25,26 @@ if(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS)
         native_real_engine_smoke PROPERTIES LABELS real_engine TIMEOUT 60
     )
 
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+        add_executable(rti_demo_ui_native_real_window_size
+            real_window_size_linux.cpp
+        )
+        target_link_libraries(
+            rti_demo_ui_native_real_window_size PRIVATE
+            rti_demo_ui_native::native_webview
+            PkgConfig::GTK3
+        )
+        add_test(
+            NAME native_real_window_size
+            COMMAND rti_demo_ui_native_real_window_size
+        )
+        set_tests_properties(
+            native_real_window_size PROPERTIES LABELS real_engine TIMEOUT 60
+        )
+    endif()
+
     add_executable(rti_demo_ui_native_real_conformance real_conformance.cpp)
     target_compile_definitions(
         rti_demo_ui_native_real_conformance PRIVATE

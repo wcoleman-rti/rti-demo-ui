@@ -25,12 +25,15 @@ class WebviewHost final : public detail::WindowHost {
         std::lock_guard<std::mutex> guard(mutex_);
         window_ = std::make_unique<webview::webview>(options.devtools, nullptr);
         window_->set_title(title).ensure_ok();
-        window_->set_size(options.width, options.height, WEBVIEW_HINT_NONE)
-            .ensure_ok();
         auto native_window = window_->window();
         native_window.ensure_ok();
-        gtk_window_set_resizable(GTK_WINDOW(native_window.value()), TRUE);
+        auto* gtk_window = GTK_WINDOW(native_window.value());
+        gtk_window_set_resizable(gtk_window, TRUE);
         window_->navigate(url).ensure_ok();
+        window_->dispatch([gtk_window, width = options.width,
+                           height = options.height]() {
+            gtk_window_resize(gtk_window, width, height);
+        }).ensure_ok();
         if (close_requested_) {
             dispatch_close_locked();
         }
