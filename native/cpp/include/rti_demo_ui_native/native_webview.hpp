@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <rti_demo_ui/demo_ui_app.hpp>
 #include <stdexcept>
 
@@ -23,6 +24,12 @@ struct NativeWindowOptions {
     int height = 800;
     /** Whether to enable the embedded browser's developer tools. */
     bool devtools = false;
+    /**
+     * Optional native application/window icon image path. Windows requires
+     * ICO; Linux and macOS accept the formats supported by their native image
+     * decoders. On macOS this sets the process-wide Dock icon.
+     */
+    std::filesystem::path icon;
 };
 
 /**

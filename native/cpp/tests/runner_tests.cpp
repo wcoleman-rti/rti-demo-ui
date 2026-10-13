@@ -11,9 +11,11 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <cstdlib>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <optional>
 #include <rti_demo_ui_native/native_webview.hpp>
@@ -176,6 +178,31 @@ void test_normal_close() {
     CHECK(port_is_released(host.url));
 }
 
+void test_icon_path_is_forwarded() {
+    const auto icon =
+        std::filesystem::temp_directory_path() /
+        ("rti_demo_ui_native_icon_" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()) +
+         ".png");
+    {
+        std::ofstream file(icon, std::ios::binary);
+        file << "test image";
+    }
+
+    DemoUiApp app("Icon");
+    FakeWindowHost host;
+    host.close_immediately = true;
+    NativeWindowOptions options;
+    options.icon = icon;
+    native_detail::run_with_host(app, options, host);
+
+    CHECK(host.options.icon == icon);
+    std::error_code error;
+    std::filesystem::remove(icon, error);
+    CHECK(!error);
+}
+
 void test_window_failure_cleans_up() {
     DemoUiApp app("Window failure");
     FakeWindowHost host;
@@ -257,6 +284,16 @@ void test_validation() {
             [&]() { native_detail::run_with_host(app, {}, host); },
             "loopback"));
     }
+    {
+        DemoUiApp app("Missing icon");
+        FakeWindowHost host;
+        NativeWindowOptions options;
+        options.icon = std::filesystem::temp_directory_path() /
+                       "rti_demo_ui_native_missing_icon.png";
+        CHECK(throws_native(
+            [&]() { native_detail::run_with_host(app, options, host); },
+            "readable image file"));
+    }
 }
 
 void test_app_is_single_use() {
@@ -334,6 +371,7 @@ void test_snap_gtk_environment_is_restored() {
 int main() {
     SocketRuntime socket_runtime;
     test_normal_close();
+    test_icon_path_is_forwarded();
     test_window_failure_cleans_up();
     test_bind_failure_does_not_create_window();
     test_server_stop_closes_window();

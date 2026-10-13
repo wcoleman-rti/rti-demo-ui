@@ -1,4 +1,8 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <webview/webview.h>
+#include <windows.h>
 
 #include <atomic>
 #include <exception>
@@ -21,6 +25,16 @@ namespace {
 
 class WebviewHost final : public detail::WindowHost {
    public:
+    ~WebviewHost() override {
+        window_.reset();
+        if (large_icon_ != nullptr) {
+            DestroyIcon(large_icon_);
+        }
+        if (small_icon_ != nullptr) {
+            DestroyIcon(small_icon_);
+        }
+    }
+
     void create(const std::string& title, const std::string& url,
                 const NativeWindowOptions& options) override {
         std::lock_guard<std::mutex> guard(mutex_);
@@ -31,6 +45,33 @@ class WebviewHost final : public detail::WindowHost {
         auto native_window = window_->window();
         native_window.ensure_ok();
         native_window_ = static_cast<HWND>(native_window.value());
+        if (!options.icon.empty()) {
+            const auto icon_path = options.icon.wstring();
+            large_icon_ = static_cast<HICON>(
+                LoadImageW(nullptr, icon_path.c_str(), IMAGE_ICON,
+                           GetSystemMetrics(SM_CXICON),
+                           GetSystemMetrics(SM_CYICON), LR_LOADFROMFILE));
+            if (large_icon_ == nullptr) {
+                throw NativeWebviewError(
+                    "failed to load native window icon; Windows requires an "
+                    "ICO image");
+            }
+            small_icon_ = static_cast<HICON>(
+                LoadImageW(nullptr, icon_path.c_str(), IMAGE_ICON,
+                           GetSystemMetrics(SM_CXSMICON),
+                           GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
+            if (small_icon_ == nullptr) {
+                DestroyIcon(large_icon_);
+                large_icon_ = nullptr;
+                throw NativeWebviewError(
+                    "failed to load small native window icon; Windows "
+                    "requires an ICO image");
+            }
+            SendMessageW(native_window_, WM_SETICON, ICON_BIG,
+                         reinterpret_cast<LPARAM>(large_icon_));
+            SendMessageW(native_window_, WM_SETICON, ICON_SMALL,
+                         reinterpret_cast<LPARAM>(small_icon_));
+        }
         window_->navigate(url).ensure_ok();
         if (close_requested_) {
             dispatch_close_locked();
@@ -81,6 +122,8 @@ class WebviewHost final : public detail::WindowHost {
     std::mutex mutex_;
     std::unique_ptr<webview::webview> window_;
     HWND native_window_ = nullptr;
+    HICON large_icon_ = nullptr;
+    HICON small_icon_ = nullptr;
     std::atomic<bool> close_requested_{false};
     std::exception_ptr close_error_;
 };

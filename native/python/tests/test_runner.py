@@ -64,7 +64,14 @@ class FakeWindowHost:
         self.close_requested.set()
 
 
-def run_fake(app, host, *, async_main=None, application_id="com.example.demo"):
+def run_fake(
+    app,
+    host,
+    *,
+    async_main=None,
+    application_id="com.example.demo",
+    icon=None,
+):
     return _run_native(
         app,
         application_id=application_id,
@@ -72,6 +79,7 @@ def run_fake(app, host, *, async_main=None, application_id="com.example.demo"):
         width=1280,
         height=800,
         devtools=False,
+        icon=icon,
         host_factory=lambda _options: host,
     )
 
@@ -175,6 +183,26 @@ def test_invalid_dimensions_are_actionable(name, value):
         )
 
 
+def test_icon_path_is_validated_and_forwarded(tmp_path):
+    icon = tmp_path / "app.png"
+    icon.write_bytes(b"test image")
+    host = FakeWindowHost(close_immediately=True)
+
+    run_fake(DemoUiApp("icon"), host, icon=icon)
+
+    assert host.options["icon"] == str(icon.resolve())
+    assert_port_released(host.options["url"])
+
+
+def test_invalid_icon_path_is_actionable(tmp_path):
+    icon = tmp_path / "missing.png"
+    app = DemoUiApp("invalid icon")
+
+    with pytest.raises(NativeWebviewError, match="readable image file"):
+        run_fake(app, FakeWindowHost(), icon=icon)
+    assert not app.run_started
+
+
 def test_non_loopback_host_is_rejected():
     with pytest.raises(NativeWebviewError, match="literal loopback"):
         run_fake(DemoUiApp("remote", host="localhost"), FakeWindowHost())
@@ -267,13 +295,115 @@ def test_pywebview_uses_platform_defaults(gui):
         width=1280,
         height=800,
         devtools=False,
+        icon=None,
     )
     host._close_requested.set()
     host.run()
     assert starts[0]["gui"] == gui
     assert starts[0]["private_mode"] is False
     assert "storage_path" not in starts[0]
+    assert "icon" not in starts[0]
     assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is True
+
+
+@pytest.mark.parametrize("gui", ["edgechromium", "gtk"])
+def test_pywebview_forwards_native_icon(gui):
+    starts = []
+    fake_webview = SimpleNamespace(
+        create_window=lambda *args, **kwargs: SimpleNamespace(),
+        start=lambda *args, **kwargs: starts.append(kwargs),
+    )
+    host = runner._PyWebviewHost(fake_webview, gui)
+    host.create(
+        title="icon",
+        url="http://127.0.0.1:42000/",
+        width=1280,
+        height=800,
+        devtools=False,
+        icon="/tmp/app.ico",
+    )
+    host._close_requested.set()
+    host.run()
+    assert starts[0]["gui"] == gui
+    assert starts[0]["icon"] == "/tmp/app.ico"
+
+
+def test_pywebview_sets_macos_dock_icon(monkeypatch, tmp_path):
+    icon_path = tmp_path / "app.icns"
+    icon_path.write_bytes(b"test image")
+    icon = object()
+    paths = []
+    set_icons = []
+    fake_appkit = SimpleNamespace(
+        NSImage=SimpleNamespace(
+            alloc=lambda: SimpleNamespace(
+                initWithContentsOfFile_=lambda path: paths.append(path) or icon
+            )
+        ),
+        NSApplication=SimpleNamespace(
+            sharedApplication=lambda: SimpleNamespace(
+                setApplicationIconImage_=set_icons.append
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        runner.importlib,
+        "import_module",
+        lambda name: fake_appkit if name == "AppKit" else None,
+    )
+    fake_webview = SimpleNamespace(
+        create_window=lambda *args, **kwargs: SimpleNamespace(),
+    )
+    host = runner._PyWebviewHost(fake_webview, "cocoa")
+    host.create(
+        title="icon",
+        url="http://127.0.0.1:42000/",
+        width=1280,
+        height=800,
+        devtools=False,
+        icon=str(icon_path),
+    )
+
+    host._on_started()
+
+    assert paths == [str(icon_path)]
+    assert set_icons == [icon]
+    assert not host._close_requested.is_set()
+
+
+def test_pywebview_reports_unsupported_macos_icon(monkeypatch, tmp_path):
+    icon_path = tmp_path / "invalid.icns"
+    icon_path.write_bytes(b"not an image")
+    fake_appkit = SimpleNamespace(
+        NSImage=SimpleNamespace(
+            alloc=lambda: SimpleNamespace(
+                initWithContentsOfFile_=lambda _path: None
+            )
+        ),
+        NSApplication=SimpleNamespace(sharedApplication=lambda: SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        runner.importlib,
+        "import_module",
+        lambda name: fake_appkit if name == "AppKit" else None,
+    )
+    fake_window = SimpleNamespace(destroy=lambda: None)
+    fake_webview = SimpleNamespace(
+        create_window=lambda *args, **kwargs: fake_window,
+        start=lambda callback, **kwargs: callback(),
+    )
+    host = runner._PyWebviewHost(fake_webview, "cocoa")
+    host.create(
+        title="invalid icon",
+        url="http://127.0.0.1:42000/",
+        width=1280,
+        height=800,
+        devtools=False,
+        icon=str(icon_path),
+    )
+
+    with pytest.raises(NativeWebviewError, match="failed to load macOS"):
+        host.run()
 
 
 def test_window_close_joins_owner_and_releases_port():

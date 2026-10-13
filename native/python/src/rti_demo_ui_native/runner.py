@@ -62,6 +62,7 @@ class _Options:
     width: int
     height: int
     devtools: bool
+    icon: str | None
 
 
 class _WindowHost(Protocol):
@@ -73,6 +74,7 @@ class _WindowHost(Protocol):
         width: int,
         height: int,
         devtools: bool,
+        icon: str | None,
     ) -> None: ...
 
     def run(self) -> None: ...
@@ -89,6 +91,7 @@ class _PyWebviewHost:
         self._close_requested = threading.Event()
         self._close_error: list[BaseException] = []
         self._devtools = False
+        self._icon: str | None = None
 
     def create(
         self,
@@ -98,8 +101,10 @@ class _PyWebviewHost:
         width: int,
         height: int,
         devtools: bool,
+        icon: str | None,
     ) -> None:
         self._devtools = devtools
+        self._icon = icon
         self._window = self._webview.create_window(
             title,
             url,
@@ -108,7 +113,30 @@ class _PyWebviewHost:
             resizable=True,
         )
 
+    def _set_macos_application_icon(self) -> None:
+        if self._icon is None:
+            raise NativeWebviewError("no macOS application icon was configured")
+        try:
+            appkit = importlib.import_module("AppKit")
+        except (ImportError, OSError) as error:
+            raise NativeWebviewError(
+                "macOS Dock icon updates require pywebview's AppKit dependencies"
+            ) from error
+        icon = appkit.NSImage.alloc().initWithContentsOfFile_(self._icon)
+        if icon is None:
+            raise NativeWebviewError(
+                "failed to load macOS application icon; use an image supported "
+                "by NSImage such as PNG or ICNS"
+            )
+        appkit.NSApplication.sharedApplication().setApplicationIconImage_(icon)
+
     def _on_started(self) -> None:
+        if self._gui == "cocoa" and self._icon is not None:
+            try:
+                self._set_macos_application_icon()
+            except Exception as error:
+                self._close_error.append(error)
+                self._close_requested.set()
         self._started.set()
         if self._close_requested.is_set():
             self._destroy()
@@ -126,12 +154,14 @@ class _PyWebviewHost:
             self._destroy()
 
     def run(self) -> None:
-        self._webview.start(
-            self._on_started,
-            gui=self._gui,
-            debug=self._devtools,
-            private_mode=False,
-        )
+        options = {
+            "gui": self._gui,
+            "debug": self._devtools,
+            "private_mode": False,
+        }
+        if self._icon is not None and self._gui != "cocoa":
+            options["icon"] = self._icon
+        self._webview.start(self._on_started, **options)
         if self._close_error:
             raise self._close_error[0]
 
@@ -249,6 +279,7 @@ def _validate_options(
     width: int,
     height: int,
     devtools: bool,
+    icon: str | os.PathLike[str] | None = None,
 ) -> _Options:
     if threading.current_thread() is not threading.main_thread():
         raise NativeWebviewError("run_native() must be called on the main thread")
@@ -274,6 +305,23 @@ def _validate_options(
             )
     if not isinstance(devtools, bool):
         raise NativeWebviewError("devtools must be a bool")
+    if icon is None:
+        icon_path = None
+    else:
+        try:
+            icon_path = os.fspath(icon)
+        except TypeError as error:
+            raise NativeWebviewError(
+                "icon must be a path-like string or None"
+            ) from error
+        if not isinstance(icon_path, str):
+            raise NativeWebviewError("icon must be a path-like string or None")
+        if icon_path == "":
+            icon_path = None
+        elif not os.path.isfile(icon_path) or not os.access(icon_path, os.R_OK):
+            raise NativeWebviewError("icon must be a readable image file")
+        else:
+            icon_path = os.path.abspath(icon_path)
     if async_main is not None and not callable(async_main):
         raise NativeWebviewError("async_main must be callable or None")
     if app.host not in {"127.0.0.1", "::1"}:
@@ -285,7 +333,7 @@ def _validate_options(
         raise NativeWebviewError(
             "DemoUiApp has already started; create a new app for run_native()"
         )
-    return _Options(application_id, width, height, devtools)
+    return _Options(application_id, width, height, devtools, icon_path)
 
 
 def _run_with_host(
@@ -407,6 +455,7 @@ def _run_with_host(
             width=options.width,
             height=options.height,
             devtools=options.devtools,
+            icon=options.icon,
         )
         host.run()
     except BaseException as error:
@@ -453,10 +502,11 @@ def _run_native(
     width: int,
     height: int,
     devtools: bool,
+    icon: str | os.PathLike[str] | None = None,
     host_factory: Callable[[_Options], _WindowHost],
 ) -> None:
     options = _validate_options(
-        app, application_id, async_main, width, height, devtools
+        app, application_id, async_main, width, height, devtools, icon
     )
     host = host_factory(options)
     _run_with_host(app, host, options, async_main=async_main)
@@ -470,6 +520,7 @@ def run_native(
     width: int = 1280,
     height: int = 800,
     devtools: bool = False,
+    icon: str | os.PathLike[str] | None = None,
 ) -> None:
     """Run an application in a native webview.
 
@@ -490,6 +541,10 @@ def run_native(
         width: Initial window width in pixels, from 1 through 16384.
         height: Initial window height in pixels, from 1 through 16384.
         devtools: Whether to enable the embedded browser's developer tools.
+        icon: Optional filesystem path to the native window icon. Windows
+            requires ICO; Linux uses a GdkPixbuf-supported image; macOS accepts
+            NSImage-supported images such as PNG or ICNS. On macOS this changes
+            the process-wide Dock icon, not an individual window's identity.
 
     Raises:
         NativeWebviewError: If options, platform prerequisites, server startup,
@@ -517,5 +572,6 @@ def run_native(
             width=width,
             height=height,
             devtools=devtools,
+            icon=icon,
             host_factory=create_host,
         )

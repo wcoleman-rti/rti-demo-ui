@@ -29,6 +29,19 @@ class WebviewHost final : public detail::WindowHost {
         native_window.ensure_ok();
         auto* gtk_window = GTK_WINDOW(native_window.value());
         gtk_window_set_resizable(gtk_window, TRUE);
+        if (!options.icon.empty()) {
+            GError* error = nullptr;
+            if (!gtk_window_set_icon_from_file(
+                    gtk_window, options.icon.string().c_str(), &error)) {
+                const std::string detail =
+                    error ? error->message : "unknown image loading error";
+                if (error) {
+                    g_error_free(error);
+                }
+                throw NativeWebviewError("failed to load native window icon: " +
+                                         detail);
+            }
+        }
         window_->navigate(url).ensure_ok();
         window_
             ->dispatch(

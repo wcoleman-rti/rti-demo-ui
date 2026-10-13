@@ -127,6 +127,7 @@ run_native(
     async_main=application_work,
     width=1280,
     height=800,
+    icon="assets/fleet.png",
     devtools=False,
 )
 ```
@@ -135,7 +136,8 @@ run_native(
 source compatibility; it does not select or isolate a browser profile.
 `async_main` runs on the app's owner event loop after the server is ready. A
 normal return closes the window; an exception is re-raised on the calling
-thread after cleanup.
+thread after cleanup. `icon` is an optional path to the application icon.
+The example's PNG is suitable for Linux and macOS; use an ICO file on Windows.
 
 ## Top-Level CMake Build
 
@@ -186,8 +188,30 @@ app.add_card("Status")->add_metric("Vehicles", 12);
 rti::demo::ui::native::NativeWindowOptions options;
 options.width = 1280;
 options.height = 800;
+options.icon = "assets/fleet.png";
 rti::demo::ui::native::run(app, options);
 ```
+
+The example's PNG is suitable for Linux and macOS; use an ICO file on Windows.
+
+## Native Application Icons
+
+Both native runners accept an optional icon file path. Leaving it unset
+preserves the platform's existing default. Windows requires an `.ico` file;
+Linux uses image formats supported by GdkPixbuf; macOS accepts formats
+supported by `NSImage`, such as PNG or ICNS. Supply a platform-appropriate path
+when one asset format does not work across all target systems. A missing,
+unreadable, or unsupported image is reported as a native-mode error.
+
+GTK and Windows set the icon on the native window, which is used by desktop
+chrome and task switchers where supported. Linux desktop shells may instead
+derive the displayed icon from the launching desktop entry or compositor app
+identity.
+
+On macOS the icon is assigned to `NSApplication`, so it changes the running
+process's Dock icon, not an individual window. This is a runtime change and
+does not update the consumer's packaged `.app` bundle; a stable installed-app
+identity/icon still depends on consumer packaging and launch configuration.
 
 ## Browser Fallback
 
@@ -271,6 +295,8 @@ For each supported engine and release candidate, record:
 6. Normal close and Ctrl-C cleanup.
 7. Application-owned links and navigation behave as intended.
 8. Canvas and WebGL rendering on a hardware GPU.
+9. A supplied icon appears in the platform's window/taskbar or Dock surface;
+   omitting it retains the platform default.
 
 Automated conformance covers snapshot/SSE, commands, imports, themes, Canvas,
 WebGL pixel readback, focus, resize observation, signal shutdown, joined
