@@ -180,6 +180,48 @@ selection, and a textual node/status fallback when WebGL or model loading is
 unavailable. Selection emits `scene3dselect` on the scene host with
 `{componentId, nodeId, selected}`; the SDK does not infer commands from it.
 
+Custom frontends can select scene-local presentation without changing the
+component snapshot or DDS data:
+
+```js
+import {reconcileScene3d, setScene3dCamera} from "/sdk/runtime3d.js";
+
+await reconcileScene3d(component, host, {
+  materialMode: "original",
+  showNodeList: false,
+  onSelection: handleSelection,
+});
+
+setScene3dCamera(component.id, {
+  position: [6, 0, 3],
+  target: [0, 0, 0],
+  up: [0, 0, 1],
+});
+```
+
+`materialMode` accepts `"status"` (the compatibility default) or `"original"`.
+Original mode retains GLB colors, embedded textures, emissive appearance, and
+PBR properties during pose/status updates. Materials are cloned for each scene;
+selection highlights are temporary and clearing selection restores the scene's
+appearance. Options persist when omitted from subsequent reconciliation calls.
+GLB materials, rather than SDK or DDS types, define application palettes.
+
+`setScene3dCamera(componentId, {position, target, up})` requires a mounted scene
+(model loading may still be pending). All vectors must contain three finite
+numbers; position and target must differ, and up must be nonzero and not
+parallel to the viewing direction. The up vector is normalized. The existing
+orbit distance limits still apply. Presets update the camera and orbit frame
+without replacing the canvas, loaded model, or controls. Subsequent snapshots
+do not overwrite the view, and Reset camera restores the last preset. User
+orbit interaction remains enabled. Presets are local, not persisted across
+scene disposal or page reload.
+
+`showNodeList` defaults to `true`. Setting it to `false` removes the list from
+the successful rendered view and gives the canvas the available width. Model,
+node-resolution, or WebGL failures still reveal the semantic node list and
+textual fallback. Frontends hiding the list should provide equivalent
+accessible selection controls when selection is part of their workflow.
+
 GLTF JSON, external buffers/textures, remote/data URLs, query strings, and
 `/sdk/` assets are rejected. Keep application model files beside the frontend
 and pass that directory as `static_root`.
