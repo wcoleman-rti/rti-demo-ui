@@ -10,6 +10,7 @@ const pythonAssets = join(root, 'python/src/rti_demo_ui_adapter_uplot/_assets');
 await mkdir(output, { recursive: true });
 await mkdir(pythonAssets, { recursive: true });
 await build({
+    absWorkingDir: root,
     entryPoints: [join(root, 'src/runtime.js')],
     bundle: true,
     format: 'esm',
@@ -22,7 +23,8 @@ await build({
 const css = await readFile(join(output, 'runtime.css'));
 await writeFile(join(output, 'theme.css'), css);
 await unlink(join(output, 'runtime.css'));
-await copyFile(join(root, 'node_modules/uplot/LICENSE'), join(output, 'LICENSE-uPlot'));
+const license = await readFile(join(root, 'node_modules/uplot/LICENSE'), 'utf8');
+await writeFile(join(output, 'LICENSE-uPlot'), `${license.trimEnd()}\n`);
 for (const name of ['runtime.js', 'theme.css', 'LICENSE-uPlot']) {
     await copyFile(join(output, name), join(pythonAssets, name));
 }

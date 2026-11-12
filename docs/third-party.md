@@ -84,6 +84,11 @@ Update the pins with `npm ci --ignore-scripts`, rebuild the artifact, refresh
 `assets/runtime3d.sha256`, and review the generated diff and upstream license
 notices together.
 
+Use Node.js 22.14.0 and run `npm run build:runtime3d` from `tools/scene3d`.
+The build script fixes esbuild's working directory so generated source-path
+comments do not depend on the caller's directory. CI verifies both the
+recorded checksum and an unchanged generated artifact.
+
 ## Optional uPlot Adapter
 
 The separately built renderer bundle is generated from exact npm pins in
@@ -101,6 +106,10 @@ distribution and installed by the optional CMake target. Regenerate with
 `npm ci --ignore-scripts && npm run build` from `adapters/uplot`; review the
 generated module, stylesheet, license, and `adapters/uplot/assets.sha256`
 checksum together.
+
+The build preserves the upstream license text with a final newline to match
+repository formatting. CI rebuilds and verifies the adapter assets and their
+Python package copies, and runs C++ tests with the optional adapter enabled.
 
 ## Optional Connext Example Dependencies
 

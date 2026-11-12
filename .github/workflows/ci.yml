@@ -51,6 +51,7 @@ jobs:
       - run: >-
           cmake -S . -B build
           -DBUILD_TESTING=ON
+          -DRTI_DEMO_BUILD_UPLOT_ADAPTER=ON
           -DFETCHCONTENT_BASE_DIR="$FETCHCONTENT_BASE_DIR"
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
@@ -84,6 +85,17 @@ jobs:
         working-directory: tools/scene3d
       - run: sha256sum --check assets/runtime3d.sha256
       - run: git diff --exit-code -- assets/runtime3d.js assets/runtime3d.sha256
+      - run: npm ci --ignore-scripts
+        working-directory: adapters/uplot
+      - run: npm run build
+        working-directory: adapters/uplot
+      - run: sha256sum --check assets.sha256
+        working-directory: adapters/uplot
+      - run: >-
+          git diff --exit-code --
+          adapters/uplot/assets
+          adapters/uplot/assets.sha256
+          adapters/uplot/python/src/rti_demo_ui_adapter_uplot/_assets
       - run: >-
           cmake -S . -B build-browser
           -DBUILD_TESTING=OFF

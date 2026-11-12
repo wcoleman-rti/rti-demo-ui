@@ -1,4 +1,4 @@
-// tools/scene3d/node_modules/three/build/three.core.js
+// node_modules/three/build/three.core.js
 var REVISION = "173";
 var MOUSE = { LEFT: 0, MIDDLE: 1, RIGHT: 2, ROTATE: 0, DOLLY: 1, PAN: 2 };
 var TOUCH = { ROTATE: 0, PAN: 1, DOLLY_PAN: 2, DOLLY_ROTATE: 3 };
@@ -11782,7 +11782,7 @@ if (typeof window !== "undefined") {
   }
 }
 
-// tools/scene3d/node_modules/three/build/three.module.js
+// node_modules/three/build/three.module.js
 function WebGLAnimation() {
   let context = null;
   let isAnimating = false;
@@ -21727,7 +21727,7 @@ var WebGLRenderer = class {
   }
 };
 
-// tools/scene3d/node_modules/three/examples/jsm/utils/BufferGeometryUtils.js
+// node_modules/three/examples/jsm/utils/BufferGeometryUtils.js
 function toTrianglesDrawMode(geometry, drawMode) {
   if (drawMode === TrianglesDrawMode) {
     console.warn("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Geometry already defined as triangles.");
@@ -21783,7 +21783,7 @@ function toTrianglesDrawMode(geometry, drawMode) {
   }
 }
 
-// tools/scene3d/node_modules/three/examples/jsm/loaders/GLTFLoader.js
+// node_modules/three/examples/jsm/loaders/GLTFLoader.js
 var GLTFLoader = class extends Loader {
   constructor(manager) {
     super(manager);
@@ -24283,7 +24283,7 @@ function addPrimitiveAttributes(geometry, primitiveDef, parser) {
   });
 }
 
-// tools/scene3d/node_modules/three/examples/jsm/controls/OrbitControls.js
+// node_modules/three/examples/jsm/controls/OrbitControls.js
 var _changeEvent = { type: "change" };
 var _startEvent = { type: "start" };
 var _endEvent = { type: "end" };
@@ -25086,7 +25086,7 @@ function interceptControlUp(event) {
   }
 }
 
-// tools/scene3d/src/runtime3d.js
+// src/runtime3d.js
 var assets = /* @__PURE__ */ new Map();
 var scenes = /* @__PURE__ */ new Map();
 function statusColor(status) {
