@@ -85,6 +85,15 @@ target_link_libraries(rti_demo_ui_native_webview
     PUBLIC rti_demo_ui::core
     PRIVATE webview::core
 )
+if(APPLE)
+    find_library(RTI_DEMO_UI_APPKIT_FRAMEWORK AppKit)
+    if(NOT RTI_DEMO_UI_APPKIT_FRAMEWORK)
+        message(FATAL_ERROR "The AppKit framework is required for macOS native mode")
+    endif()
+    target_link_libraries(
+        rti_demo_ui_native_webview PRIVATE "${RTI_DEMO_UI_APPKIT_FRAMEWORK}"
+    )
+endif()
 add_library(
     rti_demo_ui_native::native_webview ALIAS rti_demo_ui_native_webview
 )

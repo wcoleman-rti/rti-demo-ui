@@ -32,12 +32,15 @@ class WebviewHost final : public detail::WindowHost {
         if (!options.icon.empty()) {
             const auto icon_path = options.icon.string();
             NSString* path = [NSString stringWithUTF8String:icon_path.c_str()];
-            NSImage* icon = [NSImage imageWithContentsOfFile:path];
+            NSImage* icon = [[NSImage alloc] initWithContentsOfFile:path];
             if (icon == nil) {
                 throw NativeWebviewError("failed to load macOS application icon; use an image "
                                          "supported by NSImage such as PNG or ICNS");
             }
             [[NSApplication sharedApplication] setApplicationIconImage:icon];
+#if !__has_feature(objc_arc)
+            [icon release];
+#endif
         }
         window_->navigate(url).ensure_ok();
         if (close_requested_) {
