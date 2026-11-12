@@ -17,6 +17,7 @@ import struct
 import zlib
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 
@@ -104,6 +105,67 @@ def _page(browser, bundled=False):
     page.route("http://scene.test/**", serve)
     page.goto("http://scene.test/")
     return page
+
+
+@pytest.mark.parametrize("bundled", [False, True], ids=["source", "shipped"])
+def test_node_list_preserves_keyboard_focus_during_snapshots(bundled):
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = _page(browser, bundled=bundled)
+        page.evaluate(
+            """async () => {
+                window.runtime = await import('/renderer.js');
+                window.host = document.querySelector('#original');
+                window.component = {id: 'original', type: 'scene3d', revision: 1, data: {
+                    asset: '/model.glb', background: '#0a0e17',
+                    camera: {position: [4, 3, 6], target: [0, 1.5, 0],
+                             min_distance: 0.1, max_distance: 100},
+                    nodes: ['Base', 'Tool'].map(name => ({
+                        id: name.toLowerCase(), path: `Arm/${name}`,
+                        position: [0, 0, 0], rotation: [0, 0, 0, 1],
+                        scale: [1, 1, 1], status: 'success', visible: true,
+                    })),
+                }};
+                await runtime.reconcileScene3d(component, host, {reducedMotion: true});
+            }"""
+        )
+        page.locator("#original [role=option]").first.press("ArrowDown")
+        page.evaluate(
+            """async () => {
+                component.revision++;
+                component.data.nodes[1].status = 'warning';
+                await runtime.reconcileScene3d(component, host);
+            }"""
+        )
+        assert page.evaluate("document.activeElement?.dataset.nodeId") == "tool"
+        assert (
+            page.locator("#original [data-node-id=tool]").inner_text()
+            == "tool - warning"
+        )
+        page.keyboard.press("Enter")
+        assert (
+            page.locator("#original [data-node-id=tool]").get_attribute("aria-selected")
+            == "true"
+        )
+        page.evaluate(
+            """async () => {
+                component.revision++;
+                component.data.nodes.reverse();
+                await runtime.reconcileScene3d(component, host);
+            }"""
+        )
+        assert page.evaluate("document.activeElement?.dataset.nodeId") == "tool"
+        page.evaluate(
+            """async () => {
+                component.revision++;
+                component.data.nodes = component.data.nodes.filter(n => n.id !== 'tool');
+                await runtime.reconcileScene3d(component, host);
+            }"""
+        )
+        assert page.evaluate("document.activeElement?.dataset.nodeId") == "base"
+        assert page.locator("#original [role=option][tabindex='0']").count() == 1
+        page.evaluate("runtime.disposeScene3d('original')")
+        browser.close()
 
 
 def test_materials_selection_camera_and_fallback_are_scene_local():

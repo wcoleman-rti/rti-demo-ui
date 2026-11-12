@@ -25111,35 +25111,48 @@ function hasVisibleFrame(renderer) {
   return pixel.some((value) => value !== 0);
 }
 function renderList(list, data, state) {
-  list.replaceChildren();
-  const activeId = state?.selected || data.nodes?.[0]?.id;
-  for (const node of data.nodes || []) {
-    const option = document.createElement("div");
+  const nodes = data.nodes || [];
+  const focusedId = list.contains(document.activeElement) ? document.activeElement.dataset.nodeId : null;
+  const activeId = [focusedId, state?.selected, nodes[0]?.id].find((id) => nodes.some((node) => node.id === id));
+  const existing = new Map([...list.children].map((option) => [option.dataset.nodeId, option]));
+  for (const [index, node] of nodes.entries()) {
+    let option = existing.get(node.id);
+    if (!option) {
+      option = document.createElement("div");
+      option.setAttribute("role", "option");
+      option.dataset.nodeId = node.id;
+      option.addEventListener("click", () => select(state, node.id));
+      option.addEventListener("keydown", (event) => {
+        const options = [...list.querySelectorAll('[role="option"]')];
+        const index2 = options.indexOf(option);
+        let next = index2;
+        if (event.key === "ArrowDown") next = Math.min(options.length - 1, index2 + 1);
+        else if (event.key === "ArrowUp") next = Math.max(0, index2 - 1);
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = options.length - 1;
+        else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          select(state, node.id);
+          return;
+        } else return;
+        event.preventDefault();
+        options.forEach((item, itemIndex) => {
+          item.tabIndex = itemIndex === next ? 0 : -1;
+        });
+        options[next]?.focus();
+      });
+    }
+    existing.delete(node.id);
     option.id = `${data.asset}-${node.id}`.replace(/[^A-Za-z0-9_-]/g, "_");
-    option.setAttribute("role", "option");
     option.tabIndex = activeId === node.id ? 0 : -1;
     option.setAttribute("aria-selected", String(state && state.selected === node.id));
     option.setAttribute("aria-label", `${node.id}, ${node.status}, ${node.visible ? "visible" : "hidden"}`);
     option.textContent = `${node.id} - ${node.status}`;
-    option.dataset.nodeId = node.id;
-    option.addEventListener("click", () => select(state, node.id));
-    option.addEventListener("keydown", (event) => {
-      const options = [...list.querySelectorAll('[role="option"]')];
-      const index = options.indexOf(option);
-      let next = index;
-      if (event.key === "ArrowDown") next = Math.min(options.length - 1, index + 1);
-      else if (event.key === "ArrowUp") next = Math.max(0, index - 1);
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = options.length - 1;
-      else if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        select(state, node.id);
-        return;
-      } else return;
-      event.preventDefault();
-      options[next]?.focus();
-    });
-    list.appendChild(option);
+    if (list.children[index] !== option) list.insertBefore(option, list.children[index] || null);
+  }
+  for (const option of existing.values()) option.remove();
+  if (focusedId && !list.contains(document.activeElement)) {
+    [...list.children].find((option) => option.dataset.nodeId === activeId)?.focus();
   }
 }
 function select(state, nodeId) {
