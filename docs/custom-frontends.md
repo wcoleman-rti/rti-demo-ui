@@ -98,6 +98,12 @@ High-update-rate applications may explicitly select SSE:
 const client = createClient({transport: "sse"});
 ```
 
+The built-in SDK runtime keeps polling for applications without an enabled
+time-series chart. When it sees a `timeseries` component, it switches to SSE
+after the initial complete snapshot so subsequent chart appends remain
+incremental. Custom frontends that render such components should also choose
+SSE explicitly; polling always transfers complete snapshots.
+
 SSE uses a same-origin `/api/events` URL, applies patches in the browser, and
 uses `/api/state` only to recover from an invalid payload or revision gap.
 `reconnecting` means the browser is retrying SSE or the client is

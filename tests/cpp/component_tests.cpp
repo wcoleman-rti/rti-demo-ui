@@ -27,6 +27,11 @@ namespace rti::demo::ui::detail {
 class ModelTestAccess {
    public:
     static Model& model(DemoUiApp& app) { return app.model_; }
+    static void enable_timeseries(DemoUiApp& app) {
+        auto& model = app.model_;
+        std::lock_guard<std::mutex> guard(model.lock());
+        model.register_adapter_components({"timeseries"});
+    }
 };
 }  // namespace rti::demo::ui::detail
 
@@ -224,6 +229,105 @@ void test_validation_errors() {
     EXPECT_THROWS(scene->remove_link("v2", "v1"));
 }
 
+void test_time_series_validation_retention_and_append_delta() {
+    DemoUiApp app("Time Series");
+    Card* card = app.add_card("Trend");
+    EXPECT_RUNTIME_ERROR(card->add_time_series(
+        "Rate", {TimeSeriesSeries{"rate", "Rate", "Hz"}}));
+    detail::ModelTestAccess::enable_timeseries(app);
+    auto& model = detail::ModelTestAccess::model(app);
+    std::vector<TimeSeriesSeries> too_many_series;
+    for (int index = 0; index < 9; ++index) {
+        too_many_series.push_back(
+            {"series-" + std::to_string(index),
+             "Series " + std::to_string(index), "Hz"});
+    }
+    const long before_invalid_chart = model.revision_;
+    EXPECT_THROWS(card->add_time_series("Too many", too_many_series));
+    CHECK(model.revision_ == before_invalid_chart);
+
+    std::vector<TimeSeriesSample> initial{{1000.0, 2.0},
+                                           {2000.0, std::nullopt}};
+    auto* chart = card->add_time_series(
+        "Rate", {TimeSeriesSeries{"rate", "Rate", "Hz",
+                                  "var(--sdk-accent)", initial}},
+        TimeSeriesStatus::live, "Time", "Rate", std::array<double, 2>{0, 5000},
+        std::nullopt);
+    const Json baseline = chart->to_json_locked();
+    const long revision = model.revision_;
+    EXPECT_THROWS(chart->append("rate", {{3000.0, 3.0}, {3000.0, 4.0}}));
+    EXPECT_THROWS(chart->append("rate", {{3000.0, std::nan("")}}));
+    EXPECT_THROWS(chart->replace_series("rate", {{3000.0, 3.0},
+                                                  {2000.0, 4.0}}));
+    CHECK(chart->to_json_locked() == baseline);
+    CHECK(model.revision_ == revision);
+
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        model.start_dirty_tracking_locked();
+    }
+    chart->append("rate", {{3000.0, 3.0}});
+    chart->append("rate", {{4000.0, std::nullopt}, {5000.0, 5.0}});
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        const auto patch = model.flush_dirty_targets_locked();
+        CHECK(patch.has_value());
+        if (patch) {
+            CHECK((*patch)["changes"].size() == 1);
+            const auto& change = (*patch)["changes"][0];
+            CHECK(change["op"] == "append-timeseries");
+            CHECK(change["component_revision"] == (*patch)["revision"]);
+            CHECK(change["series"][0]["samples"] ==
+                  Json({{3000.0, 3.0}, {4000.0, nullptr}, {5000.0, 5.0}}));
+            CHECK(!change.contains("data"));
+        }
+    }
+
+    std::vector<TimeSeriesSample> replacement;
+    replacement.reserve(10000);
+    for (int index = 0; index < 10000; ++index) {
+        replacement.push_back(
+            {static_cast<double>(index), static_cast<double>(index)});
+    }
+    chart->replace_series("rate", replacement);
+    const long before_append = model.revision_;
+    chart->append("rate", {{10000.0, 10000.0}, {10001.0, std::nullopt}});
+    const auto snapshot = chart->to_json_locked();
+    CHECK(snapshot["data"]["series"][0]["samples"].size() == 10000);
+    CHECK(snapshot["data"]["series"][0]["samples"][0][0] == 2.0);
+    CHECK(snapshot["data"]["series"][0]["samples"][9999][1].is_null());
+    CHECK(model.revision_ == before_append + 1);
+}
+
+void test_time_series_matches_shared_cross_language_fixture() {
+    std::ifstream input(std::string(SOURCE_ROOT) +
+                        "/tests/fixtures/time_series_contract.json");
+    const Json fixture = Json::parse(input);
+    DemoUiApp app("Chart");
+    detail::ModelTestAccess::enable_timeseries(app);
+    Card* card = app.add_card("Trend");
+    auto* chart = card->add_time_series(
+        "Rate",
+        {TimeSeriesSeries{"rate", "Rate", "Hz", "var(--sdk-accent)",
+                          {{1.0, 1.0}, {2.0, std::nullopt}}}},
+        TimeSeriesStatus::waiting, "Time");
+    auto& model = detail::ModelTestAccess::model(app);
+    CHECK(Json::parse(model.snapshot_json_locked()) == fixture["snapshot"]);
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        model.start_dirty_tracking_locked();
+    }
+    chart->append("rate", {{3.0, 2.0}, {4.0, std::nullopt}});
+    {
+        std::lock_guard<std::mutex> guard(model.lock());
+        const auto patch = model.flush_dirty_targets_locked();
+        CHECK(patch.has_value());
+        if (patch) CHECK(*patch == fixture["append_patch"]);
+        CHECK(Json::parse(model.snapshot_json_locked()) ==
+              fixture["snapshot_after_append"]);
+    }
+}
+
 void test_timer_cancel_idempotent() {
     DemoUiApp app("Test", 19184);
     int counter = 0;
@@ -275,6 +379,8 @@ int main() {
     test_structural_component_order_matches_shared_bytes();
     test_entity_removal_removes_links();
     test_validation_errors();
+    test_time_series_validation_retention_and_append_delta();
+    test_time_series_matches_shared_cross_language_fixture();
     test_scene3d_contract();
     test_timer_cancel_idempotent();
     if (g_failures == 0) {

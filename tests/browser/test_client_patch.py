@@ -89,3 +89,85 @@ def test_client_rejects_revision_gap_and_invalid_operation_vectors():
         browser.close()
 
     assert all(rejected)
+
+
+def test_client_applies_bounded_time_series_append_delta():
+    snapshot = {
+        "schema_version": 2,
+        "revision": 5,
+        "title": "Chart",
+        "data": {},
+        "cards": [
+            {
+                "id": "card-1",
+                "title": "Trend",
+                "components": [
+                    {
+                        "id": "timeseries-1",
+                        "type": "timeseries",
+                        "revision": 4,
+                        "data": {
+                            "title": "Rate",
+                            "x_label": "Time",
+                            "y_label": "Rate",
+                            "status": "live",
+                            "x_range": None,
+                            "y_range": None,
+                            "series": [
+                                {
+                                    "id": "rate",
+                                    "label": "Rate",
+                                    "unit": "Hz",
+                                    "color": "#0076CE",
+                                    "samples": [[1, 1.0], [2, None]],
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    patch = {
+        "schema_version": 1,
+        "base_revision": 5,
+        "revision": 7,
+        "changes": [
+            {
+                "op": "append-timeseries",
+                "card_id": "card-1",
+                "component_id": "timeseries-1",
+                "component_revision": 7,
+                "series": [{"id": "rate", "samples": [[3, 2.0], [4, None]]}],
+            }
+        ],
+    }
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page()
+        result = page.evaluate(
+            """async ({moduleUrl, snapshot, patch}) => {
+                const {applyPatch} = await import(moduleUrl);
+                const next = applyPatch(snapshot, patch);
+                const component = next.cards[0].components[0];
+                const invalid = JSON.parse(JSON.stringify(patch));
+                invalid.changes[0].series[0].samples[0][0] = 2;
+                let rejected = false;
+                try { applyPatch(snapshot, invalid); } catch { rejected = true; }
+                return {
+                    samples: component.data.series[0].samples,
+                    componentRevision: component.revision,
+                    frozen: Object.isFrozen(next)
+                        && Object.isFrozen(component.data.series[0].samples),
+                    rejected
+                };
+            }""",
+            {"moduleUrl": CLIENT_MODULE_URL, "snapshot": snapshot, "patch": patch},
+        )
+        browser.close()
+    assert result == {
+        "samples": [[1, 1.0], [2, None], [3, 2.0], [4, None]],
+        "componentRevision": 7,
+        "frozen": True,
+        "rejected": True,
+    }
