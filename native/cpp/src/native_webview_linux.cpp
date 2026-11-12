@@ -27,10 +27,28 @@ class WebviewHost final : public detail::WindowHost {
         window_->set_title(title).ensure_ok();
         auto native_window = window_->window();
         native_window.ensure_ok();
-        gtk_window_set_default_size(GTK_WINDOW(native_window.value()),
-                                    options.width, options.height);
-        gtk_window_set_resizable(GTK_WINDOW(native_window.value()), TRUE);
+        auto* gtk_window = GTK_WINDOW(native_window.value());
+        gtk_window_set_resizable(gtk_window, TRUE);
+        if (!options.icon.empty()) {
+            GError* error = nullptr;
+            if (!gtk_window_set_icon_from_file(
+                    gtk_window, options.icon.string().c_str(), &error)) {
+                const std::string detail =
+                    error ? error->message : "unknown image loading error";
+                if (error) {
+                    g_error_free(error);
+                }
+                throw NativeWebviewError("failed to load native window icon: " +
+                                         detail);
+            }
+        }
         window_->navigate(url).ensure_ok();
+        window_
+            ->dispatch(
+                [gtk_window, width = options.width, height = options.height]() {
+                    gtk_window_resize(gtk_window, width, height);
+                })
+            .ensure_ok();
         if (close_requested_) {
             dispatch_close_locked();
         }
@@ -68,8 +86,8 @@ class WebviewHost final : public detail::WindowHost {
         }
     }
 
-    private:
-     void dispatch_close_locked() {
+   private:
+    void dispatch_close_locked() {
         auto* window = window_.get();
         window->dispatch([window]() { window->terminate().ensure_ok(); })
             .ensure_ok();

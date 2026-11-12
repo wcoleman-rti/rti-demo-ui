@@ -91,14 +91,15 @@ Add the separate `native/cpp` CMake project after the core target and link
 rti::demo::ui::native::NativeWindowOptions options;
 options.width = 1280;
 options.height = 800;
+options.icon = "assets/fleet.png";
 rti::demo::ui::native::run(app, options);
 ```
 
 The call owns the native main-thread loop and a joined server thread. Browser
 targets remain core-only and call `app.run()`. See
 [Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
-profiles, the current Linux, Windows, and macOS qualification status, and
-troubleshooting. The generated
+icon behavior, profiles, the current Linux, Windows, and macOS qualification
+status, and troubleshooting. The generated
 [C++ API reference](../reference/cpp.rst) also documents the public native
 runner types.
 
