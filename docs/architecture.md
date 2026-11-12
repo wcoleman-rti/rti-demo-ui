@@ -334,7 +334,9 @@ up-vector presets without replacing the canvas, model, or controls. Context
 options and presets survive subsequent snapshots. `showNodeList` defaults to
 `true`; hiding it in the rendered view never hides the semantic list and
 textual fallback on failure. These presentation APIs do not change the
-server-side component schema. Unsupported custom components show a visible
+server-side component schema. Node-list entries are reconciled by node ID so
+live snapshots preserve keyboard focus; removing the focused node moves focus
+to a remaining entry. Unsupported custom components show a visible
 isolated diagnostic.
 
 ## 11. Build and Tests
