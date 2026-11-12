@@ -107,9 +107,11 @@ see the [Python](docs/api/python.md) and [C++](docs/api/cpp.md) guides.
 ## What you can build
 
 - Dashboards using tables, metrics, text, badges, logs, and governed layouts.
+- Bounded timestamped charts through the separately installed uPlot adapter.
 - Live 2D scenes and glTF-based 3D scenes.
 - Custom browser frontends using polling or server-sent events.
-- Validated browser commands and application-owned JSON state.
+- Validated browser commands, application-owned JSON state, and momentary
+  press/hold helpers for custom frontends.
 - Optional native windows through separate Python and C++ companions. Linux is
   release-supported; see the
   [native support matrix](docs/native-webview.md#support-and-qualification) for

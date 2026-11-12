@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .types import (
     CardArea,
@@ -36,6 +38,93 @@ from .types import (
     require_valid_color,
 )
 
+MAX_TIME_SERIES = 8
+MAX_TIME_SERIES_SAMPLES = 10_000
+MAX_TIME_SERIES_APPEND_BATCH = 1_024
+_TIME_SERIES_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+
+
+class TimeSeriesStatus(str, Enum):
+    """Application-supplied status displayed by a time-series component."""
+
+    waiting = "waiting"
+    live = "live"
+    stale = "stale"
+
+
+TimeSeriesSample = Tuple[float, Optional[float]]
+
+
+@dataclass(frozen=True)
+class TimeSeriesSeries:
+    """Series metadata and optional initial samples for a time-series chart.
+
+    Sample timestamps are milliseconds since the Unix epoch. Values may be
+    finite numbers or ``None`` gaps.
+    """
+
+    id: str
+    label: str
+    unit: str = ""
+    color: str = "var(--sdk-accent)"
+    samples: Sequence[TimeSeriesSample] = ()
+
+
+def _coerce_time_series_status(value) -> TimeSeriesStatus:
+    try:
+        return value if isinstance(value, TimeSeriesStatus) else TimeSeriesStatus(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "TimeSeries: status must be waiting, live, or stale"
+        ) from error
+
+
+def _require_time_series_finite(value, name, context):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{context}: {name} must be finite")
+    try:
+        finite = math.isfinite(float(value))
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError(f"{context}: {name} must be finite")
+
+
+def _validate_time_series_samples(samples, *, limit, context):
+    if not isinstance(samples, (list, tuple)):
+        raise ValueError(f"{context}: samples must be a sequence")
+    if len(samples) > limit:
+        raise ValueError(f"{context}: samples may contain at most {limit} entries")
+    result = []
+    previous_timestamp = None
+    for sample in samples:
+        if not isinstance(sample, (list, tuple)) or len(sample) != 2:
+            raise ValueError(
+                f"{context}: each sample must be a (timestamp_ms, value) pair"
+            )
+        timestamp, value = sample
+        _require_time_series_finite(timestamp, "timestamp_ms", context)
+        if previous_timestamp is not None and timestamp <= previous_timestamp:
+            raise ValueError(f"{context}: timestamps must be strictly increasing")
+        if value is not None:
+            _require_time_series_finite(value, "value", context)
+        result.append([float(timestamp), None if value is None else float(value)])
+        previous_timestamp = timestamp
+    return result
+
+
+def _validate_time_series_range(value, name):
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError(f"TimeSeries: {name} must be a two-value range or None")
+    minimum, maximum = value
+    _require_time_series_finite(minimum, f"{name}[0]", "TimeSeries")
+    _require_time_series_finite(maximum, f"{name}[1]", "TimeSeries")
+    if minimum >= maximum:
+        raise ValueError(f"TimeSeries: {name} minimum must be less than maximum")
+    return [float(minimum), float(maximum)]
+
 
 class _Component:
     def __init__(self, model, component_id: str, component_type: str) -> None:
@@ -45,10 +134,13 @@ class _Component:
         self.revision = 0
         self._card_id = None
 
-    def _mutated(self) -> None:
+    def _mutated(self, append: Optional[dict] = None) -> None:
         if self._card_id is None:
             raise RuntimeError("Component: component is not attached to a card")
-        self._model.commit_component_locked(self._card_id, self.id)
+        if append is None:
+            self._model.commit_component_locked(self._card_id, self.id)
+        else:
+            self._model.commit_component_append_locked(self._card_id, self.id, append)
         self.revision = self._model.revision
 
     def _envelope(self, data: dict) -> dict:
@@ -261,6 +353,43 @@ class Card:
             empty_state,
         )
         return self._add_component(table)
+
+    def add_time_series(
+        self,
+        title: str,
+        series: Sequence[TimeSeriesSeries],
+        *,
+        status: TimeSeriesStatus | str = TimeSeriesStatus.waiting,
+        x_label: str = "",
+        y_label: str = "",
+        x_range: Optional[Tuple[float, float]] = None,
+        y_range: Optional[Tuple[float, float]] = None,
+    ) -> "TimeSeries":
+        """Add an opt-in bounded time-series chart.
+
+        Call ``rti_demo_ui_adapter_uplot.enable_uplot(app)`` before creating
+        charts and before starting the app. Timestamps are finite milliseconds
+        since the Unix epoch.
+        """
+        self._model.check_owner()
+        self._model.ensure_running()
+        if not self._model.has_adapter_component("timeseries"):
+            raise RuntimeError(
+                "Card: enable the optional uPlot adapter before adding "
+                "time-series components"
+            )
+        component = TimeSeries(
+            self._model,
+            self._model.next_component_id("timeseries"),
+            title,
+            series,
+            status=status,
+            x_label=x_label,
+            y_label=y_label,
+            x_range=x_range,
+            y_range=y_range,
+        )
+        return self._add_component(component)
 
     def add_metric(self, label: str, value, severity=None) -> "Metric":
         """Add a scalar metric component to this card.
@@ -1518,8 +1647,19 @@ class CustomComponent(_Component):
         """
         require_non_empty(component_id, "id", "CustomComponent: ")
         require_non_empty(component_type, "type", "CustomComponent: ")
-        if component_type in {"scene2d", "table", "metric", "text", "badge", "log"}:
+        if component_type in {
+            "scene2d",
+            "scene3d",
+            "table",
+            "metric",
+            "text",
+            "badge",
+            "log",
+            "timeseries",
+        }:
             raise ValueError("CustomComponent: type is reserved")
+        if component_type in model.adapter_component_types:
+            raise ValueError("CustomComponent: type is reserved by an enabled adapter")
         super().__init__(model, component_id, component_type)
         self.data = copy_json_value(data, "CustomComponent: ")
 
@@ -1564,4 +1704,149 @@ class CustomComponent(_Component):
 
     def to_dict(self):
         """Return a detached JSON-ready snapshot of the custom component."""
+        return self._envelope(copy_json_value(self.data))
+
+
+class TimeSeries(_Component):
+    """Application-supplied, bounded timestamped time-series data."""
+
+    def __init__(
+        self,
+        model,
+        component_id,
+        title,
+        series,
+        *,
+        status=TimeSeriesStatus.waiting,
+        x_label="",
+        y_label="",
+        x_range=None,
+        y_range=None,
+    ):
+        super().__init__(model, component_id, "timeseries")
+        if not isinstance(title, str) or not title:
+            raise ValueError("TimeSeries: title must be a non-empty string")
+        if not isinstance(x_label, str) or not isinstance(y_label, str):
+            raise ValueError("TimeSeries: axis labels must be strings")
+        if (
+            not isinstance(series, (list, tuple))
+            or not 1 <= len(series) <= MAX_TIME_SERIES
+        ):
+            raise ValueError(
+                f"TimeSeries: series must contain 1 to {MAX_TIME_SERIES} entries"
+            )
+        normalized = []
+        seen_ids = set()
+        for definition in series:
+            if not isinstance(definition, TimeSeriesSeries):
+                raise ValueError(
+                    "TimeSeries: series entries must be TimeSeriesSeries values"
+                )
+            if not isinstance(definition.id, str) or not _TIME_SERIES_ID.fullmatch(
+                definition.id
+            ):
+                raise ValueError("TimeSeries: series id has invalid format")
+            if definition.id in seen_ids:
+                raise ValueError("TimeSeries: series IDs must be unique")
+            seen_ids.add(definition.id)
+            if not isinstance(definition.label, str) or not definition.label:
+                raise ValueError("TimeSeries: series label must be a non-empty string")
+            if not isinstance(definition.unit, str):
+                raise ValueError("TimeSeries: series unit must be a string")
+            if not isinstance(definition.color, str):
+                raise ValueError("TimeSeries: series color must be a string")
+            require_valid_color(definition.color, "TimeSeries: ")
+            normalized.append(
+                {
+                    "id": definition.id,
+                    "label": definition.label,
+                    "unit": definition.unit,
+                    "color": definition.color,
+                    "samples": _validate_time_series_samples(
+                        definition.samples,
+                        limit=MAX_TIME_SERIES_SAMPLES,
+                        context="TimeSeries",
+                    ),
+                }
+            )
+        self._series_by_id = {item["id"]: item for item in normalized}
+        self.data = {
+            "title": title,
+            "x_label": x_label,
+            "y_label": y_label,
+            "status": _coerce_time_series_status(status).value,
+            "x_range": _validate_time_series_range(x_range, "x_range"),
+            "y_range": _validate_time_series_range(y_range, "y_range"),
+            "series": normalized,
+        }
+
+    def _series(self, series_id):
+        try:
+            return self._series_by_id[series_id]
+        except (KeyError, TypeError) as error:
+            raise ValueError(f"TimeSeries: unknown series id: {series_id}") from error
+
+    def replace_series(
+        self, series_id: str, samples: Sequence[TimeSeriesSample]
+    ) -> None:
+        """Atomically replace one series with at most 10,000 ordered samples."""
+        replacement = _validate_time_series_samples(
+            samples, limit=MAX_TIME_SERIES_SAMPLES, context="TimeSeries"
+        )
+        self._model.check_owner()
+        self._model.ensure_running()
+        series = self._series(series_id)
+        if series["samples"] == replacement:
+            return
+        series["samples"] = replacement
+        self._mutated()
+
+    def append(self, series_id: str, samples: Sequence[TimeSeriesSample]) -> None:
+        """Append up to 1,024 ordered samples, retaining the newest 10,000."""
+        batch = _validate_time_series_samples(
+            samples, limit=MAX_TIME_SERIES_APPEND_BATCH, context="TimeSeries"
+        )
+        self._model.check_owner()
+        self._model.ensure_running()
+        series = self._series(series_id)
+        if not batch:
+            return
+        retained = series["samples"]
+        if retained and batch[0][0] <= retained[-1][0]:
+            raise ValueError(
+                "TimeSeries: appended timestamps must be newer than the "
+                "retained tail"
+            )
+        series["samples"] = (retained + batch)[-MAX_TIME_SERIES_SAMPLES:]
+        self._mutated({"series": [{"id": series_id, "samples": batch}]})
+
+    def set_status(self, status: TimeSeriesStatus | str) -> None:
+        """Set the application-supplied waiting, live, or stale status."""
+        value = _coerce_time_series_status(status).value
+        self._model.check_owner()
+        self._model.ensure_running()
+        if self.data["status"] == value:
+            return
+        self.data["status"] = value
+        self._mutated()
+
+    def set_range(
+        self,
+        *,
+        x_range: Optional[Tuple[float, float]] = None,
+        y_range: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        """Replace optional finite x/y axis ranges (``None`` means automatic)."""
+        x_value = _validate_time_series_range(x_range, "x_range")
+        y_value = _validate_time_series_range(y_range, "y_range")
+        self._model.check_owner()
+        self._model.ensure_running()
+        if self.data["x_range"] == x_value and self.data["y_range"] == y_value:
+            return
+        self.data["x_range"] = x_value
+        self.data["y_range"] = y_value
+        self._mutated()
+
+    def to_dict(self):
+        """Return a detached JSON-ready snapshot of the chart and its history."""
         return self._envelope(copy_json_value(self.data))

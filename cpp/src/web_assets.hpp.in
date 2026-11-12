@@ -55,6 +55,15 @@ inline const char* embedded_client_js() {
     return asset.c_str();
 }
 
+inline const char* embedded_momentary_js() {
+    static const std::string asset = []() {
+        std::string result;
+        result.reserve(@RTI_DEMO_MOMENTARY_JS_SIZE@);
+@RTI_DEMO_MOMENTARY_JS_CPP@        return result;
+    }();
+    return asset.c_str();
+}
+
 inline const char* embedded_theme_css() {
     static const std::string asset = []() {
         std::string result;

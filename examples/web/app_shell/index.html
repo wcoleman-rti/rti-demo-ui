@@ -1,0 +1,331 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of
+  the use or inability to use the software.
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Application workspace</title>
+<link rel="stylesheet" href="/sdk/theme.css">
+<style>
+.shell {
+    width: min(72rem, calc(100% - 2rem));
+    margin: 0 auto;
+    padding: 1.25rem 0 2rem;
+}
+
+.app-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--sdk-border);
+}
+
+.title-block h1 {
+    margin: 0;
+    font-size: clamp(1.5rem, 4vw, 2rem);
+}
+
+.title-block p {
+    margin: 0.35rem 0 0;
+    color: var(--sdk-muted);
+}
+
+.indicators {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.indicator {
+    min-width: 10rem;
+    padding: 0.65rem 0.8rem;
+    background: var(--sdk-surface);
+    border: 1px solid var(--sdk-border);
+    border-radius: 0.5rem;
+}
+
+.indicator-label,
+.indicator-value {
+    display: block;
+}
+
+.indicator-label {
+    margin-bottom: 0.25rem;
+    color: var(--sdk-muted);
+    font-size: 0.8rem;
+}
+
+.indicator-value {
+    font-weight: 600;
+}
+
+.indicator-value::before {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-right: 0.45rem;
+    border-radius: 50%;
+    background: currentColor;
+    content: "";
+    vertical-align: 0.05rem;
+}
+
+.indicator-value[data-state="connected"],
+.indicator-value[data-state="live"] {
+    color: var(--sdk-success);
+}
+
+.indicator-value[data-state="connecting"],
+.indicator-value[data-state="waiting"] {
+    color: var(--sdk-warning);
+}
+
+.indicator-value[data-state="reconnecting"],
+.indicator-value[data-state="stopped"],
+.indicator-value[data-state="unavailable"] {
+    color: var(--sdk-danger);
+}
+
+.workspace-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 20rem);
+    align-items: start;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.primary-content,
+.activity-panel {
+    min-width: 0;
+    padding: 1.25rem;
+    background: var(--sdk-surface);
+    border: 1px solid var(--sdk-border);
+    border-radius: 0.75rem;
+}
+
+.primary-content h2,
+.activity-panel h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.summary {
+    margin: 0.5rem 0 1.25rem;
+    color: var(--sdk-muted);
+}
+
+.data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+    gap: 0.75rem;
+    margin: 0;
+}
+
+.data-item {
+    min-width: 0;
+    padding: 1rem;
+    background: var(--sdk-card-bg);
+    border: 1px solid var(--sdk-border);
+    border-radius: 0.5rem;
+}
+
+.data-item dt {
+    color: var(--sdk-muted);
+    font-size: 0.85rem;
+}
+
+.data-item dd {
+    margin: 0.45rem 0 0;
+    font-size: 1.4rem;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.activity-list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.activity-item {
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--sdk-border);
+}
+
+.activity-item:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.activity-time {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--sdk-muted);
+    font-size: 0.8rem;
+}
+
+.empty-activity {
+    color: var(--sdk-muted);
+}
+
+@media (max-width: 48rem) {
+    .shell {
+        width: min(100% - 1rem, 72rem);
+        padding-top: 0.75rem;
+    }
+
+    .app-header {
+        display: grid;
+        gap: 1rem;
+    }
+
+    .indicators {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .indicator {
+        min-width: 0;
+    }
+
+    .workspace-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 22rem) {
+    .indicators {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="app-header">
+    <div class="title-block">
+      <h1>Application workspace</h1>
+      <p>A domain-neutral custom frontend starter.</p>
+    </div>
+    <section class="indicators" aria-label="Status indicators">
+      <div class="indicator">
+        <span class="indicator-label">Browser connection</span>
+        <span id="connection-status" class="indicator-value" role="status"
+              aria-label="Browser connection status" aria-live="polite"
+              data-state="connecting">Connecting</span>
+      </div>
+      <div class="indicator">
+        <span class="indicator-label">Application data</span>
+        <span id="data-status" class="indicator-value" role="status"
+              aria-label="Application data status" aria-live="polite"
+              data-state="waiting">Waiting for data</span>
+      </div>
+    </section>
+  </header>
+
+  <main class="workspace-layout">
+    <section class="primary-content" aria-labelledby="overview-title">
+      <h2 id="overview-title">Overview</h2>
+      <p class="summary">
+        Replace this area with the content your application needs.
+      </p>
+      <dl class="data-grid">
+        <div class="data-item">
+          <dt>Updates received</dt>
+          <dd><output id="sample-count">—</output></dd>
+        </div>
+        <div class="data-item">
+          <dt>Last update</dt>
+          <dd><output id="last-updated">—</output></dd>
+        </div>
+      </dl>
+    </section>
+
+    <aside class="activity-panel" aria-labelledby="activity-title">
+      <h2 id="activity-title">Recent activity</h2>
+      <ol id="activity-list" class="activity-list">
+        <li class="empty-activity">Waiting for activity.</li>
+      </ol>
+    </aside>
+  </main>
+</div>
+<script type="module">
+import {createClient} from "/sdk/client.js";
+
+const connectionStatus = document.getElementById("connection-status");
+const dataStatus = document.getElementById("data-status");
+const sampleCount = document.getElementById("sample-count");
+const lastUpdated = document.getElementById("last-updated");
+const activityList = document.getElementById("activity-list");
+const connectionLabels = {
+  connecting: "Connecting",
+  connected: "Connected",
+  reconnecting: "Reconnecting",
+  stopped: "Stopped",
+};
+
+function renderActivity(activity) {
+  const items = activity
+    .filter((entry) => entry && typeof entry.message === "string")
+    .map((entry) => {
+      const item = document.createElement("li");
+      item.className = "activity-item";
+      const time = document.createElement("span");
+      time.className = "activity-time";
+      time.textContent = typeof entry.time === "string" ? entry.time : "";
+      const message = document.createElement("span");
+      message.textContent = entry.message;
+      item.append(time, message);
+      return item;
+    });
+
+  if (items.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty-activity";
+    empty.textContent = "No recent activity.";
+    items.push(empty);
+  }
+  activityList.replaceChildren(...items);
+}
+
+function render(snapshot, connectionState) {
+  connectionStatus.textContent = connectionLabels[connectionState] || connectionState;
+  connectionStatus.dataset.state = connectionState;
+
+  const data = snapshot ? snapshot.data : null;
+  const reportedStatus = data && typeof data.status === "string"
+    ? data.status
+    : "Waiting for data";
+  dataStatus.textContent = reportedStatus;
+  dataStatus.dataset.state = reportedStatus === "Live" ? "live" : "waiting";
+  sampleCount.textContent = Number.isFinite(data?.sample_count)
+    ? String(data.sample_count)
+    : "—";
+  lastUpdated.textContent = typeof data?.last_updated === "string"
+    ? data.last_updated
+    : "—";
+  renderActivity(Array.isArray(data?.activity) ? data.activity : []);
+}
+
+const client = createClient({transport: "sse"});
+client.subscribe(render);
+client.start();
+window.addEventListener("pagehide", () => client.stop(), {once: true});
+</script>
+</body>
+</html>

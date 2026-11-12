@@ -24,12 +24,62 @@
 namespace rti::demo::ui {
 namespace {
 
+constexpr size_t kMaxTimeSeries = 8;
+constexpr size_t kMaxTimeSeriesSamples = 10000;
+constexpr size_t kMaxTimeSeriesAppendBatch = 1024;
+
 void require_string(const Json& value, const char* name,
                     const std::string& prefix) {
     if (!value.is_string() || value.get<std::string>().empty()) {
         throw std::invalid_argument(prefix + name +
                                     " must be a non-empty string");
     }
+}
+
+void validate_time_series_samples(const std::vector<TimeSeriesSample>& samples,
+                                  size_t maximum) {
+    if (samples.size() > maximum) {
+        throw std::invalid_argument(
+            "TimeSeries: sample batch exceeds its configured limit");
+    }
+    double previous = 0.0;
+    bool has_previous = false;
+    for (const auto& sample : samples) {
+        detail::require_finite(sample.timestamp_ms, "timestamp_ms",
+                               "TimeSeries: ");
+        if (has_previous && sample.timestamp_ms <= previous) {
+            throw std::invalid_argument(
+                "TimeSeries: timestamps must be strictly increasing");
+        }
+        if (sample.value) {
+            detail::require_finite(*sample.value, "value", "TimeSeries: ");
+        }
+        previous = sample.timestamp_ms;
+        has_previous = true;
+    }
+}
+
+void validate_time_series_range(
+    const std::optional<std::array<double, 2>>& range, const char* name) {
+    if (!range) return;
+    detail::require_finite((*range)[0], std::string(name) + "[0]",
+                           "TimeSeries: ");
+    detail::require_finite((*range)[1], std::string(name) + "[1]",
+                           "TimeSeries: ");
+    if ((*range)[0] >= (*range)[1]) {
+        throw std::invalid_argument(std::string("TimeSeries: ") + name +
+                                    " minimum must be less than maximum");
+    }
+}
+
+Json time_series_samples_json(const std::vector<TimeSeriesSample>& samples) {
+    Json result = Json::array();
+    for (const auto& sample : samples) {
+        result.push_back(
+            Json::array({sample.timestamp_ms,
+                         sample.value ? Json(*sample.value) : Json(nullptr)}));
+    }
+    return result;
 }
 
 void validate_columns(const Json& columns) {
@@ -103,6 +153,15 @@ void Component::mutated_locked() {
             "Component: component is not attached to a card");
     }
     model_.commit_component_locked(card_id_, id_);
+    revision_ = model_.revision_;
+}
+
+void Component::mutated_append_locked(const Json& append) {
+    if (card_id_.empty()) {
+        throw std::runtime_error(
+            "Component: component is not attached to a card");
+    }
+    model_.commit_component_append_locked(card_id_, id_, append);
     revision_ = model_.revision_;
 }
 
@@ -738,13 +797,155 @@ Json Log::to_json_locked() const {
                                {"max_entries", max_entries_}});
 }
 
+TimeSeriesViewport::TimeSeriesViewport(
+    detail::Model& model, std::string id, std::string title,
+    std::vector<TimeSeriesSeries> series, TimeSeriesStatus status,
+    std::string x_label, std::string y_label,
+    std::optional<std::array<double, 2>> x_range,
+    std::optional<std::array<double, 2>> y_range)
+    : Component(model, std::move(id), "timeseries"),
+      title_(std::move(title)),
+      x_label_(std::move(x_label)),
+      y_label_(std::move(y_label)),
+      status_(status),
+      x_range_(std::move(x_range)),
+      y_range_(std::move(y_range)),
+      series_(std::move(series)) {
+    detail::require_non_empty(title_, "title", "TimeSeries: ");
+    to_string(status_);
+    if (series_.empty() || series_.size() > kMaxTimeSeries) {
+        throw std::invalid_argument(
+            "TimeSeries: series must contain 1 to 8 entries");
+    }
+    validate_time_series_range(x_range_, "x_range");
+    validate_time_series_range(y_range_, "y_range");
+    static const std::regex id_pattern("^[a-z][a-z0-9_-]{0,63}$");
+    std::set<std::string> ids;
+    for (auto& item : series_) {
+        if (!std::regex_match(item.id, id_pattern)) {
+            throw std::invalid_argument(
+                "TimeSeries: series ID has invalid format");
+        }
+        if (!ids.insert(item.id).second) {
+            throw std::invalid_argument(
+                "TimeSeries: series IDs must be unique");
+        }
+        detail::require_non_empty(item.label, "series label", "TimeSeries: ");
+        detail::require_valid_color(item.color, "TimeSeries: ");
+        validate_time_series_samples(item.samples, kMaxTimeSeriesSamples);
+    }
+}
+
+TimeSeriesSeries& TimeSeriesViewport::find_series(
+    const std::string& series_id) {
+    const auto found = std::find_if(
+        series_.begin(), series_.end(),
+        [&series_id](const auto& series) { return series.id == series_id; });
+    if (found == series_.end()) {
+        throw std::invalid_argument("TimeSeries: unknown series ID: " +
+                                    series_id);
+    }
+    return *found;
+}
+
+void TimeSeriesViewport::replace_series(const std::string& series_id,
+                                        std::vector<TimeSeriesSample> samples) {
+    validate_time_series_samples(samples, kMaxTimeSeriesSamples);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    auto& series = find_series(series_id);
+    if (series.samples.size() == samples.size() &&
+        std::equal(series.samples.begin(), series.samples.end(),
+                   samples.begin(), [](const auto& left, const auto& right) {
+                       return left.timestamp_ms == right.timestamp_ms &&
+                              left.value == right.value;
+                   })) {
+        return;
+    }
+    series.samples = std::move(samples);
+    mutated_locked();
+}
+
+void TimeSeriesViewport::append(const std::string& series_id,
+                                std::vector<TimeSeriesSample> samples) {
+    validate_time_series_samples(samples, kMaxTimeSeriesAppendBatch);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    auto& series = find_series(series_id);
+    if (samples.empty()) return;
+    if (!series.samples.empty() &&
+        samples.front().timestamp_ms <= series.samples.back().timestamp_ms) {
+        throw std::invalid_argument(
+            "TimeSeries: appended timestamps must be newer than the retained "
+            "tail");
+    }
+    series.samples.insert(series.samples.end(), samples.begin(), samples.end());
+    if (series.samples.size() > kMaxTimeSeriesSamples) {
+        series.samples.erase(
+            series.samples.begin(),
+            series.samples.begin() +
+                static_cast<std::ptrdiff_t>(series.samples.size() -
+                                            kMaxTimeSeriesSamples));
+    }
+    const Json append{
+        {"series",
+         Json::array({Json{{"id", series_id},
+                           {"samples", time_series_samples_json(samples)}}})}};
+    mutated_append_locked(append);
+}
+
+void TimeSeriesViewport::set_status(TimeSeriesStatus status) {
+    to_string(status);
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (status_ == status) return;
+    status_ = status;
+    mutated_locked();
+}
+
+void TimeSeriesViewport::set_range(
+    std::optional<std::array<double, 2>> x_range,
+    std::optional<std::array<double, 2>> y_range) {
+    validate_time_series_range(x_range, "x_range");
+    validate_time_series_range(y_range, "y_range");
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (x_range_ == x_range && y_range_ == y_range) return;
+    x_range_ = std::move(x_range);
+    y_range_ = std::move(y_range);
+    mutated_locked();
+}
+
+Json TimeSeriesViewport::to_json_locked() const {
+    Json series = Json::array();
+    for (const auto& item : series_) {
+        series.push_back({{"id", item.id},
+                          {"label", item.label},
+                          {"unit", item.unit},
+                          {"color", item.color},
+                          {"samples", time_series_samples_json(item.samples)}});
+    }
+    const auto range_json = [](const auto& range) {
+        return range ? Json::array({(*range)[0], (*range)[1]}) : Json(nullptr);
+    };
+    return component_json(id_, type_, revision_,
+                          Json{{"title", title_},
+                               {"x_label", x_label_},
+                               {"y_label", y_label_},
+                               {"status", to_string(status_)},
+                               {"x_range", range_json(x_range_)},
+                               {"y_range", range_json(y_range_)},
+                               {"series", std::move(series)}});
+}
+
 CustomComponent::CustomComponent(detail::Model& model, std::string id,
                                  std::string type, Json data)
     : Component(model, std::move(id), std::move(type)), data_(std::move(data)) {
     detail::require_non_empty(id_, "id", "CustomComponent: ");
     detail::require_non_empty(type_, "type", "CustomComponent: ");
-    if (type_ == "scene2d" || type_ == "table" || type_ == "metric" ||
-        type_ == "text" || type_ == "badge" || type_ == "log")
+    if (type_ == "scene2d" || type_ == "scene3d" || type_ == "table" ||
+        type_ == "metric" || type_ == "text" || type_ == "badge" ||
+        type_ == "log" || type_ == "timeseries")
         throw std::invalid_argument("CustomComponent: type is reserved");
     detail::require_json_compatible(data_, "CustomComponent: ");
 }
@@ -882,6 +1083,27 @@ Log* Card::add_log(Json entries, std::string empty_state, int max_entries) {
     auto component = std::make_unique<Log>(
         model_, model_.next_component_id("log"), std::move(entries),
         std::move(empty_state), max_entries);
+    auto* result = component.get();
+    components_.push_back(std::move(component));
+    result->added_locked(id_);
+    return result;
+}
+TimeSeriesViewport* Card::add_time_series(
+    const std::string& title, std::vector<TimeSeriesSeries> series,
+    TimeSeriesStatus status, std::string x_label, std::string y_label,
+    std::optional<std::array<double, 2>> x_range,
+    std::optional<std::array<double, 2>> y_range) {
+    std::lock_guard<std::mutex> guard(model_.lock());
+    model_.ensure_running();
+    if (!model_.has_adapter_component("timeseries")) {
+        throw std::runtime_error(
+            "Card: enable the optional uPlot adapter before adding "
+            "time-series components");
+    }
+    auto component = std::make_unique<TimeSeriesViewport>(
+        model_, model_.next_component_id("timeseries"), title,
+        std::move(series), status, std::move(x_label), std::move(y_label),
+        std::move(x_range), std::move(y_range));
     auto* result = component.get();
     components_.push_back(std::move(component));
     result->added_locked(id_);

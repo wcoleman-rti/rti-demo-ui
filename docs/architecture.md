@@ -326,9 +326,16 @@ scene positions with `requestAnimationFrame`. `prefers-reduced-motion` applies
 target positions immediately. For `scene3d`, it dynamically imports the
 optional `/sdk/runtime3d.js` module only after receiving a scene component.
 That renderer caches GLB parsing by URL, clones per-scene hierarchies and
-materials, owns orbit controls and browser-local selection, and always keeps a
-semantic node list and textual fallback beside the canvas. Unsupported custom
-components show a visible isolated diagnostic.
+materials, and owns orbit controls and browser-local selection. The renderer
+context's `materialMode` defaults to `status`; `original` preserves the GLB's
+appearance during pose/status updates and restores original emissive values
+after selection. `setScene3dCamera` applies browser-local position, target, and
+up-vector presets without replacing the canvas, model, or controls. Context
+options and presets survive subsequent snapshots. `showNodeList` defaults to
+`true`; hiding it in the rendered view never hides the semantic list and
+textual fallback on failure. These presentation APIs do not change the
+server-side component schema. Unsupported custom components show a visible
+isolated diagnostic.
 
 ## 11. Build and Tests
 
