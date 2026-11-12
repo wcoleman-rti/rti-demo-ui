@@ -85,6 +85,10 @@ AppKit, and WebKit. The `arm64Darwin23clang16.0` RTI architecture remains the
 Connext binary architecture even when a newer compatible Xcode builds the
 application.
 
+Hosted qualification uses the `macos-15` Apple Silicon runner because GitHub
+retired its macOS 14 images. This does not change the minimum platform
+requirements above.
+
 Python requires Python 3.11+ and pywebview 6.2.1, which installs its Cocoa
 dependencies. Its hosted automated qualification has passed; manual acceptance
 remains required.
