@@ -237,14 +237,6 @@ body {
     gap: 10px;
 }
 
-.sdk-scene3d-body-no-list {
-    grid-template-columns: minmax(0, 1fr);
-}
-
-.sdk-scene3d-list[hidden] {
-    display: none;
-}
-
 .sdk-scene3d-viewport {
     position: relative;
     min-width: 0;

@@ -20,16 +20,10 @@ C++.
 | 2D scene updates | `python examples/py/simple.py` | `rti_demo_ui_simple` |
 | Built-in dashboard components | `python examples/py/components.py` | `rti_demo_ui_components` |
 | Application-owned JSON state | `python examples/py/app_data.py` | `rti_demo_ui_app_data` |
-| Responsive custom frontend shell | `python examples/py/app_shell.py` | `rti_demo_ui_app_shell` |
 | Validated browser commands | `python examples/py/commands.py` | `rti_demo_ui_commands` |
 | Themes, layouts, and a custom root | `python examples/py/gallery.py` | `rti_demo_ui_gallery` |
 | 3D scene updates | `python examples/py/arm3d.py` | `rti_demo_ui_arm3d` |
 | Optional Connext DDS integration | `python examples/py/connext.py` | `rti_demo_ui_connext` |
-
-The custom frontend shell is a domain-neutral starting point with separate
-browser-connection and application-data status indicators, a recent activity
-list, and responsive main/sidebar regions. It uses the shared
-`/sdk/client.js` browser client and `/sdk/theme.css` theme stylesheet.
 
 Build any C++ example from the repository root:
 

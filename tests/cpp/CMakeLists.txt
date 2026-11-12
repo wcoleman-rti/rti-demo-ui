@@ -24,12 +24,6 @@ target_link_libraries(rti_demo_ui_http_tests PRIVATE rti_demo_ui::core)
 target_compile_definitions(rti_demo_ui_http_tests PRIVATE
     SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
-if(TARGET rti_demo_ui::uplot)
-    target_link_libraries(rti_demo_ui_http_tests PRIVATE rti_demo_ui::uplot)
-    target_compile_definitions(rti_demo_ui_http_tests PRIVATE
-        RTI_DEMO_HAS_UPLOT=1
-    )
-endif()
 add_test(NAME http_tests COMMAND rti_demo_ui_http_tests)
 
 add_executable(rti_demo_ui_static_root_tests static_root_tests.cpp)

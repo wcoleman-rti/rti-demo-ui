@@ -184,10 +184,7 @@ Durable cross-language contracts are described in
 manage application-owned JSON state. `Card` also provides `add_table`,
 `add_metric`, `add_text`, `add_badge`, `add_log`, and
 `add_custom_component`; returned handles expose the live mutation methods
-described by their type hints. Bounded time-series charts are available through
-the separately installed uPlot adapter; see [Time Series](../time-series.md)
-for enabling it, schema limits, timestamp units, and Python/C++ examples.
-Register opt-in actions with
+described by their type hints. Register opt-in actions with
 `register_command(name, schema, handler, confirmation=None)`. Command schemas
 use the shared restricted subset, handlers receive validated objects, and
 responses are JSON envelopes.
