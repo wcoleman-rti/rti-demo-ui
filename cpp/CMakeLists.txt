@@ -43,6 +43,7 @@ set(RTI_DEMO_ASSET_FILES
     "${RTI_DEMO_UI_ASSETS_DIR}/runtime.js"
     "${RTI_DEMO_UI_ASSETS_DIR}/runtime3d.js"
     "${RTI_DEMO_UI_ASSETS_DIR}/client.js"
+    "${RTI_DEMO_UI_ASSETS_DIR}/momentary.js"
     "${RTI_DEMO_UI_ASSETS_DIR}/theme.css"
 )
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -58,6 +59,7 @@ file(READ "${RTI_DEMO_UI_ASSETS_DIR}/index.html" RTI_DEMO_INDEX_HTML)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/runtime.js" RTI_DEMO_RUNTIME_JS)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/runtime3d.js" RTI_DEMO_RUNTIME3D_JS)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/client.js" RTI_DEMO_CLIENT_JS)
+file(READ "${RTI_DEMO_UI_ASSETS_DIR}/momentary.js" RTI_DEMO_MOMENTARY_JS)
 file(READ "${RTI_DEMO_UI_ASSETS_DIR}/theme.css" RTI_DEMO_THEME_CSS)
 
 function(rti_demo_cpp_asset input_var output_var size_var)
@@ -87,6 +89,7 @@ foreach(asset_var
         RTI_DEMO_RUNTIME_JS
         RTI_DEMO_RUNTIME3D_JS
         RTI_DEMO_CLIENT_JS
+        RTI_DEMO_MOMENTARY_JS
         RTI_DEMO_THEME_CSS)
     string(FIND "${${asset_var}}" "RTI_ASSET" RTI_DEMO_ASSET_DELIMITER_INDEX)
     if(NOT RTI_DEMO_ASSET_DELIMITER_INDEX EQUAL -1)
@@ -105,6 +108,9 @@ rti_demo_cpp_asset(
 )
 rti_demo_cpp_asset(
     RTI_DEMO_CLIENT_JS RTI_DEMO_CLIENT_JS_CPP RTI_DEMO_CLIENT_JS_SIZE
+)
+rti_demo_cpp_asset(
+    RTI_DEMO_MOMENTARY_JS RTI_DEMO_MOMENTARY_JS_CPP RTI_DEMO_MOMENTARY_JS_SIZE
 )
 rti_demo_cpp_asset(
     RTI_DEMO_THEME_CSS RTI_DEMO_THEME_CSS_CPP RTI_DEMO_THEME_CSS_SIZE
@@ -139,6 +145,15 @@ target_include_directories(rti_demo_ui_core
 target_compile_features(rti_demo_ui_core PUBLIC cxx_std_17)
 
 add_library(rti_demo_ui::core ALIAS rti_demo_ui_core)
+
+option(RTI_DEMO_BUILD_UPLOT_ADAPTER
+       "Expose the separately packaged optional uPlot adapter target" OFF)
+if(RTI_DEMO_BUILD_UPLOT_ADAPTER)
+    add_subdirectory(
+        "${CMAKE_CURRENT_LIST_DIR}/../adapters/uplot/cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/uplot"
+    )
+endif()
 
 install(
     TARGETS rti_demo_ui_core

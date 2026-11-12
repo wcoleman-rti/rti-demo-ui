@@ -19,6 +19,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 from copy import deepcopy
@@ -53,6 +54,17 @@ _SSE_MAX_STREAMS = 16
 _SSE_PUBLICATION_INTERVAL = 1.0 / 30.0
 _SSE_RETRY = b"retry: 1000\n\n"
 _SSE_WRITE_TIMEOUT = 5.0
+_ADAPTER_NAME = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_ADAPTER_COMPONENT = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_CORE_COMPONENT_TYPES = {
+    "scene2d",
+    "scene3d",
+    "table",
+    "metric",
+    "text",
+    "badge",
+    "log",
+}
 _logger = logging.getLogger(__name__)
 
 _ASSET_ROUTES = {
@@ -61,6 +73,7 @@ _ASSET_ROUTES = {
     "/sdk/runtime.js": ("runtime.js", "application/javascript; charset=utf-8"),
     "/sdk/runtime3d.js": ("runtime3d.js", "application/javascript; charset=utf-8"),
     "/sdk/client.js": ("client.js", "application/javascript; charset=utf-8"),
+    "/sdk/momentary.js": ("momentary.js", "application/javascript; charset=utf-8"),
     "/sdk/theme.css": ("theme.css", "text/css; charset=utf-8"),
 }
 
@@ -149,6 +162,8 @@ class _DirtyTargets:
         self.presentation = False
         self.cards = {}
         self.components = {}
+        self.append_batches = {}
+        self.append_revisions = {}
         self.removed_cards = set()
         self.removed_components = set()
 
@@ -159,6 +174,8 @@ class _DirtyTargets:
         self.presentation = False
         self.cards.clear()
         self.components.clear()
+        self.append_batches.clear()
+        self.append_revisions.clear()
 
     def empty(self) -> bool:
         return not (self.app_data or self.presentation or self.cards or self.components)
@@ -189,6 +206,7 @@ class _DirtyTargets:
             for target, operation in self.components.items()
             if target[0] != card_id
         }
+        self._clear_appends_for_card(card_id)
         return was_empty
 
     def mark_card_removed(self, card_id: str) -> bool:
@@ -202,7 +220,18 @@ class _DirtyTargets:
             for target, operation in self.components.items()
             if target[0] != card_id
         }
+        self._clear_appends_for_card(card_id)
         return was_empty
+
+    def _clear_appends_for_card(self, card_id):
+        for target in tuple(self.append_batches):
+            if target[0] == card_id:
+                self.append_batches.pop(target, None)
+                self.append_revisions.pop(target, None)
+
+    def _clear_appends(self, target):
+        self.append_batches.pop(target, None)
+        self.append_revisions.pop(target, None)
 
     def mark_component(self, card_id: str, component_id: str) -> bool:
         was_empty = self.empty()
@@ -219,6 +248,34 @@ class _DirtyTargets:
             )
         if card_id not in self.cards:
             self.components[target] = self._UPSERT
+            self._clear_appends(target)
+        return self.active and was_empty and not self.empty()
+
+    def mark_component_append(self, card_id, component_id, append, revision):
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        if card_id in self.removed_cards:
+            raise RuntimeError(
+                f"cannot upsert component in removed card target: {card_id}"
+            )
+        target = (card_id, component_id)
+        if target in self.removed_components:
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        if card_id in self.cards or self.components.get(target) == self._UPSERT:
+            return False
+        self.components[target] = "append"
+        batches = self.append_batches.setdefault(target, {})
+        for series in append["series"]:
+            current = batches.setdefault(series["id"], [])
+            current.extend(series["samples"])
+            if len(current) > 10_000:
+                self.components[target] = self._UPSERT
+                self._clear_appends(target)
+                return self.active and was_empty and not self.empty()
+        self.append_revisions[target] = revision
         return self.active and was_empty and not self.empty()
 
     def mark_component_removed(self, card_id: str, component_id: str) -> bool:
@@ -228,6 +285,7 @@ class _DirtyTargets:
             return False
         if card_id not in self.cards:
             self.components[(card_id, component_id)] = self._REMOVE
+            self._clear_appends((card_id, component_id))
         return was_empty and not self.empty()
 
     def flush(self, model) -> Optional[dict]:
@@ -269,6 +327,23 @@ class _DirtyTargets:
                         "op": "remove-component",
                         "card_id": card_id,
                         "component_id": component_id,
+                    }
+                )
+                continue
+            if operation == "append":
+                batches = self.append_batches[(card_id, component_id)]
+                changes.append(
+                    {
+                        "op": "append-timeseries",
+                        "card_id": card_id,
+                        "component_id": component_id,
+                        "component_revision": self.append_revisions[
+                            (card_id, component_id)
+                        ],
+                        "series": [
+                            {"id": series_id, "samples": samples}
+                            for series_id, samples in sorted(batches.items())
+                        ],
                     }
                 )
                 continue
@@ -479,6 +554,7 @@ class _Model:
         self.data: Any = {}
         self._dirty_targets = _DirtyTargets()
         self._dirty_callback = None
+        self.adapter_component_types = set()
 
     def set_owner(self, loop) -> None:
         self._owner_loop = loop
@@ -556,6 +632,28 @@ class _Model:
             and self._dirty_callback is not None
         ):
             self._dirty_callback()
+
+    def commit_component_append_locked(
+        self, card_id: str, component_id: str, append: dict
+    ) -> None:
+        if (
+            card_id in self._dirty_targets.removed_cards
+            or (card_id, component_id) in self._dirty_targets.removed_components
+        ):
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_component_append(
+                card_id, component_id, append, self.revision
+            )
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
+    def has_adapter_component(self, component_type: str) -> bool:
+        return component_type in self.adapter_component_types
 
     def commit_component_removal_locked(self, card_id: str, component_id: str) -> None:
         self.revision += 1
@@ -698,6 +796,9 @@ class DemoUiApp:
         self._site = None
         self._ready_info = None
         self._commands: Dict[str, Command] = {}
+        self._adapters = {}
+        self._adapter_assets = {}
+        self._adapter_component_types = set()
         self._command_capability = None
         self._active_commands = set()
         self._commands_done = asyncio.Event()
@@ -768,6 +869,70 @@ class DemoUiApp:
                 },
             },
         )
+
+    def _register_adapter(
+        self,
+        name: str,
+        version: str,
+        components,
+        runtime_js: bytes,
+        theme_css: bytes | None = None,
+    ) -> None:
+        """Register a fixed SDK-owned adapter descriptor and local assets."""
+        if self._run_started or self._state != self._NEW:
+            raise RuntimeError("DemoUiApp: adapters must be enabled before run()")
+        if not isinstance(name, str) or not _ADAPTER_NAME.fullmatch(name):
+            raise ValueError("DemoUiApp: invalid adapter name")
+        if not isinstance(version, str) or not version:
+            raise ValueError("DemoUiApp: adapter version must be non-empty")
+        if not isinstance(components, (list, tuple)) or not components:
+            raise ValueError(
+                "DemoUiApp: adapter components must be unique and non-empty"
+            )
+        if name in self._adapters:
+            raise ValueError(f"DemoUiApp: adapter already registered: {name}")
+        if any(
+            not isinstance(component_type, str)
+            or not _ADAPTER_COMPONENT.fullmatch(component_type)
+            or component_type in _CORE_COMPONENT_TYPES
+            or component_type in self._adapter_component_types
+            for component_type in components
+        ) or len(set(components)) != len(components):
+            raise ValueError("DemoUiApp: invalid or colliding adapter component type")
+        if not isinstance(runtime_js, bytes) or not runtime_js:
+            raise ValueError("DemoUiApp: adapter runtime must be non-empty bytes")
+        if theme_css is not None and (
+            not isinstance(theme_css, bytes) or not theme_css
+        ):
+            raise ValueError("DemoUiApp: adapter stylesheet must be non-empty bytes")
+
+        root = f"/sdk/adapters/{name}"
+        module = f"{root}/runtime.js"
+        styles = [f"{root}/theme.css"] if theme_css is not None else []
+        self._adapters[name] = {
+            "name": name,
+            "version": version,
+            "components": list(components),
+            "module": module,
+            "styles": styles,
+        }
+        self._adapter_assets[module] = (
+            runtime_js,
+            "application/javascript; charset=utf-8",
+        )
+        if theme_css is not None:
+            self._adapter_assets[styles[0]] = (
+                theme_css,
+                "text/css; charset=utf-8",
+            )
+        self._adapter_component_types.update(components)
+        self._model.adapter_component_types.update(components)
+
+    def _adapter_manifest(self) -> dict:
+        return {
+            "schema_version": 1,
+            "adapters": [self._adapters[name] for name in sorted(self._adapters)],
+        }
 
     def _command_origin_is_trusted(self, request: web.Request) -> bool:
         if self._ready_info is None:
@@ -913,6 +1078,15 @@ class DemoUiApp:
             return _json_response(200, {"status": "ok"})
         if path == "/api/state":
             return _json_response(200, self._model.snapshot())
+        if path == "/sdk/adapters/manifest.json":
+            return _asset_response(
+                _json_bytes(self._adapter_manifest()),
+                "application/json; charset=utf-8",
+            )
+        adapter_asset = self._adapter_assets.get(path)
+        if adapter_asset is not None:
+            body, content_type = adapter_asset
+            return _asset_response(body, content_type)
         if path == "/api" or path.startswith("/api/"):
             return _json_response(404, {"error": "not found"})
         if path == "/sdk" or path.startswith("/sdk/"):

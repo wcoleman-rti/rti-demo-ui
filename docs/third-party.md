@@ -84,6 +84,24 @@ Update the pins with `npm ci --ignore-scripts`, rebuild the artifact, refresh
 `assets/runtime3d.sha256`, and review the generated diff and upstream license
 notices together.
 
+## Optional uPlot Adapter
+
+The separately built renderer bundle is generated from exact npm pins in
+`adapters/uplot/package-lock.json`. Its generated ES module and stylesheet are
+served only by an app that enables the adapter; the core Python distribution
+and C++ target do not include the renderer bytes.
+
+| Component | Version | Purpose | License | Source |
+| --- | --- | --- | --- | --- |
+| uPlot | 1.6.31 | Locally bundled time-series renderer | MIT | [leeoniya/uPlot](https://github.com/leeoniya/uPlot) |
+| esbuild | 0.25.0 | Reproducible optional-adapter bundle build tool | MIT | [evanw/esbuild](https://github.com/evanw/esbuild) |
+
+The uPlot MIT notice is bundled as `LICENSE-uPlot` in the adapter Python
+distribution and installed by the optional CMake target. Regenerate with
+`npm ci --ignore-scripts && npm run build` from `adapters/uplot`; review the
+generated module, stylesheet, license, and `adapters/uplot/assets.sha256`
+checksum together.
+
 ## Optional Connext Example Dependencies
 
 These components are required only when building or running the guarded Connext
