@@ -59,17 +59,6 @@ Containers and components
    :undoc-members:
    :show-inheritance:
 
-.. autoclass:: rti_demo_ui.TimeSeries
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. autoclass:: rti_demo_ui.TimeSeriesSeries
-   :members:
-   :undoc-members:
-
-.. autodata:: rti_demo_ui.TimeSeriesSample
-
 Commands
 --------
 
@@ -97,7 +86,4 @@ Presentation and state values
    :members:
 
 .. autoclass:: rti_demo_ui.CardArea
-   :members:
-
-.. autoclass:: rti_demo_ui.TimeSeriesStatus
    :members:

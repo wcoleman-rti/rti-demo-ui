@@ -25,12 +25,6 @@ target_compile_definitions(rti_demo_ui_app_data PRIVATE
     RTI_DEMO_APP_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/app_data"
 )
 
-add_executable(rti_demo_ui_app_shell app_shell.cpp)
-target_link_libraries(rti_demo_ui_app_shell PRIVATE rti_demo_ui::core)
-target_compile_definitions(rti_demo_ui_app_shell PRIVATE
-    RTI_DEMO_APP_SHELL_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/app_shell"
-)
-
 add_executable(rti_demo_ui_commands commands.cpp)
 target_link_libraries(rti_demo_ui_commands PRIVATE rti_demo_ui::core)
 target_compile_definitions(rti_demo_ui_commands PRIVATE

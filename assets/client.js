@@ -14,7 +14,6 @@
 
 const POLL_INTERVAL_MS = 200;
 const BACKOFF_STEPS_MS = [500, 1000, 2000, 5000];
-const trustedSnapshots = new WeakSet();
 
 function freeze(value) {
     if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -72,72 +71,6 @@ function validateComponent(component, snapshotRevision) {
     assertRevision(component.revision, 'component');
     if (component.revision > snapshotRevision) throw new Error('component revision exceeds snapshot revision');
     assertJson(component.data);
-    if (component.type === 'timeseries') validateTimeSeriesData(component.data);
-}
-
-function validateTimeSeriesData(data) {
-    if (!isObject(data)) throw new Error('timeseries data must be an object');
-    assertKeys(
-        data,
-        ['title', 'x_label', 'y_label', 'status', 'x_range', 'y_range', 'series'],
-        'timeseries data',
-    );
-    if (typeof data.title !== 'string' || data.title.length === 0) {
-        throw new Error('timeseries title must be a non-empty string');
-    }
-    if (typeof data.x_label !== 'string' || typeof data.y_label !== 'string') {
-        throw new Error('timeseries axis labels must be strings');
-    }
-    if (!['waiting', 'live', 'stale'].includes(data.status)) {
-        throw new Error('timeseries status is invalid');
-    }
-    ['x_range', 'y_range'].forEach((name) => {
-        const range = data[name];
-        if (range === null) return;
-        if (!Array.isArray(range) || range.length !== 2
-            || !Number.isFinite(range[0]) || !Number.isFinite(range[1])
-            || range[0] >= range[1]) {
-            throw new Error(`timeseries ${name} is invalid`);
-        }
-    });
-    if (!Array.isArray(data.series) || data.series.length < 1 || data.series.length > 8) {
-        throw new Error('timeseries must contain 1 to 8 series');
-    }
-    const ids = new Set();
-    data.series.forEach((series) => {
-        if (!isObject(series)) throw new Error('timeseries series must be objects');
-        assertKeys(series, ['id', 'label', 'unit', 'color', 'samples'], 'timeseries series');
-        if (typeof series.id !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(series.id)) {
-            throw new Error('timeseries series ID is invalid');
-        }
-        if (ids.has(series.id)) throw new Error(`duplicate timeseries series ID: ${series.id}`);
-        ids.add(series.id);
-        if (typeof series.label !== 'string' || series.label.length === 0
-            || typeof series.unit !== 'string'
-            || typeof series.color !== 'string'
-            || !/^(#[0-9A-Fa-f]{6}|var\(--[A-Za-z0-9-]+\))$/.test(series.color)) {
-            throw new Error('timeseries series metadata is invalid');
-        }
-        validateTimeSeriesSamples(series.samples, 10000, 'timeseries series');
-    });
-}
-
-function validateTimeSeriesSamples(samples, limit, kind) {
-    if (!Array.isArray(samples) || samples.length > limit) {
-        throw new Error(`${kind} samples must be an array of at most ${limit} entries`);
-    }
-    let previous = null;
-    samples.forEach((sample) => {
-        if (!Array.isArray(sample) || sample.length !== 2
-            || !Number.isFinite(sample[0])
-            || !(sample[1] === null || Number.isFinite(sample[1]))) {
-            throw new Error(`${kind} sample must contain a finite timestamp and value or null`);
-        }
-        if (previous !== null && sample[0] <= previous) {
-            throw new Error(`${kind} timestamps must be strictly increasing`);
-        }
-        previous = sample[0];
-    });
 }
 
 function validateCard(card, snapshotRevision) {
@@ -257,47 +190,6 @@ function validatePatch(snapshot, patch) {
             target = `component:${change.card_id}:${change.value.id}`;
             order = [3, change.card_id, change.value.id];
             break;
-        case 'append-timeseries': {
-            assertKeys(
-                change,
-                ['op', 'card_id', 'component_id', 'component_revision', 'series'],
-                'append-timeseries operation',
-            );
-            assertId(change.card_id, 'card');
-            assertId(change.component_id, 'component');
-            assertRevision(change.component_revision, 'component');
-            const card = snapshot.cards.find((item) => item.id === change.card_id);
-            const component = card && card.components.find((item) => item.id === change.component_id);
-            if (!component || component.type !== 'timeseries') {
-                throw new Error('append-timeseries target must exist and be a timeseries');
-            }
-            if (change.component_revision <= component.revision
-                || change.component_revision > patch.revision) {
-                throw new Error('append-timeseries component revision is invalid');
-            }
-            if (!Array.isArray(change.series) || change.series.length < 1 || change.series.length > 8) {
-                throw new Error('append-timeseries series must be a non-empty array');
-            }
-            const changedSeries = new Set();
-            change.series.forEach((delta) => {
-                if (!isObject(delta)) throw new Error('append-timeseries series must be objects');
-                assertKeys(delta, ['id', 'samples'], 'append-timeseries series');
-                const state = component.data.series.find((item) => item.id === delta.id);
-                if (!state || changedSeries.has(delta.id)) {
-                    throw new Error('append-timeseries series ID is absent or duplicated');
-                }
-                changedSeries.add(delta.id);
-                validateTimeSeriesSamples(delta.samples, 10000, 'append-timeseries');
-                if (delta.samples.length === 0
-                    || (state.samples.length
-                        && delta.samples[0][0] <= state.samples[state.samples.length - 1][0])) {
-                    throw new Error('append-timeseries samples must extend the retained tail');
-                }
-            });
-            target = `component:${change.card_id}:${change.component_id}`;
-            order = [3, change.card_id, change.component_id];
-            break;
-        }
         case 'remove-component':
             assertKeys(change, ['op', 'card_id', 'component_id'], 'remove-component operation');
             assertId(change.card_id, 'card');
@@ -327,42 +219,9 @@ function validatePatch(snapshot, patch) {
 }
 
 export function applyPatch(snapshot, patch) {
-    if (!trustedSnapshots.has(snapshot)) {
-        validateSnapshot(snapshot);
-        snapshot = freeze(cloneJson(snapshot));
-        trustedSnapshots.add(snapshot);
-    }
+    validateSnapshot(snapshot);
     validatePatch(snapshot, patch);
-    const next = {...snapshot};
-    let cardsCopied = false;
-    const copiedCards = new WeakSet();
-    const copiedComponents = new WeakSet();
-    const copiedChartComponents = new WeakSet();
-
-    function mutableCards() {
-        if (!cardsCopied) {
-            next.cards = next.cards.slice();
-            cardsCopied = true;
-        }
-        return next.cards;
-    }
-
-    function mutableCard(cardId) {
-        const cards = mutableCards();
-        const index = cards.findIndex((item) => item.id === cardId);
-        if (index === -1) throw new Error(`cannot update missing card: ${cardId}`);
-        let card = cards[index];
-        if (!copiedCards.has(card)) {
-            card = {...card};
-            cards[index] = card;
-            copiedCards.add(card);
-        }
-        if (!copiedComponents.has(card)) {
-            card.components = card.components.slice();
-            copiedComponents.add(card);
-        }
-        return card;
-    }
+    const next = cloneJson(snapshot);
 
     patch.changes.forEach((change) => {
         switch (change.op) {
@@ -376,49 +235,18 @@ export function applyPatch(snapshot, patch) {
         case 'upsert-card': {
             const card = cloneJson(change.value);
             const index = next.cards.findIndex((item) => item.id === card.id);
-            if (index === -1) {
-                const cards = mutableCards();
-                insertCard(cards, card);
-            } else {
-                mutableCards()[index] = card;
-            }
-            break;
-        }
-        case 'append-timeseries': {
-            const card = mutableCard(change.card_id);
-            const componentIndex = card.components.findIndex(
-                (item) => item.id === change.component_id
-            );
-            let component = card.components[componentIndex];
-            if (!copiedChartComponents.has(component)) {
-                component = {
-                    ...component,
-                    data: {...component.data, series: component.data.series.slice()}
-                };
-                card.components[componentIndex] = component;
-                copiedChartComponents.add(component);
-            }
-            change.series.forEach((delta) => {
-                const seriesIndex = component.data.series.findIndex(
-                    (item) => item.id === delta.id
-                );
-                const series = component.data.series[seriesIndex];
-                component.data.series[seriesIndex] = {
-                    ...series,
-                    samples: series.samples.concat(cloneJson(delta.samples)).slice(-10000)
-                };
-            });
-            component.revision = change.component_revision;
+            if (index === -1) insertCard(next.cards, card);
+            else next.cards[index] = card;
             break;
         }
         case 'remove-card': {
             const index = next.cards.findIndex((item) => item.id === change.card_id);
             if (index === -1) throw new Error(`cannot remove missing card: ${change.card_id}`);
-            mutableCards().splice(index, 1);
+            next.cards.splice(index, 1);
             break;
         }
         case 'upsert-component': {
-            const card = mutableCard(change.card_id);
+            const card = next.cards.find((item) => item.id === change.card_id);
             if (!card) throw new Error(`cannot update component in missing card: ${change.card_id}`);
             const component = cloneJson(change.value);
             const index = card.components.findIndex((item) => item.id === component.id);
@@ -427,7 +255,8 @@ export function applyPatch(snapshot, patch) {
             break;
         }
         case 'remove-component': {
-            const card = mutableCard(change.card_id);
+            const card = next.cards.find((item) => item.id === change.card_id);
+            if (!card) throw new Error(`cannot remove component from missing card: ${change.card_id}`);
             const index = card.components.findIndex((item) => item.id === change.component_id);
             if (index === -1) throw new Error(`cannot remove missing component: ${change.component_id}`);
             card.components.splice(index, 1);
@@ -436,9 +265,7 @@ export function applyPatch(snapshot, patch) {
         }
     });
     next.revision = patch.revision;
-    const result = freeze(next);
-    trustedSnapshots.add(result);
-    return result;
+    return freeze(validateSnapshot(next));
 }
 
 export function createClient(options = {}) {
@@ -467,8 +294,8 @@ export function createClient(options = {}) {
         return new URL(`${baseUrl}${path}`, window.location.href);
     }
 
-    function notify(update = null) {
-        listeners.forEach((listener) => listener(snapshot, connectionState, update));
+    function notify() {
+        listeners.forEach((listener) => listener(snapshot, connectionState));
     }
 
     function setConnectionState(next) {
@@ -477,12 +304,11 @@ export function createClient(options = {}) {
         notify();
     }
 
-    function publish(next, force = false, update = null) {
+    function publish(next, force = false) {
         if (!force && revision !== null && next.revision <= revision) return;
         revision = next.revision;
         snapshot = freeze(next);
-        trustedSnapshots.add(snapshot);
-        notify(update);
+        notify();
     }
 
     function schedule(delay, currentGeneration, callback) {
@@ -561,7 +387,7 @@ export function createClient(options = {}) {
                 }
                 if (revision !== null && patch.revision <= revision) return;
                 if (!snapshot) throw new Error('patch received before snapshot');
-                publish(applyPatch(snapshot, patch), false, patch.changes);
+                publish(applyPatch(snapshot, patch));
             } catch (error) {
                 recoverEventSource(currentGeneration);
             }

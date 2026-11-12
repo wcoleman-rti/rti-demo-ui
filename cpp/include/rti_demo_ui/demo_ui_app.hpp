@@ -76,14 +76,8 @@ class Model {
     void commit_card_removal_locked(const std::string& card_id);
     void commit_component_locked(const std::string& card_id,
                                  const std::string& component_id);
-    void commit_component_append_locked(const std::string& card_id,
-                                        const std::string& component_id,
-                                        const Json& append);
     void commit_component_removal_locked(const std::string& card_id,
                                          const std::string& component_id);
-    bool has_adapter_component(const std::string& component_type) const;
-    void register_adapter_components(
-        const std::vector<std::string>& component_types);
     std::optional<Json> flush_dirty_targets_locked();
 
     std::string next_card_id() {
@@ -111,7 +105,7 @@ class Model {
    private:
     friend class SseManager;
 
-    enum class DirtyOperation { upsert, remove, append };
+    enum class DirtyOperation { upsert, remove };
 
     std::mutex mutex_;
     bool running_ = true;
@@ -124,11 +118,6 @@ class Model {
     std::map<std::string, DirtyOperation> dirty_cards_;
     std::map<std::pair<std::string, std::string>, DirtyOperation>
         dirty_components_;
-    std::map<std::pair<std::string, std::string>, Json>
-        dirty_component_appends_;
-    std::map<std::pair<std::string, std::string>, long>
-        dirty_component_revisions_;
-    std::set<std::string> adapter_component_types_;
     std::set<std::string> removed_card_ids_;
     std::set<std::pair<std::string, std::string>> removed_component_ids_;
     SseManager* sse_manager_ = nullptr;
@@ -445,9 +434,6 @@ class DemoUiApp {
    private:
     friend class detail::ModelTestAccess;
     friend class detail::SseTestAccess;
-    /** @cond INTERNAL */
-    friend void enable_uplot(DemoUiApp& app);
-    /** @endcond */
 
     struct RegisteredCommand {
         CommandSchema schema;
@@ -467,9 +453,6 @@ class DemoUiApp {
     std::atomic<bool> stopped_ = false;
     std::atomic<bool> run_started_ = false;
     std::unordered_map<std::string, RegisteredCommand> commands_;
-    std::map<std::string, Json> adapters_;
-    std::map<std::string, std::pair<std::string, std::string>> adapter_assets_;
-    mutable std::mutex adapter_mutex_;
     std::string command_capability_;
     std::mutex command_mutex_;
     std::condition_variable command_cv_;

@@ -158,13 +158,6 @@ Transforms are glTF right-handed, Y-up meters and local to the addressed
 imported node. Node IDs remain stale after removal. Batch validation is
 copy-then-commit, so failures leave state and revisions unchanged.
 
-## Time Series
-
-The bounded `TimeSeriesViewport` component is rendered by a separate optional
-target; it is not included in the core library. See
-[Time Series](../time-series.md) for installation, `enable_uplot(app)`,
-validation limits, and the matching Python/C++ schema.
-
 ## Lifecycle and Concurrency
 
 `run()` binds the server, publishes `ReadyInfo`, and blocks until `stop()` is
