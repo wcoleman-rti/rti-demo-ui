@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rti_demo_ui_native VERSION 0.4.1 LANGUAGES CXX)
+project(rti_demo_ui_native VERSION 0.5.0 LANGUAGES CXX)
 
 include(CTest)
 include(FetchContent)
@@ -39,9 +39,9 @@ if(NOT TARGET rti_demo_ui::core)
     add_subdirectory("${RTI_DEMO_UI_SOURCE_DIR}/cpp" core-build)
 endif()
 get_target_property(RTI_DEMO_UI_CORE_VERSION rti_demo_ui::core VERSION)
-if(NOT RTI_DEMO_UI_CORE_VERSION MATCHES "^0\\.4\\.")
+if(NOT RTI_DEMO_UI_CORE_VERSION MATCHES "^0\\.5\\.")
     message(FATAL_ERROR
-        "rti_demo_ui_native 0.4 requires an rti_demo_ui::core 0.4.x target"
+        "rti_demo_ui_native 0.5 requires an rti_demo_ui::core 0.5.x target"
     )
 endif()
 

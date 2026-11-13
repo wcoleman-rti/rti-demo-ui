@@ -10,4 +10,4 @@
 # use or inability to use the software.
 #
 
-set(RTI_DEMO_UI_VERSION 0.4.1)
+set(RTI_DEMO_UI_VERSION 0.5.0)
