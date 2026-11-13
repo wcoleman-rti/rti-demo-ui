@@ -125,7 +125,7 @@ jobs:
           mkdir -p dist/release
           cp dist/core/* dist/native/* dist/release/
       - name: Upload Python release artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-distributions
           path: dist/release/*
@@ -171,7 +171,7 @@ jobs:
             -C dist -cf - "$package" |
             gzip --no-name > "dist/${package}.tar.gz"
       - name: Upload C++ release artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cpp-linux-x86_64-gcc11
           path: dist/*.tar.gz
@@ -199,7 +199,7 @@ jobs:
         with:
           subject-path: release/*
       - name: Upload verified release bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-release
           path: release/*
