@@ -1,18 +1,33 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # SDK Next-Wave Implementation Roadmap
 
 ## Status
 
-Proposed coordination plan for four independently reviewed implementation
-plans. This document owns sequencing and integration boundaries; each feature
-plan owns its public contracts and implementation details.
+The original coordinated wave delivered SSE state streaming, governed
+themes/layouts, the adapter core with the uPlot reference adapter, and the
+optional native webview host. Linux native hosting is release-supported;
+Windows and macOS still require manual release acceptance. This page records
+the original sequencing and gates. Future renderer work is scoped in
+`ui_renderer_adapters_opt_in.md`.
 
 ## Objective
 
-Coordinate the next transport, rendering, desktop-hosting, and presentation
-capabilities without creating conflicting changes to the shared Python, C++,
-and browser runtime surfaces.
+Coordinate transport, rendering, desktop-hosting, and presentation work
+without creating conflicting changes to the shared Python, C++, and browser
+runtime surfaces.
 
-The four efforts are:
+The delivered efforts were:
 
 - Server-Sent Events (SSE) state streaming.
 - Opt-in UI renderer adapters with pinned browser libraries.
@@ -28,28 +43,24 @@ The four efforts are:
 
 ## Dependency and Delivery Order
 
-SSE and theming/layouts may be implemented in parallel because their primary
-ownership differs: SSE owns backend mutation notification and browser
-transport, while theming/layouts owns snapshot presentation metadata and the
+SSE and theming/layouts were implemented in parallel because their primary
+ownership differed: SSE owned backend mutation notification and browser
+transport, while theming/layouts owned snapshot presentation metadata and the
 built-in renderer's card container.
 
-The adapter core begins after the theming/layout contract is stable and after
-the SSE client changes have established the supported transport-facing client
-API. Individual library adapters follow the adapter core rather than landing as
-independent runtime conventions.
+The adapter core followed the stable theming/layout contract and SSE
+transport-facing client API. Individual library adapters follow the adapter
+core rather than introducing independent runtime conventions.
 
-Native webview starts as a technology spike in parallel with SSE and
-theming/layouts. Full implementation starts only after the spike resolves GUI
-main-thread ownership, dependency packaging, platform support, and coordinated
-window/server shutdown. It consumes the existing HTTP client and whichever
-transport contract SSE establishes; it does not create another frontend
-protocol.
+Native webview began as a technology spike alongside SSE and theming/layouts.
+Implementation followed after the spike resolved GUI main-thread ownership,
+dependency packaging, platform support, and coordinated window/server
+shutdown. It consumes the existing HTTP client and SSE transport; it does not
+create another frontend protocol.
 
-The parallel native spike uses its same-origin conformance fixture to exercise
-the required browser primitives before dependent SDK features merge. Passing
-that fixture does not satisfy cross-feature integration. Native release remains
-blocked on Gate 3 after SSE, theming/layouts, adapter core, and one dynamic
-adapter are merged.
+The native spike used its same-origin conformance fixture to exercise required
+browser primitives. Passing that fixture did not satisfy cross-feature
+integration; the integrated feature gates remain applicable to future changes.
 
 ```text
 SSE streaming -----------+--> UI renderer adapter core --> library adapters
@@ -119,11 +130,11 @@ also test missing-dependency behavior without native packages installed.
 
 ### Gate 3: Cross-Feature Integration
 
-Before adapter work begins, verify that the built-in runtime can apply theme
-and layout metadata while receiving state through both supported client
-transports. Before native webview release, verify the merged SSE,
-theme/layout, adapter-manifest, dynamic-import, Canvas, and WebGL paths inside
-every supported backend/platform host combination.
+For future adapter work, verify that the built-in runtime applies theme and
+layout metadata while receiving state through both supported client
+transports. Before declaring a native platform release-supported, verify the
+merged SSE, theme/layout, adapter-manifest, dynamic-import, Canvas, and WebGL
+paths inside that backend/platform host.
 
 ### Gate 4: Full Repository Validation
 
@@ -162,8 +173,9 @@ requires an explicit planning-document revision before the code change.
 
 ## Completion Criteria
 
-This roadmap is complete when all four plans have been reviewed, their
-dependencies are reflected in branch bases, feature-level validation passes,
-and the durable resulting contracts are folded into `docs/architecture.md`,
-the API guides, lifecycle documentation, custom-frontend documentation, and
-third-party notices.
+The initial coordinated SDK work is delivered and its durable contracts are
+recorded in the architecture, API guides, lifecycle and custom-frontend
+documentation, and third-party notices. Linux native hosting is release-
+supported; Windows and macOS still require manual acceptance before they can
+be declared release-supported. Future renderer milestones use the same
+contract, validation, and documentation gates.

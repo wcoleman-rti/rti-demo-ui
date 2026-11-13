@@ -1,3 +1,15 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # Third-Party Dependencies
 
 This register covers the SDK's direct dependencies declared in the repository.
@@ -44,6 +56,18 @@ runtime dependencies.
 | pre-commit | 4.6.1 | Local quality-check orchestration | MIT | [pre-commit/pre-commit](https://github.com/pre-commit/pre-commit) |
 | build | 1.2.2 | Python release artifact builder | MIT | [PyPA build](https://github.com/pypa/build) |
 
+## Documentation Dependencies
+
+These packages are installed only with the Python `docs` extra. Doxygen is a
+separate system build prerequisite.
+
+| Component | Version | Purpose | License | Source |
+| --- | --- | --- | --- | --- |
+| Breathe | 4.36.0 | Doxygen XML integration for Sphinx | BSD-3-Clause | [breathe-doc/breathe](https://github.com/breathe-doc/breathe) |
+| Furo | 2024.8.6 | Sphinx HTML theme | MIT | [pradyunsg/furo](https://github.com/pradyunsg/furo) |
+| MyST Parser | 4.0.1 | Markdown parsing for Sphinx | MIT | [executablebooks/MyST-Parser](https://github.com/executablebooks/MyST-Parser) |
+| Sphinx | 8.2.3 | Documentation site and Python API generation | BSD-2-Clause | [sphinx-doc/sphinx](https://github.com/sphinx-doc/sphinx) |
+
 ## Optional Scene3D Bundle
 
 The opt-in browser renderer is built from exact npm pins in
@@ -59,6 +83,33 @@ run Node.js at runtime.
 Update the pins with `npm ci --ignore-scripts`, rebuild the artifact, refresh
 `assets/runtime3d.sha256`, and review the generated diff and upstream license
 notices together.
+
+Use Node.js 22.14.0 and run `npm run build:runtime3d` from `tools/scene3d`.
+The build script fixes esbuild's working directory so generated source-path
+comments do not depend on the caller's directory. CI verifies both the
+recorded checksum and an unchanged generated artifact.
+
+## Optional uPlot Adapter
+
+The separately built renderer bundle is generated from exact npm pins in
+`adapters/uplot/package-lock.json`. Its generated ES module and stylesheet are
+served only by an app that enables the adapter; the core Python distribution
+and C++ target do not include the renderer bytes.
+
+| Component | Version | Purpose | License | Source |
+| --- | --- | --- | --- | --- |
+| uPlot | 1.6.31 | Locally bundled time-series renderer | MIT | [leeoniya/uPlot](https://github.com/leeoniya/uPlot) |
+| esbuild | 0.25.0 | Reproducible optional-adapter bundle build tool | MIT | [evanw/esbuild](https://github.com/evanw/esbuild) |
+
+The uPlot MIT notice is bundled as `LICENSE-uPlot` in the adapter Python
+distribution and installed by the optional CMake target. Regenerate with
+`npm ci --ignore-scripts && npm run build` from `adapters/uplot`; review the
+generated module, stylesheet, license, and `adapters/uplot/assets.sha256`
+checksum together.
+
+The build preserves the upstream license text with a final newline to match
+repository formatting. CI rebuilds and verifies the adapter assets and their
+Python package copies, and runs C++ tests with the optional adapter enabled.
 
 ## Optional Connext Example Dependencies
 

@@ -1,3 +1,15 @@
+/*
+ * (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+ *
+ * RTI grants Licensee a license to use, modify, compile, and create derivative
+ * works of the Software.  Licensee has the right to distribute object form
+ * only for use with RTI products.  The Software is provided "as is", with no
+ * warranty of any type, including any warranty for fitness for any purpose.
+ * RTI is under no obligation to maintain or support the Software.  RTI shall
+ * not be liable for any incidental or consequential damages arising out of the
+ * use or inability to use the software.
+ */
+
 // Implements DemoUiApp (see docs/architecture.md §3, §7.2-§7.3, §8).
 #include "rti_demo_ui/demo_ui_app.hpp"
 
@@ -411,6 +423,16 @@ std::string Model::snapshot_json_locked() const {
         .dump();
 }
 
+bool Model::has_adapter_component(const std::string& component_type) const {
+    return adapter_component_types_.count(component_type) != 0;
+}
+
+void Model::register_adapter_components(
+    const std::vector<std::string>& component_types) {
+    adapter_component_types_.insert(component_types.begin(),
+                                    component_types.end());
+}
+
 void Model::start_dirty_tracking_locked() {
     dirty_tracking_ = true;
     published_revision_ = revision_;
@@ -418,6 +440,8 @@ void Model::start_dirty_tracking_locked() {
     presentation_dirty_ = false;
     dirty_cards_.clear();
     dirty_components_.clear();
+    dirty_component_appends_.clear();
+    dirty_component_revisions_.clear();
 }
 
 void Model::commit_app_data_locked() {
@@ -457,6 +481,15 @@ void Model::commit_card_locked(const std::string& card_id) {
             ++target;
         }
     }
+    for (auto target = dirty_component_appends_.begin();
+         target != dirty_component_appends_.end();) {
+        if (target->first.first == card_id) {
+            dirty_component_revisions_.erase(target->first);
+            target = dirty_component_appends_.erase(target);
+        } else {
+            ++target;
+        }
+    }
     if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
 
@@ -472,6 +505,15 @@ void Model::commit_card_removal_locked(const std::string& card_id) {
          target != dirty_components_.end();) {
         if (target->first.first == card_id) {
             target = dirty_components_.erase(target);
+        } else {
+            ++target;
+        }
+    }
+    for (auto target = dirty_component_appends_.begin();
+         target != dirty_component_appends_.end();) {
+        if (target->first.first == card_id) {
+            dirty_component_revisions_.erase(target->first);
+            target = dirty_component_appends_.erase(target);
         } else {
             ++target;
         }
@@ -493,6 +535,53 @@ void Model::commit_component_locked(const std::string& card_id,
     ++revision_;
     if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
         dirty_components_[target] = DirtyOperation::upsert;
+        dirty_component_appends_.erase(target);
+        dirty_component_revisions_.erase(target);
+    }
+    if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
+}
+
+void Model::commit_component_append_locked(const std::string& card_id,
+                                           const std::string& component_id,
+                                           const Json& append) {
+    const auto target = std::make_pair(card_id, component_id);
+    if (removed_card_ids_.count(card_id) != 0 ||
+        removed_component_ids_.count(target) != 0) {
+        throw std::runtime_error("cannot upsert removed component target: " +
+                                 card_id + ":" + component_id);
+    }
+    const bool schedule = dirty_tracking_ && !app_data_dirty_ &&
+                          !presentation_dirty_ && dirty_cards_.empty() &&
+                          dirty_components_.empty();
+    ++revision_;
+    const auto existing = dirty_components_.find(target);
+    if (dirty_tracking_ && dirty_cards_.count(card_id) == 0 &&
+        (existing == dirty_components_.end() ||
+         existing->second == DirtyOperation::append)) {
+        if (existing == dirty_components_.end()) {
+            dirty_components_[target] = DirtyOperation::append;
+        }
+        Json& batches = dirty_component_appends_[target];
+        if (!batches.is_object()) batches = Json::object();
+        for (const auto& batch : append.at("series")) {
+            const auto& series_id =
+                batch.at("id").get_ref<const std::string&>();
+            if (!batches.contains(series_id)) {
+                batches[series_id] = Json::array();
+            }
+            for (const auto& sample : batch.at("samples")) {
+                batches[series_id].push_back(sample);
+            }
+            if (batches[series_id].size() > 10000) {
+                dirty_components_[target] = DirtyOperation::upsert;
+                dirty_component_appends_.erase(target);
+                dirty_component_revisions_.erase(target);
+                break;
+            }
+        }
+        if (dirty_components_[target] == DirtyOperation::append) {
+            dirty_component_revisions_[target] = revision_;
+        }
     }
     if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
@@ -506,6 +595,8 @@ void Model::commit_component_removal_locked(const std::string& card_id,
     removed_component_ids_.emplace(card_id, component_id);
     if (dirty_tracking_ && dirty_cards_.count(card_id) == 0) {
         dirty_components_[{card_id, component_id}] = DirtyOperation::remove;
+        dirty_component_appends_.erase({card_id, component_id});
+        dirty_component_revisions_.erase({card_id, component_id});
     }
     if (schedule && sse_manager_) sse_manager_->mark_dirty_locked();
 }
@@ -553,9 +644,23 @@ std::optional<Json> Model::flush_dirty_targets_locked() {
             [&component_id](const auto& item) {
                 return item->id() == component_id;
             });
-        changes.push_back({{"op", "upsert-component"},
-                           {"card_id", card_id},
-                           {"value", (*component)->to_json_locked()}});
+        if (operation == DirtyOperation::append) {
+            Json series = Json::array();
+            for (const auto& [series_id, samples] :
+                 dirty_component_appends_.at(target).items()) {
+                series.push_back({{"id", series_id}, {"samples", samples}});
+            }
+            changes.push_back(
+                {{"op", "append-timeseries"},
+                 {"card_id", card_id},
+                 {"component_id", component_id},
+                 {"component_revision", dirty_component_revisions_.at(target)},
+                 {"series", std::move(series)}});
+        } else {
+            changes.push_back({{"op", "upsert-component"},
+                               {"card_id", card_id},
+                               {"value", (*component)->to_json_locked()}});
+        }
     }
 
     Json patch{{"schema_version", 1},
@@ -794,9 +899,11 @@ std::vector<Json> CommandSchema::validate(const Json& value) const {
 
 DemoUiApp::DemoUiApp(std::string title, int port, std::string host,
                      std::filesystem::path static_root, Theme theme,
-                     Layout layout)
+                     Layout layout,
+                     std::optional<std::string> listening_message_prefix)
     : host_(std::move(host)),
       port_(port),
+      listening_message_prefix_(std::move(listening_message_prefix)),
       model_(std::move(title), static_root, theme, layout),
       sse_manager_(std::make_unique<detail::SseManager>(model_)) {
     to_string(theme);
@@ -995,9 +1102,13 @@ void DemoUiApp::run() {
             }
         }
     }
-    bool expected = false;
-    if (!run_started_.compare_exchange_strong(expected, true)) {
-        throw std::runtime_error("DemoUiApp: run() may only be called once");
+    {
+        std::lock_guard<std::mutex> adapter_guard(adapter_mutex_);
+        bool expected = false;
+        if (!run_started_.compare_exchange_strong(expected, true)) {
+            throw std::runtime_error(
+                "DemoUiApp: run() may only be called once");
+        }
     }
     server_->Get(
         "/", [this](const httplib::Request& req, httplib::Response& res) {
@@ -1033,10 +1144,42 @@ void DemoUiApp::run() {
                      send_asset(res, detail::embedded_client_js(),
                                 "application/javascript; charset=utf-8");
                  });
+    server_->Get("/sdk/momentary.js",
+                 [](const httplib::Request&, httplib::Response& res) {
+                     send_asset(res, detail::embedded_momentary_js(),
+                                "application/javascript; charset=utf-8");
+                 });
     server_->Get("/sdk/theme.css",
                  [](const httplib::Request&, httplib::Response& res) {
                      send_asset(res, detail::embedded_theme_css(),
                                 "text/css; charset=utf-8");
+                 });
+    server_->Get("/sdk/adapters/manifest.json",
+                 [this](const httplib::Request&, httplib::Response& res) {
+                     Json descriptors = Json::array();
+                     for (const auto& [name, descriptor] : adapters_) {
+                         (void)name;
+                         descriptors.push_back(descriptor);
+                     }
+                     res.status = 200;
+                     res.set_header("Cache-Control", "no-cache");
+                     res.set_header("X-Content-Type-Options", "nosniff");
+                     res.set_content(Json{{"schema_version", 1},
+                                          {"adapters", std::move(descriptors)}}
+                                         .dump(),
+                                     "application/json; charset=utf-8");
+                 });
+    server_->Get(R"(/sdk/adapters/(.*))",
+                 [this](const httplib::Request& req, httplib::Response& res) {
+                     const auto asset = adapter_assets_.find(req.path);
+                     if (asset == adapter_assets_.end()) {
+                         send_static_not_found(res);
+                         return;
+                     }
+                     res.status = 200;
+                     res.set_header("Cache-Control", "no-cache");
+                     res.set_header("X-Content-Type-Options", "nosniff");
+                     res.set_content(asset->second.first, asset->second.second);
                  });
     server_->Get("/api/health",
                  [](const httplib::Request&, httplib::Response& res) {
@@ -1346,7 +1489,12 @@ void DemoUiApp::run() {
         return;
     }
     readiness_cv_.notify_all();
-    std::cout << "RTI Demo UI listening on " << info.url << "/" << std::endl;
+    if (listening_message_prefix_) {
+        if (!listening_message_prefix_->empty()) {
+            std::cout << *listening_message_prefix_ << " ";
+        }
+        std::cout << info.url << "/" << std::endl;
+    }
     if (!listener.get() && !stopped_) {
         throw std::runtime_error("DemoUiApp: failed to listen on " + host_ +
                                  ":" + std::to_string(bound_port));

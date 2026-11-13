@@ -1,3 +1,15 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # Custom Frontends
 
 RTI Demo UI has a built-in frontend and an opt-in application-owned static
@@ -86,6 +98,12 @@ High-update-rate applications may explicitly select SSE:
 const client = createClient({transport: "sse"});
 ```
 
+The built-in SDK runtime keeps polling for applications without an enabled
+time-series chart. When it sees a `timeseries` component, it switches to SSE
+after the initial complete snapshot so subsequent chart appends remain
+incremental. Custom frontends that render such components should also choose
+SSE explicitly; polling always transfers complete snapshots.
+
 SSE uses a same-origin `/api/events` URL, applies patches in the browser, and
 uses `/api/state` only to recover from an invalid payload or revision gap.
 `reconnecting` means the browser is retrying SSE or the client is
@@ -161,6 +179,48 @@ reset/zoom controls, a synchronized semantic listbox, pointer and keyboard
 selection, and a textual node/status fallback when WebGL or model loading is
 unavailable. Selection emits `scene3dselect` on the scene host with
 `{componentId, nodeId, selected}`; the SDK does not infer commands from it.
+
+Custom frontends can select scene-local presentation without changing the
+component snapshot or DDS data:
+
+```js
+import {reconcileScene3d, setScene3dCamera} from "/sdk/runtime3d.js";
+
+await reconcileScene3d(component, host, {
+  materialMode: "original",
+  showNodeList: false,
+  onSelection: handleSelection,
+});
+
+setScene3dCamera(component.id, {
+  position: [6, 0, 3],
+  target: [0, 0, 0],
+  up: [0, 0, 1],
+});
+```
+
+`materialMode` accepts `"status"` (the compatibility default) or `"original"`.
+Original mode retains GLB colors, embedded textures, emissive appearance, and
+PBR properties during pose/status updates. Materials are cloned for each scene;
+selection highlights are temporary and clearing selection restores the scene's
+appearance. Options persist when omitted from subsequent reconciliation calls.
+GLB materials, rather than SDK or DDS types, define application palettes.
+
+`setScene3dCamera(componentId, {position, target, up})` requires a mounted scene
+(model loading may still be pending). All vectors must contain three finite
+numbers; position and target must differ, and up must be nonzero and not
+parallel to the viewing direction. The up vector is normalized. The existing
+orbit distance limits still apply. Presets update the camera and orbit frame
+without replacing the canvas, loaded model, or controls. Subsequent snapshots
+do not overwrite the view, and Reset camera restores the last preset. User
+orbit interaction remains enabled. Presets are local, not persisted across
+scene disposal or page reload.
+
+`showNodeList` defaults to `true`. Setting it to `false` removes the list from
+the successful rendered view and gives the canvas the available width. Model,
+node-resolution, or WebGL failures still reveal the semantic node list and
+textual fallback. Frontends hiding the list should provide equivalent
+accessible selection controls when selection is part of their workflow.
 
 GLTF JSON, external buffers/textures, remote/data URLs, query strings, and
 `/sdk/` assets are rejected. Keep application model files beside the frontend

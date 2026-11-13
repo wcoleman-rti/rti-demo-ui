@@ -1,3 +1,15 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # Product Use Cases and Visual Capabilities
 
 ## Use This Brief
@@ -41,24 +53,24 @@ these workflows without exposing a renderer's full configuration surface.
 | --- | --- |
 | Card | Group one operational concern; avoid decorative nesting. |
 | Metric, text, badge | Current values and semantic status; no arbitrary HTML or historical plotting. |
+| Bounded time series | App-supplied timestamped numeric series through the optional uPlot adapter; not inferred DDS waveforms or unbounded history. |
 | Log, table | Bounded stable-ID events and rows; not log exploration, spreadsheets, or data lakes. |
 | `scene2d` | Entities, links, heading, status, and freshness in local coordinates; not a geographic map. |
 | `scene3d` | One GLB with stable node transforms, camera, and status; not a scene editor or server-side Three.js API. |
 | Custom component | Application JSON for a custom frontend; no automatic built-in rendering. |
-| Command controls | Explicit validated actions, with confirmation where needed; not arbitrary client messaging. |
+| Command controls and momentary helper | Explicit validated actions; the helper manages browser input lifecycle only, while applications own command meaning and timeout/lease safety. |
+| Themes and layouts | Governed dark/light presentation and responsive card organization. |
+| Native host | The same browser app in an opt-in webview; Linux is release-supported, while Windows and macOS await manual release acceptance. |
 
 ### Planned
 
 | Element | Direction |
 | --- | --- |
-| Bounded time series | Waveforms and recent telemetry via uPlot. |
 | Indicator chart | Gauges, dials, and rich status charts via Apache ECharts. |
 | Geographic map | Fleets, swarms, routes, and sites via MapLibre GL JS. |
 | High-update schematic | Local entities, zones, paths, and selection via PixiJS-backed `scene2d`. |
 | Operational grid | Current tasks, events, and row actions via Tabulator. |
 | Raster frame | Latest bounded sensor image via browser-native decoding. |
-| Themes and layouts | Governed dark/light presentation and responsive organization. |
-| Native host | The same browser app in an opt-in webview; no new component model. |
 
 Optional renderers sit behind constrained SDK schemas. They are explicitly
 enabled, locally served, reproducibly pinned, and absent when unused.

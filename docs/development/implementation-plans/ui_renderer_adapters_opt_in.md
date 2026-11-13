@@ -1,9 +1,22 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # Opt-In UI Renderer Adapters Plan
 
 ## Status
 
-Proposed implementation plan for `feature/ui-renderer-adapter-core`, followed
-by one feature branch per library adapter.
+The adapter core and uPlot reference adapter are implemented. Remaining
+portfolio items are proposed; execute one separately scoped renderer, raster
+frame capability, or Scene3D migration at a time.
 
 This is a portfolio program plan, not one agent-session implementation scope.
 Hand off exactly one execution unit at a time: Phase 1 adapter core, Phase 2
@@ -21,18 +34,18 @@ core. Python applications opt in by importing and enabling an adapter package;
 C++ applications opt in by including its API and linking its CMake target.
 Only enabled adapters expose their component model and browser assets.
 
-The initial portfolio targets industry-facing demo applications: live medical
-waveforms, gauges and status indicators, moving assets on geographic or site
-maps, interactive 3D equipment views, raster sensor and medical imagery, and
-bounded operational task/event grids. The first delivery establishes the
-adapter contract and proves it with a small live-data adapter before adding each
-independently justified capability.
+The portfolio targets industry-facing demo applications: live time series,
+gauges and status indicators, moving assets on geographic or site maps,
+interactive 3D equipment views, raster sensor and medical imagery, and bounded
+operational task/event grids. The adapter contract and uPlot reference adapter
+are delivered; additional capabilities require an independently justified
+schema, implementation plan, and acceptance tests.
 
 ## Dependencies
 
-This plan begins after the SSE browser-client contract and the theming/layout
-snapshot contract are stable. Adapters consume `/sdk/client.js`, theme tokens,
-and card layout; they do not implement separate transport or layout systems.
+This plan follows the stable SSE browser-client and theming/layout contracts.
+Adapters consume `/sdk/client.js`, theme tokens, and card layout; they do not
+implement separate transport or layout systems.
 
 The existing Scene3D implementation is the migration reference. Its current
 `scene3d` model and `/sdk/runtime3d.js` asset remain supported until a dedicated
@@ -427,19 +440,22 @@ rather than adding a dedicated overlay schema.
 
 ## Implementation Phases
 
-### Phase 1: Core Contract and Test Adapter
+### Phase 1: Core Contract and Test Adapter (delivered)
 
-- Lock descriptor, manifest, collision, route, and renderer lifecycle fixtures.
-- Add per-app adapter registration and asset serving in Python and C++.
-- Add the browser registry and an internal dependency-free test adapter.
-- Prove disabled assets 404 and core package/build outputs exclude adapter
+- Locked descriptor, manifest, collision, route, and renderer lifecycle
+  fixtures.
+- Added per-app adapter registration and asset serving in Python and C++.
+- Added the browser registry and an internal dependency-free test adapter.
+- Proved disabled assets 404 and core package/build outputs exclude adapter
   bytes.
 
-### Phase 2: uPlot Reference Adapter
+### Phase 2: uPlot Reference Adapter (delivered)
 
-- Add separate Python distribution and C++ target with exact npm/esbuild pins.
-- Define a bounded time-series schema and matching typed APIs.
-- Implement theme, resize, update, disposal, fallback, and browser parity tests.
+- Added a separate Python distribution and C++ target with exact npm/esbuild
+  pins.
+- Defined a bounded time-series schema and matching typed APIs.
+- Implemented theme, resize, update, disposal, fallback, and browser parity
+  tests.
 
 ### Phase 3: Utility and Additional Adapters
 

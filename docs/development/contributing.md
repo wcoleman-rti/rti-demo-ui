@@ -1,3 +1,15 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # Contributing
 
 ## Setup
@@ -69,6 +81,23 @@ route contract changes, then update both language tests.
 `docs/api/` contains conceptual usage guides. `docs/development/` documents
 contributor workflow. Decision-bearing implementation plans belong in
 `docs/development/implementation-plans/`; temporary notes do not.
+
+The hosted documentation requires CMake, Doxygen, and the Python documentation
+extra. Build the same warning-as-error site produced by CI from the repository
+root:
+
+```bash
+python -m pip install -e '.[docs]'
+cmake -S docs -B build/docs
+cmake --build build/docs --target docs
+```
+
+Open `build/docs/html/index.html` to inspect the result. The documentation build
+generates C++ XML from the public headers before Sphinx renders the Markdown
+guides and Python/C++ API references. It then verifies that every exported
+Python name and directly defined public method has a docstring, rejects
+undocumented public C++ symbols, and confirms that the generated references do
+not expose selected implementation-only C++ symbols.
 
 Start product-facing implementation and planning sessions with
 `docs/development/product-use-cases.md`. It records the representative demo

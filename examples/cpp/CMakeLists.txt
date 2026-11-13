@@ -1,7 +1,41 @@
+#
+# (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+#
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the Software.  Licensee has the right to distribute object form
+# only for use with RTI products.  The Software is provided "as is", with no
+# warranty of any type, including any warranty for fitness for any purpose.
+# RTI is under no obligation to maintain or support the Software.  RTI shall
+# not be liable for any incidental or consequential damages arising out of the
+# use or inability to use the software.
+#
+
 cmake_minimum_required(VERSION 3.16)
 
 add_executable(rti_demo_ui_simple simple.cpp)
 target_link_libraries(rti_demo_ui_simple PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_simple PRIVATE _USE_MATH_DEFINES)
+
+add_executable(rti_demo_ui_components components.cpp)
+target_link_libraries(rti_demo_ui_components PRIVATE rti_demo_ui::core)
+
+add_executable(rti_demo_ui_app_data app_data.cpp)
+target_link_libraries(rti_demo_ui_app_data PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_app_data PRIVATE
+    RTI_DEMO_APP_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/app_data"
+)
+
+add_executable(rti_demo_ui_app_shell app_shell.cpp)
+target_link_libraries(rti_demo_ui_app_shell PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_app_shell PRIVATE
+    RTI_DEMO_APP_SHELL_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/app_shell"
+)
+
+add_executable(rti_demo_ui_commands commands.cpp)
+target_link_libraries(rti_demo_ui_commands PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_commands PRIVATE
+    RTI_DEMO_COMMANDS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/commands"
+)
 
 add_executable(rti_demo_ui_gallery gallery.cpp)
 target_link_libraries(rti_demo_ui_gallery PRIVATE rti_demo_ui::core)
@@ -52,4 +86,5 @@ if(BUILD_CONNEXT_EXAMPLE)
         rti_demo_ui::core
         RTIConnextDDS::cpp2_api
     )
+    target_compile_definitions(rti_demo_ui_connext PRIVATE _USE_MATH_DEFINES)
 endif()

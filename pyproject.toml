@@ -1,10 +1,22 @@
+#
+# (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+#
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the Software.  Licensee has the right to distribute object form
+# only for use with RTI products.  The Software is provided "as is", with no
+# warranty of any type, including any warranty for fitness for any purpose.
+# RTI is under no obligation to maintain or support the Software.  RTI shall
+# not be liable for any incidental or consequential damages arising out of the
+# use or inability to use the software.
+#
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "rti-demo-ui"
-version = "0.4.0"
+version = "0.4.1"
 description = "RTI Demo UI for Python with an asyncio/aiohttp backend"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +44,12 @@ dev = [
     "ruff==0.6.2",
     "clang-format==18.1.8",
     "pre-commit==4.6.1",
+]
+docs = [
+    "breathe==4.36.0",
+    "furo==2024.8.6",
+    "myst-parser==4.0.1",
+    "sphinx==8.2.3",
 ]
 
 [tool.setuptools.packages.find]
