@@ -14,6 +14,8 @@ frontend process or a runtime dependency on Connext.
 ## Learn more
 
 - [Custom frontends](custom-frontends.md)
+- [Time series](time-series.md)
+- [Momentary actions](momentary-actions.md)
 - [Lifecycle](lifecycle.md)
 - [Architecture](architecture.md)
 - [Python API reference](reference/python.rst)
@@ -28,6 +30,8 @@ api/python
 api/cpp
 native-webview
 custom-frontends
+time-series
+momentary-actions
 lifecycle
 reference/python
 reference/cpp

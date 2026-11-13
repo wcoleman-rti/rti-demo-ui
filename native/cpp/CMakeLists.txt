@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rti_demo_ui_native VERSION 0.4.0 LANGUAGES CXX)
+project(rti_demo_ui_native VERSION 0.4.1 LANGUAGES CXX)
 
 include(CTest)
 include(FetchContent)
@@ -8,12 +8,26 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS
        "Build real native-window smoke coverage" OFF)
-option(RTI_DEMO_NATIVE_BUILD_EXAMPLES
-       "Build native companion examples" OFF)
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
+        src/control_posix.cpp
+        src/native_webview_linux.cpp
+    )
+elseif(WIN32)
+    set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
+        src/control_windows.cpp
+        src/native_webview_windows.cpp
+    )
+elseif(APPLE)
+    enable_language(OBJCXX)
+    set(RTI_DEMO_NATIVE_PLATFORM_SOURCES
+        src/control_posix.cpp
+        src/native_webview_macos.mm
+    )
+else()
     message(FATAL_ERROR
-        "rti_demo_ui_native 0.4 supports only Linux; use browser mode on this platform"
+        "rti_demo_ui_native is prepared only for Linux, Windows, and macOS"
     )
 endif()
 
@@ -31,6 +45,16 @@ if(NOT RTI_DEMO_UI_CORE_VERSION MATCHES "^0\\.4\\.")
     )
 endif()
 
+if(RTI_DEMO_BUILD_EXAMPLES)
+    set(RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT ON)
+else()
+    set(RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT OFF)
+endif()
+option(RTI_DEMO_NATIVE_BUILD_EXAMPLES
+       "Build native companion examples"
+       ${RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT})
+unset(RTI_DEMO_NATIVE_BUILD_EXAMPLES_DEFAULT)
+
 set(WEBVIEW_WEBKITGTK_API 4.1 CACHE STRING "" FORCE)
 set(WEBVIEW_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
 set(WEBVIEW_BUILD_STATIC_LIBRARY OFF CACHE BOOL "" FORCE)
@@ -42,7 +66,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(webview)
 
 add_library(rti_demo_ui_native_webview STATIC
-    src/native_webview.cpp
+    ${RTI_DEMO_NATIVE_PLATFORM_SOURCES}
     src/runner.cpp
 )
 set_target_properties(
@@ -61,12 +85,22 @@ target_link_libraries(rti_demo_ui_native_webview
     PUBLIC rti_demo_ui::core
     PRIVATE webview::core
 )
-
+if(APPLE)
+    find_library(RTI_DEMO_UI_APPKIT_FRAMEWORK AppKit)
+    if(NOT RTI_DEMO_UI_APPKIT_FRAMEWORK)
+        message(FATAL_ERROR "The AppKit framework is required for macOS native mode")
+    endif()
+    target_link_libraries(
+        rti_demo_ui_native_webview PRIVATE "${RTI_DEMO_UI_APPKIT_FRAMEWORK}"
+    )
+endif()
 add_library(
     rti_demo_ui_native::native_webview ALIAS rti_demo_ui_native_webview
 )
 
-if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if(BUILD_TESTING AND
+   (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR
+    RTI_DEMO_TOP_LEVEL_BUILD))
     add_subdirectory(tests)
 endif()
 if(RTI_DEMO_NATIVE_BUILD_EXAMPLES)

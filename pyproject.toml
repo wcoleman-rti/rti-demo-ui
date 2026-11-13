@@ -16,7 +16,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rti-demo-ui"
-version = "0.4.0"
+version = "0.4.1"
 description = "RTI Demo UI for Python with an asyncio/aiohttp backend"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,11 +26,11 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest==8.4.2",
+    "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
 ]
 browser = [
-    "pytest==8.4.2",
+    "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "playwright==1.62.0",
 ]
@@ -38,17 +38,17 @@ lint = [
     "ruff==0.6.2",
 ]
 dev = [
-    "pytest==8.4.2",
+    "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "playwright==1.62.0",
     "ruff==0.6.2",
     "clang-format==23.1.0",
-    "pre-commit==4.6.1",
+    "pre-commit==4.6.2",
 ]
 docs = [
     "breathe==4.36.0",
     "furo==2024.8.6",
-    "myst-parser==4.0.1",
+    "myst-parser==5.1.0",
     "sphinx==8.2.3",
 ]
 
