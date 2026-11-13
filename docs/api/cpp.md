@@ -1,4 +1,31 @@
-# C++ API
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
+# C++ Guide
+
+## Quick Start
+
+Configure and run the repository example:
+
+```bash
+cmake -S . -B build
+cmake --build build --target rti_demo_ui_simple
+./build/cpp/examples/rti_demo_ui_simple
+```
+
+Open the printed URL. The example owns its timer and interactive shutdown
+handling; it exits cleanly on Ctrl-C.
+
+## CMake Consumption
 
 A consuming CMake project adds the SDK's `cpp/` directory and links
 `rti_demo_ui::core`:
@@ -8,7 +35,7 @@ add_subdirectory(path/to/rti-demo-ui/cpp)
 target_link_libraries(my_demo PRIVATE rti_demo_ui::core)
 ```
 
-A minimal application is:
+The minimal application shape is:
 
 ```cpp
 #include <rti_demo_ui/rti_demo_ui.hpp>
@@ -25,11 +52,24 @@ int main() {
 
 The default host is literal loopback `127.0.0.1` and port `0`; use
 `wait_until_ready()` and `ready_info()` when the selected port is needed. The
-custom frontend form takes a final filesystem path:
+custom frontend form takes a filesystem path as the fourth constructor
+argument:
 
 ```cpp
 rti::demo::ui::DemoUiApp app(
     "Monitor", 0, "127.0.0.1", std::filesystem::path("web"));
+```
+
+The ready message defaults to `RTI Demo UI listening on <url>`. Pass a
+`listening_message_prefix` as the final constructor argument to customize the
+text before the URL, or pass `std::nullopt` to suppress the announcement. An
+empty prefix prints only the URL:
+
+```cpp
+rti::demo::ui::DemoUiApp app(
+    "Arm Controller", 0, "127.0.0.1", {}, rti::demo::ui::Theme::dark,
+    rti::demo::ui::Layout::automatic,
+    std::string("ArmController listening on"));
 ```
 
 The SDK embeds its own assets. The consuming project deploys `web/` and passes
@@ -42,8 +82,8 @@ hosts.
 
 ## Native Window
 
-On supported Linux systems, add the separate `native/cpp` CMake project after
-the core target and link `rti_demo_ui_native::native_webview`:
+Add the separate `native/cpp` CMake project after the core target and link
+`rti_demo_ui_native::native_webview`:
 
 ```cpp
 #include <rti_demo_ui_native/native_webview.hpp>
@@ -51,13 +91,17 @@ the core target and link `rti_demo_ui_native::native_webview`:
 rti::demo::ui::native::NativeWindowOptions options;
 options.width = 1280;
 options.height = 800;
+options.icon = "assets/fleet.png";
 rti::demo::ui::native::run(app, options);
 ```
 
 The call owns the native main-thread loop and a joined server thread. Browser
 targets remain core-only and call `app.run()`. See
 [Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
-profiles, platform support, and troubleshooting.
+icon behavior, profiles, the current Linux, Windows, and macOS qualification
+status, and troubleshooting. The generated
+[C++ API reference](../reference/cpp.rst) also documents the public native
+runner types.
 
 Both `GET /api/state` and `GET /api/events` are served by the C++ backend.
 Browser transport selection is not a `DemoUiApp` constructor option: custom
@@ -65,8 +109,9 @@ JavaScript calls `createClient({transport: "sse"})` to opt into SSE or omits the
 option to retain polling. See
 [Custom Frontends](../custom-frontends.md#browser-transport).
 
-For complete signatures and validation semantics, use the public headers and
-[architecture](../architecture.md) as the source of truth.
+For complete signatures and validation semantics, use the generated
+[C++ API reference](../reference/cpp.rst). Durable cross-language contracts are
+described in [architecture](../architecture.md).
 
 ## Themes and Layouts
 
@@ -87,16 +132,17 @@ controls->set_area(CardArea::main);
 telemetry->set_span(3);
 ```
 
-The new constructor arguments are appended after `static_root`, preserving
-existing positional calls. Defaults are `Theme::dark`, `Layout::automatic`,
-`CardArea::main`, and span `1`. Spans accept only `1`, `2`, or `3`. At most one
-sidebar card is permitted, and `sidebar-main` requires exactly one before
-`run()` or when selected at runtime. Changed setters increment the application
-revision exactly once; no-ops and rejected values do not.
+The `theme` and `layout` constructor arguments follow `static_root`. Defaults are
+`Theme::dark`, `Layout::automatic`, `CardArea::main`, and span `1`. Spans accept
+only `1`, `2`, or `3`. At most one sidebar card is permitted, and
+`sidebar-main` requires exactly one before `run()` or when selected at runtime.
+Changed setters increment the application revision exactly once; no-ops and
+rejected values do not.
 
 ## Scene3D
 
-The C++ API mirrors Python and serializes the same generic scene contract:
+The C++ API mirrors Python and serializes the same generic scene contract. The
+following operations assume an existing `app`:
 
 ```cpp
 auto* scene = app.add_card("Arm")->add_scene_3d("/models/scene.glb");
@@ -112,3 +158,29 @@ scene->apply_node_batch(Json::array({
 Transforms are glTF right-handed, Y-up meters and local to the addressed
 imported node. Node IDs remain stale after removal. Batch validation is
 copy-then-commit, so failures leave state and revisions unchanged.
+
+## Time Series
+
+The bounded `TimeSeriesViewport` component is rendered by a separate optional
+target; it is not included in the core library. See
+[Time Series](../time-series.md) for installation, `enable_uplot(app)`,
+validation limits, and the matching Python/C++ schema.
+
+## Lifecycle and Concurrency
+
+`run()` binds the server, publishes `ReadyInfo`, and blocks until `stop()` is
+called. The app is single-use, while `stop()` is thread-safe and idempotent when
+called from a non-callback thread. Command handlers and SDK timer callbacks must
+signal a control thread to call `stop()`.
+Cards and component handles are owned by `DemoUiApp` and remain valid until the
+app is destroyed. C++ model mutations are protected by the app model mutex and
+may be called from application threads.
+
+`add_timer()` starts an SDK-owned worker thread. Dropping its `TimerHandle` does
+not cancel it; call `cancel()` to stop it early. App shutdown cancels and joins
+all remaining timers. An exception escaping a timer callback stops that timer.
+
+C++ command handlers execute synchronously on HTTP worker threads. Python
+command handlers may instead be synchronous or asynchronous and execute on the
+app's owner event loop. See [Lifecycle](../lifecycle.md) for shutdown ownership
+and browser transport cleanup.

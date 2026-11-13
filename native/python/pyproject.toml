@@ -1,23 +1,37 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+#
+# (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+#
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the Software.  Licensee has the right to distribute object form
+# only for use with RTI products.  The Software is provided "as is", with no
+# warranty of any type, including any warranty for fitness for any purpose.
+# RTI is under no obligation to maintain or support the Software.  RTI shall
+# not be liable for any incidental or consequential damages arising out of the
+# use or inability to use the software.
+#
 
 [project]
 name = "rti-demo-ui-native"
-version = "0.4.0"
+version = "0.4.1"
 description = "Optional native webview runner for RTI Demo UI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "rti-demo-ui>=0.4,<0.5",
-    "pywebview==6.2.1; sys_platform == 'linux'",
+    "pywebview==6.2.1; sys_platform == 'linux' or sys_platform == 'win32' or sys_platform == 'darwin'",
     "PyGObject==3.50.0; sys_platform == 'linux' and python_version < '3.13'",
 ]
 classifiers = [
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,3 +1,15 @@
+#
+# (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+#
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the Software.  Licensee has the right to distribute object form
+# only for use with RTI products.  The Software is provided "as is", with no
+# warranty of any type, including any warranty for fitness for any purpose.
+# RTI is under no obligation to maintain or support the Software.  RTI shall
+# not be liable for any incidental or consequential damages arising out of the
+# use or inability to use the software.
+#
+
 """DemoUiApp model ownership and native asyncio HTTP lifecycle."""
 
 from __future__ import annotations
@@ -7,6 +19,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 from copy import deepcopy
@@ -41,6 +54,17 @@ _SSE_MAX_STREAMS = 16
 _SSE_PUBLICATION_INTERVAL = 1.0 / 30.0
 _SSE_RETRY = b"retry: 1000\n\n"
 _SSE_WRITE_TIMEOUT = 5.0
+_ADAPTER_NAME = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+_ADAPTER_COMPONENT = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_CORE_COMPONENT_TYPES = {
+    "scene2d",
+    "scene3d",
+    "table",
+    "metric",
+    "text",
+    "badge",
+    "log",
+}
 _logger = logging.getLogger(__name__)
 
 _ASSET_ROUTES = {
@@ -49,6 +73,7 @@ _ASSET_ROUTES = {
     "/sdk/runtime.js": ("runtime.js", "application/javascript; charset=utf-8"),
     "/sdk/runtime3d.js": ("runtime3d.js", "application/javascript; charset=utf-8"),
     "/sdk/client.js": ("client.js", "application/javascript; charset=utf-8"),
+    "/sdk/momentary.js": ("momentary.js", "application/javascript; charset=utf-8"),
     "/sdk/theme.css": ("theme.css", "text/css; charset=utf-8"),
 }
 
@@ -75,6 +100,15 @@ _MIME_TYPES = {
 
 @dataclass(frozen=True)
 class ReadyInfo:
+    """Connection details published after :meth:`DemoUiApp.run` binds a socket.
+
+    Attributes:
+        host: Bound host string passed to the server.
+        port: Actual bound TCP port. This may differ from the requested port
+            when the app was created with ``port=0``.
+        url: Base origin URL without a trailing slash.
+    """
+
     host: str
     port: int
     url: str
@@ -128,6 +162,8 @@ class _DirtyTargets:
         self.presentation = False
         self.cards = {}
         self.components = {}
+        self.append_batches = {}
+        self.append_revisions = {}
         self.removed_cards = set()
         self.removed_components = set()
 
@@ -138,6 +174,8 @@ class _DirtyTargets:
         self.presentation = False
         self.cards.clear()
         self.components.clear()
+        self.append_batches.clear()
+        self.append_revisions.clear()
 
     def empty(self) -> bool:
         return not (self.app_data or self.presentation or self.cards or self.components)
@@ -168,6 +206,7 @@ class _DirtyTargets:
             for target, operation in self.components.items()
             if target[0] != card_id
         }
+        self._clear_appends_for_card(card_id)
         return was_empty
 
     def mark_card_removed(self, card_id: str) -> bool:
@@ -181,7 +220,18 @@ class _DirtyTargets:
             for target, operation in self.components.items()
             if target[0] != card_id
         }
+        self._clear_appends_for_card(card_id)
         return was_empty
+
+    def _clear_appends_for_card(self, card_id):
+        for target in tuple(self.append_batches):
+            if target[0] == card_id:
+                self.append_batches.pop(target, None)
+                self.append_revisions.pop(target, None)
+
+    def _clear_appends(self, target):
+        self.append_batches.pop(target, None)
+        self.append_revisions.pop(target, None)
 
     def mark_component(self, card_id: str, component_id: str) -> bool:
         was_empty = self.empty()
@@ -198,6 +248,34 @@ class _DirtyTargets:
             )
         if card_id not in self.cards:
             self.components[target] = self._UPSERT
+            self._clear_appends(target)
+        return self.active and was_empty and not self.empty()
+
+    def mark_component_append(self, card_id, component_id, append, revision):
+        was_empty = self.empty()
+        if not self.active:
+            return False
+        if card_id in self.removed_cards:
+            raise RuntimeError(
+                f"cannot upsert component in removed card target: {card_id}"
+            )
+        target = (card_id, component_id)
+        if target in self.removed_components:
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        if card_id in self.cards or self.components.get(target) == self._UPSERT:
+            return False
+        self.components[target] = "append"
+        batches = self.append_batches.setdefault(target, {})
+        for series in append["series"]:
+            current = batches.setdefault(series["id"], [])
+            current.extend(series["samples"])
+            if len(current) > 10_000:
+                self.components[target] = self._UPSERT
+                self._clear_appends(target)
+                return self.active and was_empty and not self.empty()
+        self.append_revisions[target] = revision
         return self.active and was_empty and not self.empty()
 
     def mark_component_removed(self, card_id: str, component_id: str) -> bool:
@@ -207,6 +285,7 @@ class _DirtyTargets:
             return False
         if card_id not in self.cards:
             self.components[(card_id, component_id)] = self._REMOVE
+            self._clear_appends((card_id, component_id))
         return was_empty and not self.empty()
 
     def flush(self, model) -> Optional[dict]:
@@ -248,6 +327,23 @@ class _DirtyTargets:
                         "op": "remove-component",
                         "card_id": card_id,
                         "component_id": component_id,
+                    }
+                )
+                continue
+            if operation == "append":
+                batches = self.append_batches[(card_id, component_id)]
+                changes.append(
+                    {
+                        "op": "append-timeseries",
+                        "card_id": card_id,
+                        "component_id": component_id,
+                        "component_revision": self.append_revisions[
+                            (card_id, component_id)
+                        ],
+                        "series": [
+                            {"id": series_id, "samples": samples}
+                            for series_id, samples in sorted(batches.items())
+                        ],
                     }
                 )
                 continue
@@ -458,6 +554,7 @@ class _Model:
         self.data: Any = {}
         self._dirty_targets = _DirtyTargets()
         self._dirty_callback = None
+        self.adapter_component_types = set()
 
     def set_owner(self, loop) -> None:
         self._owner_loop = loop
@@ -536,6 +633,28 @@ class _Model:
         ):
             self._dirty_callback()
 
+    def commit_component_append_locked(
+        self, card_id: str, component_id: str, append: dict
+    ) -> None:
+        if (
+            card_id in self._dirty_targets.removed_cards
+            or (card_id, component_id) in self._dirty_targets.removed_components
+        ):
+            raise RuntimeError(
+                f"cannot upsert removed component target: {card_id}:{component_id}"
+            )
+        self.revision += 1
+        if (
+            self._dirty_targets.mark_component_append(
+                card_id, component_id, append, self.revision
+            )
+            and self._dirty_callback is not None
+        ):
+            self._dirty_callback()
+
+    def has_adapter_component(self, component_type: str) -> bool:
+        return component_type in self.adapter_component_types
+
     def commit_component_removal_locked(self, card_id: str, component_id: str) -> None:
         self.revision += 1
         if (
@@ -603,7 +722,13 @@ class _Model:
 
 
 class DemoUiApp:
-    """Model ownership and local asyncio HTTP lifecycle for one SDK process."""
+    """Own the presentation model and local aiohttp server for one process.
+
+    A ``DemoUiApp`` is configured synchronously, then started once with
+    :meth:`run`. After startup, mutating methods must be called on the event
+    loop that owns the running app. The app exposes a local HTTP UI, state
+    snapshot route, event stream, and optional validated command endpoints.
+    """
 
     _NEW = "NEW"
     _STARTING = "STARTING"
@@ -620,9 +745,35 @@ class DemoUiApp:
         *,
         theme=Theme.dark,
         layout=Layout.auto,
+        listening_message_prefix: str | None = "RTI Demo UI listening on",
     ) -> None:
+        """Create an application model and HTTP server wrapper.
+
+        Args:
+            title: Non-empty application title.
+            port: Requested TCP port in ``[0, 65535]``. Use ``0`` to let the OS
+                choose a free port.
+            host: Non-empty bind host string. Commands additionally require a
+                literal loopback host.
+            static_root: Optional existing directory containing ``index.html``
+                and any same-origin assets referenced by the UI.
+            theme: Initial built-in theme.
+            layout: Initial built-in layout.
+            listening_message_prefix: Text printed before the bound URL when
+                the server is ready. Set to ``None`` to suppress the message.
+
+        Raises:
+            ValueError: If any argument is invalid or ``static_root`` is not an
+                existing directory containing a regular ``index.html`` file.
+        """
         require_non_empty(title, "title", "DemoUiApp: ")
         require_non_empty(host, "host", "DemoUiApp: ")
+        if listening_message_prefix is not None and not isinstance(
+            listening_message_prefix, str
+        ):
+            raise ValueError(
+                "DemoUiApp: listening_message_prefix must be a string or None"
+            )
         theme = coerce_theme(theme)
         layout = coerce_layout(layout)
         if not (0 <= port <= 65535):
@@ -632,6 +783,7 @@ class DemoUiApp:
         self._assets = _load_assets()
         self._host = host
         self._port = port
+        self._listening_message_prefix = listening_message_prefix
         self._state = self._NEW
         self._run_started = False
         self._owner_loop = None
@@ -644,6 +796,9 @@ class DemoUiApp:
         self._site = None
         self._ready_info = None
         self._commands: Dict[str, Command] = {}
+        self._adapters = {}
+        self._adapter_assets = {}
+        self._adapter_component_types = set()
         self._command_capability = None
         self._active_commands = set()
         self._commands_done = asyncio.Event()
@@ -714,6 +869,70 @@ class DemoUiApp:
                 },
             },
         )
+
+    def _register_adapter(
+        self,
+        name: str,
+        version: str,
+        components,
+        runtime_js: bytes,
+        theme_css: bytes | None = None,
+    ) -> None:
+        """Register a fixed SDK-owned adapter descriptor and local assets."""
+        if self._run_started or self._state != self._NEW:
+            raise RuntimeError("DemoUiApp: adapters must be enabled before run()")
+        if not isinstance(name, str) or not _ADAPTER_NAME.fullmatch(name):
+            raise ValueError("DemoUiApp: invalid adapter name")
+        if not isinstance(version, str) or not version:
+            raise ValueError("DemoUiApp: adapter version must be non-empty")
+        if not isinstance(components, (list, tuple)) or not components:
+            raise ValueError(
+                "DemoUiApp: adapter components must be unique and non-empty"
+            )
+        if name in self._adapters:
+            raise ValueError(f"DemoUiApp: adapter already registered: {name}")
+        if any(
+            not isinstance(component_type, str)
+            or not _ADAPTER_COMPONENT.fullmatch(component_type)
+            or component_type in _CORE_COMPONENT_TYPES
+            or component_type in self._adapter_component_types
+            for component_type in components
+        ) or len(set(components)) != len(components):
+            raise ValueError("DemoUiApp: invalid or colliding adapter component type")
+        if not isinstance(runtime_js, bytes) or not runtime_js:
+            raise ValueError("DemoUiApp: adapter runtime must be non-empty bytes")
+        if theme_css is not None and (
+            not isinstance(theme_css, bytes) or not theme_css
+        ):
+            raise ValueError("DemoUiApp: adapter stylesheet must be non-empty bytes")
+
+        root = f"/sdk/adapters/{name}"
+        module = f"{root}/runtime.js"
+        styles = [f"{root}/theme.css"] if theme_css is not None else []
+        self._adapters[name] = {
+            "name": name,
+            "version": version,
+            "components": list(components),
+            "module": module,
+            "styles": styles,
+        }
+        self._adapter_assets[module] = (
+            runtime_js,
+            "application/javascript; charset=utf-8",
+        )
+        if theme_css is not None:
+            self._adapter_assets[styles[0]] = (
+                theme_css,
+                "text/css; charset=utf-8",
+            )
+        self._adapter_component_types.update(components)
+        self._model.adapter_component_types.update(components)
+
+    def _adapter_manifest(self) -> dict:
+        return {
+            "schema_version": 1,
+            "adapters": [self._adapters[name] for name in sorted(self._adapters)],
+        }
 
     def _command_origin_is_trusted(self, request: web.Request) -> bool:
         if self._ready_info is None:
@@ -859,6 +1078,15 @@ class DemoUiApp:
             return _json_response(200, {"status": "ok"})
         if path == "/api/state":
             return _json_response(200, self._model.snapshot())
+        if path == "/sdk/adapters/manifest.json":
+            return _asset_response(
+                _json_bytes(self._adapter_manifest()),
+                "application/json; charset=utf-8",
+            )
+        adapter_asset = self._adapter_assets.get(path)
+        if adapter_asset is not None:
+            body, content_type = adapter_asset
+            return _asset_response(body, content_type)
         if path == "/api" or path.startswith("/api/"):
             return _json_response(404, {"error": "not found"})
         if path == "/sdk" or path.startswith("/sdk/"):
@@ -950,6 +1178,11 @@ class DemoUiApp:
         )
 
     async def wait_until_ready(self) -> ReadyInfo:
+        """Wait until :meth:`run` binds the server socket successfully.
+
+        Returns:
+            The current :class:`ReadyInfo` for the running app.
+        """
         await self._ready_event.wait()
         return self._ready_info
 
@@ -994,6 +1227,23 @@ class DemoUiApp:
             await self._cleanup_complete.wait()
 
     def add_card(self, title: str, area=CardArea.main, span: int = 1) -> Card:
+        """Create and attach a new card.
+
+        Args:
+            title: Non-empty card title.
+            area: Initial card area as a :class:`CardArea` or matching string.
+            span: Initial card span as an integer from 1 to 3.
+
+        Returns:
+            The newly attached :class:`Card`. Mutate it in place to add
+            components or adjust presentation properties.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If the arguments are invalid or would create more than
+                one sidebar card.
+        """
         area = coerce_card_area(area)
         require_card_span(span)
         self._model.check_owner()
@@ -1009,6 +1259,19 @@ class DemoUiApp:
         return card
 
     def set_theme(self, theme) -> None:
+        """Set the application theme.
+
+        Re-applying the current theme is a no-op and does not bump the model
+        revision.
+
+        Args:
+            theme: A :class:`Theme` value or matching string.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``theme`` is invalid.
+        """
         theme = coerce_theme(theme)
         self._model.check_owner()
         self._model.ensure_running()
@@ -1018,6 +1281,20 @@ class DemoUiApp:
         self._model.commit_presentation_locked()
 
     def set_layout(self, layout) -> None:
+        """Set the application card layout.
+
+        Re-applying the current layout is a no-op. ``sidebar-main`` is only
+        allowed when exactly one sidebar card exists.
+
+        Args:
+            layout: A :class:`Layout` value or matching string.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``layout`` is invalid or violates sidebar-card
+                cardinality rules.
+        """
         layout = coerce_layout(layout)
         self._model.check_owner()
         self._model.ensure_running()
@@ -1034,6 +1311,17 @@ class DemoUiApp:
         self._model.commit_presentation_locked()
 
     def set_data(self, value) -> None:
+        """Replace the application-level JSON payload.
+
+        Args:
+            value: Any JSON-compatible value. The SDK stores a defensive deep
+                copy, so later caller-side mutations are not observed.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``value`` is not JSON-compatible.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         from .types import copy_json_value
@@ -1042,6 +1330,22 @@ class DemoUiApp:
         self._model.commit_app_data_locked()
 
     def update_data(self, path, value, create_missing=False) -> None:
+        """Update a nested field within the application-level data object.
+
+        Args:
+            path: Sequence of non-empty string keys. An empty sequence replaces
+                the complete application data value.
+            value: JSON-compatible value written at the leaf key.
+            create_missing: When ``True``, missing intermediate objects are
+                created. When ``False``, every segment must already exist.
+
+        Raises:
+            RuntimeError: If called from a non-owner event loop after
+                :meth:`run` starts, or after shutdown.
+            ValueError: If ``path`` is invalid, the current data or an
+                intermediate segment is not an object, a required segment is
+                missing, or ``value`` is not JSON-compatible.
+        """
         self._model.check_owner()
         self._model.ensure_running()
         self._model.data = self._model.update_value(
@@ -1051,18 +1355,27 @@ class DemoUiApp:
 
     @property
     def ready_info(self) -> Optional[ReadyInfo]:
+        """Current bind information for the running app, if available.
+
+        Returns:
+            ``None`` before the server becomes ready and again after cleanup
+            completes.
+        """
         return self._ready_info
 
     @property
     def title(self) -> str:
+        """Return the application title displayed by the frontend."""
         return self._model.title
 
     @property
     def host(self) -> str:
+        """Return the configured HTTP bind host."""
         return self._host
 
     @property
     def run_started(self) -> bool:
+        """Return whether this single-use application has started running."""
         return self._run_started
 
     def register_command(
@@ -1072,6 +1385,26 @@ class DemoUiApp:
         handler,
         confirmation: Optional[CommandConfirmation] = None,
     ) -> Command:
+        """Register a validated browser-invoked command before startup.
+
+        Args:
+            name: Command name matching ``^[a-z][a-z0-9-]{0,62}$``.
+            schema: A :class:`CommandSchema` instance or schema dictionary using
+                the supported subset.
+            handler: Sync or async callable invoked with the validated payload.
+                The return value must be JSON-compatible.
+            confirmation: Optional browser confirmation metadata shown before the
+                command is submitted.
+
+        Returns:
+            The registered :class:`Command` definition.
+
+        Raises:
+            RuntimeError: If registration is attempted after :meth:`run`
+                starts.
+            ValueError: If the host is not a literal loopback address, ``name``
+                is invalid or already registered, or ``schema`` is invalid.
+        """
         if self._run_started:
             raise RuntimeError(
                 "DemoUiApp: command registration is closed after run() begins"
@@ -1092,6 +1425,19 @@ class DemoUiApp:
         return command
 
     async def run(self) -> None:
+        """Start serving the demo UI until :meth:`stop` or cancellation occurs.
+
+        This coroutine may be called only once. The running loop becomes the
+        owner for all subsequent model mutations.
+
+        Raises:
+            RuntimeError: If called more than once or if the server does not
+                bind exactly one socket.
+            ValueError: If the current ``sidebar-main`` layout does not have
+                exactly one sidebar card.
+            OSError: If the HTTP site fails to bind.
+            asyncio.CancelledError: If the task is cancelled while running.
+        """
         loop = asyncio.get_running_loop()
         if self._run_started:
             raise RuntimeError("DemoUiApp: run() may only be called once")
@@ -1131,7 +1477,13 @@ class DemoUiApp:
             self._events.start(loop)
             self._state = self._RUNNING
             self._ready_event.set()
-            print(f"RTI Demo UI listening on {self._ready_info.url}/")
+            if self._listening_message_prefix is not None:
+                prefix = (
+                    f"{self._listening_message_prefix} "
+                    if self._listening_message_prefix
+                    else ""
+                )
+                print(f"{prefix}{self._ready_info.url}/")
             await self._shutdown_event.wait()
         except asyncio.CancelledError:
             cancelled = True
@@ -1144,6 +1496,15 @@ class DemoUiApp:
             raise asyncio.CancelledError
 
     async def stop(self) -> None:
+        """Stop the server and wait for cleanup to finish.
+
+        ``stop()`` may be awaited before :meth:`run` to prevent any later bind,
+        from the owner loop, or from another loop while the app is running. The
+        method waits for in-flight requests, active commands, and SSE cleanup.
+        Do not directly await ``stop()`` inside a command handler: that handler
+        is itself active work that shutdown must drain. Schedule it with
+        ``asyncio.create_task(app.stop())`` so the handler can return first.
+        """
         owner_loop = self._owner_loop
         if owner_loop is None:
             self._request_stop()

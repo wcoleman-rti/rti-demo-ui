@@ -1,3 +1,15 @@
+#
+# (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+#
+# RTI grants Licensee a license to use, modify, compile, and create derivative
+# works of the Software.  Licensee has the right to distribute object form
+# only for use with RTI products.  The Software is provided "as is", with no
+# warranty of any type, including any warranty for fitness for any purpose.
+# RTI is under no obligation to maintain or support the Software.  RTI shall
+# not be liable for any incidental or consequential damages arising out of the
+# use or inability to use the software.
+#
+
 """Playwright browser tests run against the Python backend (shared assets mean
 the same assertions apply to the C++ backend — see docs/architecture.md.
 Run explicitly: `pytest tests/browser/test_browser.py`.
@@ -222,9 +234,15 @@ def _assert_arm_page(page, base_url):
         "document.querySelector('#arm3d-scene canvas') && "
         "document.querySelector('#arm3d-scene canvas').width > 0"
     )
-    page.locator("#arm3d-scene [role=option]").first.focus()
-    page.keyboard.press("ArrowDown")
-    page.keyboard.press("Enter")
+    page.wait_for_function(
+        "document.querySelector('.sdk-scene3d-live').textContent === "
+        "'3D model loaded'"
+    )
+    page.locator("#arm3d-scene [role=option]").first.press("ArrowDown")
+    page.wait_for_function(
+        "document.activeElement?.dataset.nodeId === 'joint-1'"
+    )
+    page.locator("#arm3d-scene [role=option]").nth(1).press("Enter")
     page.wait_for_function(
         "document.querySelectorAll('[role=option][aria-selected=true]').length === 1"
         " && document.querySelector('.sdk-scene3d-live')"

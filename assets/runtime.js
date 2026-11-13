@@ -1,3 +1,15 @@
+/*
+ * (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+ *
+ * RTI grants Licensee a license to use, modify, compile, and create derivative
+ * works of the Software.  Licensee has the right to distribute object form
+ * only for use with RTI products.  The Software is provided "as is", with no
+ * warranty of any type, including any warranty for fitness for any purpose.
+ * RTI is under no obligation to maintain or support the Software.  RTI shall
+ * not be liable for any incidental or consequential damages arising out of the
+ * use or inability to use the software.
+ */
+
 import { createClient } from './client.js';
 
 // RTI Demo UI — shared browser runtime.
@@ -20,6 +32,13 @@ import { createClient } from './client.js';
     var componentSnapshots = Object.create(null);
     var scene3dModulePromise = null;
     var scene3dModule = null;
+    var adapterStates = Object.create(null);
+    var adapterRenderers = Object.create(null);
+    var adapterModulePromises = Object.create(null);
+    var adapterStyles = Object.create(null);
+    var adapterManifestPromise = null;
+    var adapterManifest = null;
+    var appClient = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -61,7 +80,7 @@ import { createClient } from './client.js';
         if (cardsEl) cardsEl.dataset.sdkLayout = layout;
     }
 
-    function applySnapshot(snapshot) {
+    function applySnapshot(snapshot, changes) {
         if (snapshot.schema_version !== 2) {
             var cardsEl = byId('sdk-cards');
             if (cardsEl) {
@@ -73,10 +92,10 @@ import { createClient } from './client.js';
         if (titleEl) titleEl.textContent = snapshot.title || '';
 
         applyPresentation(snapshot);
-        reconcileCards(snapshot.cards || []);
+        reconcileCards(snapshot.cards || [], changes || []);
     }
 
-    function reconcileCards(cards) {
+    function reconcileCards(cards, changes) {
         var container = byId('sdk-cards');
         if (!container) return;
         var seenCardIds = Object.create(null);
@@ -106,7 +125,11 @@ import { createClient } from './client.js';
             nextCardEl = cardEl.nextElementSibling;
             var titleNode = cardEl.querySelector('.sdk-card-title');
             if (titleNode.textContent !== card.title) titleNode.textContent = card.title;
-            reconcileComponents(cardEl.querySelector('.sdk-card-body'), card.components || []);
+            reconcileComponents(
+                cardEl.querySelector('.sdk-card-body'),
+                card.components || [],
+                changes
+            );
         });
 
         Array.prototype.slice.call(container.children).forEach(function (child) {
@@ -117,11 +140,22 @@ import { createClient } from './client.js';
         });
     }
 
-    function reconcileComponents(container, components) {
+    function reconcileComponents(container, components, changes) {
         var seenIds = Object.create(null);
         components.forEach(function (component) {
             seenIds[component.id] = true;
-            var snapshot = JSON.stringify(component);
+            var snapshot = String(component.revision);
+            if (
+                component.type !== 'scene2d' &&
+                component.type !== 'scene3d' &&
+                component.type !== 'table' &&
+                component.type !== 'metric' &&
+                component.type !== 'text' &&
+                component.type !== 'badge' &&
+                component.type !== 'log'
+            ) {
+                snapshot += ':' + document.documentElement.dataset.sdkTheme;
+            }
             var existing = document.getElementById(component.id);
             if (
                 existing && existing.parentNode === container &&
@@ -138,7 +172,7 @@ import { createClient } from './client.js';
             } else if (component.type === 'metric' || component.type === 'text' || component.type === 'badge' || component.type === 'log') {
                 renderTextComponent(container, component);
             } else {
-                renderUnsupported(container, component);
+                reconcileAdapterComponent(container, component, changes);
             }
             componentSnapshots[component.id] = snapshot;
         });
@@ -148,9 +182,294 @@ import { createClient } from './client.js';
                     if (scene3dModule) scene3dModule.disposeScene3d(child.dataset.componentId);
                     delete scene3dStates[child.dataset.componentId];
                 }
+                disposeAdapterComponent(child.dataset.componentId);
                 container.removeChild(child);
                 delete sceneStates[child.dataset.componentId];
                 delete componentSnapshots[child.dataset.componentId];
+            }
+        });
+    }
+
+    function adapterFailure(host, message, retry) {
+        host.className = 'sdk-generic-component sdk-adapter-fallback';
+        host.textContent = '';
+        var text = document.createElement('p');
+        text.textContent = message;
+        host.appendChild(text);
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sdk-button';
+        button.textContent = 'Retry renderer';
+        button.addEventListener('click', retry);
+        host.appendChild(button);
+    }
+
+    function adapterContext(state, append) {
+        var media = window.matchMedia
+            ? window.matchMedia('(prefers-reduced-motion: reduce)')
+            : null;
+        return {
+            theme: document.documentElement.dataset.sdkTheme || 'dark',
+            reducedMotion: media ? media.matches : reducedMotion,
+            append: append || null,
+            observeResize: function (host, callback) {
+                if (!window.ResizeObserver) {
+                    var onResize = function () {
+                        callback(host.getBoundingClientRect());
+                    };
+                    window.addEventListener('resize', onResize);
+                    return function () {
+                        window.removeEventListener('resize', onResize);
+                    };
+                }
+                var observer = new ResizeObserver(function (entries) {
+                    if (entries.length) callback(entries[0].contentRect);
+                });
+                observer.observe(host);
+                return function () { observer.disconnect(); };
+            },
+            invokeCommand: function (name, payload) {
+                if (!appClient) {
+                    return Promise.reject(new Error('SDK client is unavailable'));
+                }
+                return appClient.invokeCommand(name, payload);
+            },
+            reportDiagnostic: function (message, error) {
+                console.error('RTI Demo UI adapter: ' + message, error || '');
+            }
+        };
+    }
+
+    function loadAdapterManifest() {
+        if (adapterManifestPromise) return adapterManifestPromise;
+        adapterManifestPromise = fetch('/sdk/adapters/manifest.json', {
+            cache: 'no-store'
+        }).then(function (response) {
+            if (!response.ok) throw new Error('adapter manifest request failed');
+            return response.json();
+        }).then(function (manifest) {
+            if (!manifest || manifest.schema_version !== 1
+                || !Array.isArray(manifest.adapters)) {
+                throw new Error('adapter manifest is invalid');
+            }
+            adapterManifest = Object.create(null);
+            manifest.adapters.forEach(function (descriptor) {
+                if (!descriptor || typeof descriptor.name !== 'string'
+                    || !/^[a-z][a-z0-9-]{0,62}$/.test(descriptor.name)
+                    || typeof descriptor.version !== 'string'
+                    || !Array.isArray(descriptor.components)
+                    || !descriptor.components.length
+                    || descriptor.module !== '/sdk/adapters/' + descriptor.name + '/runtime.js'
+                    || !Array.isArray(descriptor.styles)) {
+                    throw new Error('adapter descriptor is invalid');
+                }
+                var prefix = '/sdk/adapters/' + descriptor.name + '/';
+                if (descriptor.styles.some(function (style) {
+                    return style !== prefix + 'theme.css';
+                })) throw new Error('adapter stylesheet route is invalid');
+                descriptor.components.forEach(function (type) {
+                    if (typeof type !== 'string'
+                        || !/^[a-z][a-z0-9_-]{0,63}$/.test(type)
+                        || adapterManifest[type]) {
+                        throw new Error('adapter component registration is invalid');
+                    }
+                    adapterManifest[type] = descriptor;
+                });
+            });
+            return adapterManifest;
+        });
+        return adapterManifestPromise;
+    }
+
+    function loadAdapterRenderer(type) {
+        return loadAdapterManifest().then(function (manifest) {
+            var descriptor = manifest[type];
+            if (!descriptor) throw new Error('no enabled renderer for ' + type);
+            var modulePromise = adapterModulePromises[descriptor.name];
+            if (!modulePromise) {
+                var styles = descriptor.styles.map(function (route) {
+                    if (adapterStyles[route]) return adapterStyles[route];
+                    var loaded = new Promise(function (resolve, reject) {
+                        var link = document.createElement('link');
+                        link.rel = 'stylesheet';
+                        link.href = route;
+                        link.onload = resolve;
+                        link.onerror = function () {
+                            reject(new Error('adapter stylesheet failed to load'));
+                        };
+                        document.head.appendChild(link);
+                    });
+                    adapterStyles[route] = loaded;
+                    loaded.catch(function () {
+                        delete adapterStyles[route];
+                    });
+                    return loaded;
+                });
+                modulePromise = Promise.all(styles).then(function () {
+                    return import(descriptor.module);
+                }).then(function (module) {
+                    if (typeof module.registerAdapter !== 'function') {
+                        throw new Error('adapter module has no registerAdapter()');
+                    }
+                    module.registerAdapter({
+                        registerComponentRenderer: function (registeredType, renderer) {
+                            if (!descriptor.components.includes(registeredType)
+                                || adapterRenderers[registeredType]
+                                || !renderer || typeof renderer.mount !== 'function'
+                                || typeof renderer.update !== 'function'
+                                || typeof renderer.dispose !== 'function') {
+                                throw new Error('adapter renderer registration is invalid');
+                            }
+                            adapterRenderers[registeredType] = renderer;
+                        }
+                    });
+                    if (descriptor.components.some(function (registeredType) {
+                        return !adapterRenderers[registeredType];
+                    })) throw new Error('adapter did not register all declared renderers');
+                    return module;
+                });
+                adapterModulePromises[descriptor.name] = modulePromise;
+                modulePromise.catch(function () {
+                    delete adapterModulePromises[descriptor.name];
+                    descriptor.components.forEach(function (registeredType) {
+                        delete adapterRenderers[registeredType];
+                    });
+                });
+            }
+            return modulePromise.then(function () {
+                return adapterRenderers[type];
+            });
+        });
+    }
+
+    function appendDelta(component, changes) {
+        for (var index = 0; index < changes.length; ++index) {
+            var change = changes[index];
+            if (change.op === 'append-timeseries'
+                && change.component_id === component.id) {
+                return {
+                    revision: change.component_revision,
+                    series: change.series
+                };
+            }
+        }
+        return null;
+    }
+
+    function reconcileAdapterComponent(container, component, changes) {
+        var state = adapterStates[component.id];
+        if (!state) {
+            var host = document.createElement('div');
+            host.id = component.id;
+            host.dataset.componentId = component.id;
+            host.className = 'sdk-adapter-loading';
+            host.textContent = 'Loading optional renderer…';
+            container.appendChild(host);
+            state = { host: host, type: component.type, component: component, generation: 0 };
+            adapterStates[component.id] = state;
+        }
+        if (state.type !== component.type) {
+            disposeAdapterComponent(component.id);
+            reconcileAdapterComponent(container, component, changes);
+            return;
+        }
+        var previous = state.component;
+        state.component = component;
+        var append = appendDelta(component, changes);
+        var generation = ++state.generation;
+        loadAdapterRenderer(component.type).then(function (renderer) {
+            if (adapterStates[component.id] !== state
+                || state.generation !== generation) return;
+            var context = adapterContext(state, append);
+            try {
+                if (state.mounted) {
+                    renderer.update(state.host, previous, component, context);
+                } else {
+                    renderer.mount(state.host, component, context);
+                    state.mounted = true;
+                }
+                state.renderer = renderer;
+                state.context = context;
+            } catch (error) {
+                state.mounted = false;
+                try {
+                    renderer.dispose(state.host, context);
+                } catch (disposeError) {
+                    context.reportDiagnostic('renderer disposal failed', disposeError);
+                }
+                context.reportDiagnostic('renderer update failed', error);
+                adapterFailure(
+                    state.host,
+                    'Optional renderer failed: ' +
+                        (error && error.message ? error.message : 'unknown error'),
+                    function () {
+                        state.generation += 1;
+                        reconcileAdapterComponent(container, state.component, []);
+                    }
+                );
+            }
+        }).catch(function (error) {
+            if (adapterStates[component.id] !== state
+                || state.generation !== generation) return;
+            adapterFailure(
+                state.host,
+                'Optional renderer unavailable: ' +
+                    (error && error.message ? error.message : 'module failed to load'),
+                function () {
+                    adapterManifestPromise = null;
+                    state.generation += 1;
+                    reconcileAdapterComponent(container, state.component, []);
+                }
+            );
+        });
+    }
+
+    function disposeAdapterComponent(componentId) {
+        var state = adapterStates[componentId];
+        if (!state) return;
+        state.generation += 1;
+        if (state.mounted && state.renderer) {
+            try {
+                state.renderer.dispose(state.host, state.context);
+            } catch (error) {
+                console.error('RTI Demo UI adapter disposal failed', error);
+            }
+        }
+        delete adapterStates[componentId];
+    }
+
+    var activeTransport = 'poll';
+    var transportSwitching = false;
+    var clientUnsubscribe = null;
+
+    function snapshotHasTimeSeries(snapshot) {
+        return (snapshot.cards || []).some(function (card) {
+            return (card.components || []).some(function (component) {
+                return component.type === 'timeseries';
+            });
+        });
+    }
+
+    function subscribeClient(client) {
+        appClient = client;
+        clientUnsubscribe = client.subscribe(function (snapshot, _connectionState, changes) {
+            showBanner(client.getConnectionState() === 'reconnecting');
+            if (snapshot) applySnapshot(snapshot, changes);
+            if (
+                snapshot &&
+                client === appClient &&
+                activeTransport === 'poll' &&
+                !transportSwitching &&
+                snapshotHasTimeSeries(snapshot)
+            ) {
+                transportSwitching = true;
+                client.stop();
+                if (clientUnsubscribe) clientUnsubscribe();
+                activeTransport = 'sse';
+                var streamClient = createClient({ transport: 'sse' });
+                subscribeClient(streamClient);
+                transportSwitching = false;
+                streamClient.start();
             }
         });
     }
@@ -454,10 +773,29 @@ import { createClient } from './client.js';
 
     document.addEventListener('DOMContentLoaded', function () {
         var client = createClient();
-        client.subscribe(function (snapshot) {
-            showBanner(client.getConnectionState() === 'reconnecting');
-            if (snapshot) applySnapshot(snapshot);
-        });
+        subscribeClient(client);
         client.start();
+    });
+
+    window.addEventListener('pagehide', function () {
+        if (appClient) appClient.stop();
+        if (clientUnsubscribe) clientUnsubscribe();
+        Object.keys(adapterStates).forEach(function (componentId) {
+            var state = adapterStates[componentId];
+            if (state.mounted && state.renderer) {
+                try {
+                    state.renderer.dispose(
+                        state.host,
+                        state.context || adapterContext(state, null)
+                    );
+                } catch (error) {
+                    console.error('RTI Demo UI adapter disposal failed', error);
+                }
+            }
+            delete adapterStates[componentId];
+        });
+        Object.keys(scene3dStates).forEach(function (componentId) {
+            if (scene3dModule) scene3dModule.disposeScene3d(componentId);
+        });
     });
 })();

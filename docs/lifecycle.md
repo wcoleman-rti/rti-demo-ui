@@ -1,3 +1,15 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+
 # Lifecycle
 
 Python `DemoUiApp` owns the local aiohttp server and component model.
@@ -20,11 +32,20 @@ An app stopped from another event loop schedules shutdown on its owner loop.
 Shutdown rejects new event subscriptions, wakes connected and idle SSE handlers,
 closes their transports, and then completes normal aiohttp cleanup.
 
+Do not directly await `app.stop()` from a command handler. Shutdown drains active
+commands, including the current handler. Instead, schedule
+`asyncio.create_task(app.stop())` and return from the handler so cleanup can
+proceed.
+
 The C++ `wait_until_ready()` returns only after the bound httplib listener is
 running and the reported URL can accept requests. `run()` remains blocking and
 owns the managed listener until `stop()`; callers do not need a separate health
 poll after readiness. Concurrent startup and stop cannot publish a stale
 `ReadyInfo`.
+
+C++ `stop()` must run on a non-callback control thread. A command handler or SDK
+timer callback must signal that control thread rather than call `stop()` itself,
+because shutdown waits for active commands and joins timer threads.
 
 Component factory and mutation methods remain synchronous. Configuration before
 startup is allowed; after startup, mutations and snapshots must run on the

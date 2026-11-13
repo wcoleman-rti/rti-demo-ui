@@ -1,7 +1,22 @@
+/*
+ * (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+ *
+ * RTI grants Licensee a license to use, modify, compile, and create derivative
+ * works of the Software.  Licensee has the right to distribute object form
+ * only for use with RTI products.  The Software is provided "as is", with no
+ * warranty of any type, including any warranty for fitness for any purpose.
+ * RTI is under no obligation to maintain or support the Software.  RTI shall
+ * not be liable for any incidental or consequential damages arising out of the
+ * use or inability to use the software.
+ */
+
 // HTTP contract tests against the C++ backend. See
 // docs/architecture.md §11.2.
 #include <httplib.h>
 #include <rti_demo_ui/rti_demo_ui.hpp>
+#ifdef RTI_DEMO_HAS_UPLOT
+#include <rti_demo_ui/uplot.hpp>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -57,6 +72,15 @@ int main() {
     const auto info = app.ready_info();
     CHECK(info.has_value());
     if (!info) return 1;
+#ifdef RTI_DEMO_HAS_UPLOT
+    bool late_adapter_rejected = false;
+    try {
+        enable_uplot(app);
+    } catch (const std::runtime_error&) {
+        late_adapter_rejected = true;
+    }
+    CHECK(late_adapter_rejected);
+#endif
 
     httplib::Client client(info->host, info->port);
 
@@ -69,6 +93,7 @@ int main() {
         {"/sdk/runtime.js", "application/javascript; charset=utf-8"},
         {"/sdk/runtime3d.js", "application/javascript; charset=utf-8"},
         {"/sdk/client.js", "application/javascript; charset=utf-8"},
+        {"/sdk/momentary.js", "application/javascript; charset=utf-8"},
         {"/sdk/theme.css", "text/css; charset=utf-8"},
     };
     for (const auto& route : routes) {
@@ -79,6 +104,16 @@ int main() {
             CHECK(res->get_header_value("Content-Type") == route.content_type);
             CHECK(res->get_header_value("X-Content-Type-Options") == "nosniff");
         }
+        auto empty_manifest = client.Get("/sdk/adapters/manifest.json");
+        CHECK(empty_manifest != nullptr && empty_manifest->status == 200);
+        if (empty_manifest) {
+            CHECK(empty_manifest->get_header_value("Cache-Control") == "no-cache");
+            const Json expected_manifest{
+                {"schema_version", 1}, {"adapters", Json::array()}};
+            CHECK(Json::parse(empty_manifest->body) == expected_manifest);
+        }
+        auto disabled_adapter = client.Get("/sdk/adapters/uplot/runtime.js");
+        CHECK(disabled_adapter != nullptr && disabled_adapter->status == 404);
     }
 
     auto health = client.Get("/api/health");
@@ -170,8 +205,57 @@ int main() {
     if (runtime3d_response)
         CHECK(runtime3d_response->body == runtime3d_contents.str());
 
+    std::ifstream momentary_file(SOURCE_ROOT "/assets/momentary.js",
+                                 std::ios::binary);
+    std::ostringstream momentary_contents;
+    momentary_contents << momentary_file.rdbuf();
+    auto momentary_response = client.Get("/sdk/momentary.js");
+    CHECK(momentary_response != nullptr);
+    if (momentary_response)
+        CHECK(momentary_response->body == momentary_contents.str());
+
     app.stop();
     server_thread.join();
+
+#ifdef RTI_DEMO_HAS_UPLOT
+    DemoUiApp adapter_app("Adapter Routes");
+    enable_uplot(adapter_app);
+    bool duplicate_adapter_rejected = false;
+    try {
+        enable_uplot(adapter_app);
+    } catch (const std::invalid_argument&) {
+        duplicate_adapter_rejected = true;
+    }
+    CHECK(duplicate_adapter_rejected);
+    std::thread adapter_thread([&adapter_app]() { adapter_app.run(); });
+    adapter_app.wait_until_ready();
+    const auto adapter_info = adapter_app.ready_info();
+    CHECK(adapter_info.has_value());
+    if (adapter_info) {
+        httplib::Client adapter_client(adapter_info->host, adapter_info->port);
+        auto manifest = adapter_client.Get("/sdk/adapters/manifest.json");
+        CHECK(manifest != nullptr && manifest->status == 200);
+        if (manifest) {
+            CHECK(manifest->get_header_value("Cache-Control") == "no-cache");
+            const auto body = Json::parse(manifest->body);
+            CHECK(body["adapters"].size() == 1);
+            CHECK(body["adapters"][0]["name"] == "uplot");
+            CHECK(body["adapters"][0]["module"] ==
+                  "/sdk/adapters/uplot/runtime.js");
+        }
+        auto module = adapter_client.Get("/sdk/adapters/uplot/runtime.js");
+        CHECK(module != nullptr && module->status == 200);
+        if (module) CHECK(module->body.size() > 50000);
+        auto style = adapter_client.Get("/sdk/adapters/uplot/theme.css");
+        CHECK(style != nullptr && style->status == 200);
+        if (style) CHECK(style->body.find(".sdk-timeseries") !=
+                         std::string::npos);
+        auto unknown = adapter_client.Get("/sdk/adapters/uplot/remote.js");
+        CHECK(unknown != nullptr && unknown->status == 404);
+    }
+    adapter_app.stop();
+    adapter_thread.join();
+#endif
 
     if (g_failures == 0) {
         std::printf("All HTTP contract tests passed\n");
