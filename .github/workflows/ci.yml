@@ -152,7 +152,7 @@ jobs:
           PY
           )
       - name: Upload native Python wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-python-wheels
           path: ${{ runner.temp }}/native-wheels/*.whl
@@ -294,7 +294,7 @@ jobs:
         run: python "${{ github.workspace }}/native/python/tests/real_host_smoke.py"
       - name: Retain native diagnostics
         if: failure() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-webview-logs
           path: ${{ runner.temp }}/native-webview/*.log
