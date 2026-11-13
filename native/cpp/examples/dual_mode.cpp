@@ -1,19 +1,29 @@
-#include <rti_demo_ui_native/native_webview.hpp>
-
 #include <cmath>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <rti_demo_ui_native/native_webview.hpp>
 
 int main(int argc, char** argv) {
     bool native_mode = false;
-    if (argc == 2 && std::strcmp(argv[1], "--native") == 0) {
-        native_mode = true;
-    } else if (argc != 1 && !(argc == 2 &&
-                              std::strcmp(argv[1], "--browser") == 0)) {
-        std::cerr << "usage: rti_demo_ui_native_dual_mode "
-                     "[--browser|--native]\n";
-        return 2;
+    rti::demo::ui::native::NativeWindowOptions options;
+    for (int index = 1; index < argc; ++index) {
+        if (std::strcmp(argv[index], "--native") == 0) {
+            native_mode = true;
+        } else if (std::strcmp(argv[index], "--browser") == 0) {
+            native_mode = false;
+        } else if (std::strcmp(argv[index], "--icon") == 0 &&
+                   index + 1 < argc) {
+            options.icon = argv[++index];
+        } else if (std::strcmp(argv[index], "--application-id") == 0 &&
+                   index + 1 < argc) {
+            options.application_id = argv[++index];
+        } else {
+            std::cerr << "usage: rti_demo_ui_native_dual_mode "
+                         "[--browser|--native] [--icon PATH] "
+                         "[--application-id ID]\n";
+            return 2;
+        }
     }
 
     using namespace rti::demo::ui;
@@ -29,12 +39,11 @@ int main(int argc, char** argv) {
     app.add_timer(100, [scene, angle]() {
         *angle += 0.05;
         scene->update_entity("vehicle-1", 40.0 * std::cos(*angle),
-                             40.0 * std::sin(*angle),
-                             (*angle) * 180.0 / M_PI);
+                             40.0 * std::sin(*angle), (*angle) * 180.0 / M_PI);
     });
 
     if (native_mode) {
-        rti::demo::ui::native::run(app);
+        rti::demo::ui::native::run(app, options);
     } else {
         app.run();
     }

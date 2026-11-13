@@ -195,12 +195,25 @@ void test_icon_path_is_forwarded() {
     host.close_immediately = true;
     NativeWindowOptions options;
     options.icon = icon;
+    options.application_id = "com.example.native-icon";
     native_detail::run_with_host(app, options, host);
 
     CHECK(host.options.icon == icon);
+    CHECK(host.options.application_id == options.application_id);
     std::error_code error;
     std::filesystem::remove(icon, error);
     CHECK(!error);
+}
+
+void test_invalid_application_id() {
+    DemoUiApp app("Invalid desktop identity");
+    FakeWindowHost host;
+    NativeWindowOptions options;
+    options.application_id = "not a desktop identity";
+    CHECK(throws_native(
+        [&]() { native_detail::run_with_host(app, options, host); },
+        "application_id"));
+    CHECK(!app.run_started());
 }
 
 void test_window_failure_cleans_up() {
@@ -372,6 +385,7 @@ int main() {
     SocketRuntime socket_runtime;
     test_normal_close();
     test_icon_path_is_forwarded();
+    test_invalid_application_id();
     test_window_failure_cleans_up();
     test_bind_failure_does_not_create_window();
     test_server_stop_closes_window();

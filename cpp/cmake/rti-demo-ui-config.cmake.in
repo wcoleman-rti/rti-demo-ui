@@ -13,4 +13,5 @@
 @PACKAGE_INIT@
 
 include("${CMAKE_CURRENT_LIST_DIR}/rti_demo_ui-targets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/rti-demo-ui-desktop.cmake")
 check_required_components(rti_demo_ui)

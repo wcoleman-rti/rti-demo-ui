@@ -136,8 +136,9 @@ run_native(
 )
 ```
 
-`application_id` is an optional lowercase reverse-DNS identifier retained for
-source compatibility; it does not select or isolate a browser profile.
+`application_id` is an optional lowercase reverse-DNS identifier. On Linux it
+sets the Wayland app ID and both X11 window-class values for desktop matching.
+It does not select or isolate a browser profile or install a desktop entry.
 `async_main` runs on the app's owner event loop after the server is ready. A
 normal return closes the window; an exception is re-raised on the calling
 thread after cleanup. `icon` is an optional path to the application icon.
@@ -193,6 +194,7 @@ rti::demo::ui::native::NativeWindowOptions options;
 options.width = 1280;
 options.height = 800;
 options.icon = "assets/fleet.png";
+options.application_id = "com.example.fleet";
 rti::demo::ui::native::run(app, options);
 ```
 
@@ -210,7 +212,121 @@ unreadable, or unsupported image is reported as a native-mode error.
 GTK and Windows set the icon on the native window, which is used by desktop
 chrome and task switchers where supported. Linux desktop shells may instead
 derive the displayed icon from the launching desktop entry or compositor app
-identity.
+identity. Linux hosts bound icon images to 256 pixels per dimension, preserving
+aspect ratio and leaving smaller images unchanged. This avoids GTK silently
+omitting oversized images from the X11 `_NET_WM_ICON` property.
+
+### Linux desktop identity and launchers
+
+For reliable GNOME/Wayland shell branding, supply an explicit application ID
+and install a matching desktop entry as part of the consumer application.
+The native runners never write desktop files or register icons. Merely
+providing `icon=` is not a guarantee of a GNOME overview, dock, or Alt-Tab icon.
+
+### Opt-in CMake desktop packaging
+
+After `find_package(rti_demo_ui CONFIG REQUIRED)` or adding the SDK's `cpp`
+directory with `add_subdirectory`, Linux consumers can opt into:
+
+```cmake
+add_executable(fleet main.cpp)
+# Link the core/native targets required by your application.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    rti_demo_ui_install_desktop_app(
+        TARGET fleet
+        APPLICATION_ID com.example.fleet
+        NAME "Fleet Telemetry"
+        ICON "${CMAKE_CURRENT_SOURCE_DIR}/assets/fleet.png"
+    )
+endif()
+```
+
+In the application, set `NativeWindowOptions::application_id` to the same
+`com.example.fleet` value. The helper does not change application code or append
+command-line arguments; the executable must launch the intended UI without
+arguments.
+
+The helper installs the executable to `CMAKE_INSTALL_BINDIR`, a PNG/SVG/XPM
+icon to `CMAKE_INSTALL_DATADIR/pixmaps`, and a matching desktop entry to
+`CMAKE_INSTALL_DATADIR/applications`. The desktop entry uses the application ID
+as its icon name and `StartupWMClass`. Other than the ID, display name, image,
+and executable target, no desktop metadata is inferred.
+
+Use the normal CMake install controls:
+
+```bash
+# Standard per-user desktop integration:
+cmake --install build --prefix "$HOME/.local"
+
+# Or a project-local installation:
+cmake --install build --prefix "$PWD/local-install"
+export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+XDG_DATA_DIRS="$PWD/local-install/share:$XDG_DATA_DIRS" \
+  gtk-launch com.example.fleet
+
+# Package staging: paths in the desktop entry refer to /opt/fleet, not stage:
+DESTDIR="$PWD/stage" cmake --install build --prefix /opt/fleet
+```
+
+Relative GNUInstallDirs values follow the effective install prefix, including
+`cmake --install --prefix`; absolute values remain absolute. `DESTDIR` is a
+packaging root only. Reinstall for a new runtime prefix rather than moving an
+installed launcher whose `Exec` contains the original absolute path.
+Paths containing spaces are quoted. Executable paths containing percent signs,
+control characters, or semicolons are rejected rather than generating an
+unlaunchable desktop entry.
+
+Project-local `XDG_DATA_DIRS` lets that launcher process find the desktop entry
+and icon. An already-running GNOME Shell does not inherit changes made in a
+terminal: reliable menu and shell-icon discovery requires standard desktop
+locations or configuring the session's data directories before login.
+The helper does not change session environment, run desktop registration
+utilities, or install anything during application startup or `pip install`.
+Python consumers can use their own installer with the manual entry below;
+there is no Python desktop-packaging CLI.
+
+### Manual desktop entries
+
+For example, save this as
+`~/.local/share/applications/com.example.fleet.desktop`, replacing all
+`/absolute/path` values with real absolute paths (desktop entries do not expand
+`~`, shell variables, or shell activation commands):
+
+<!-- rumdl-disable MD013 -->
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=Fleet Telemetry
+Exec=/absolute/path/.venv/bin/python /absolute/path/native/python/examples/dual_mode.py --native --application-id com.example.fleet --icon /absolute/path/fleet.png
+Icon=/absolute/path/fleet.png
+StartupWMClass=com.example.fleet
+Terminal=false
+```
+
+<!-- rumdl-enable MD013 -->
+
+For the C++ example, use the same fields but replace `Exec` with:
+
+<!-- rumdl-disable MD013 -->
+
+```ini
+Exec=/absolute/path/build-native/native/examples/rti_demo_ui_native_dual_mode --native --application-id com.example.fleet --icon /absolute/path/fleet.png
+```
+
+<!-- rumdl-enable MD013 -->
+
+Use distinct IDs and desktop filenames if both applications are installed.
+Launch from the desktop application menu or `gtk-launch com.example.fleet`.
+Verify the supplied icon in GNOME overview and Alt-Tab. Repeat on native
+Wayland and with `GDK_BACKEND=x11` (for the latter, temporarily prefix the
+desktop entry's `Exec` command with `/usr/bin/env GDK_BACKEND=x11`).
+On X11, `xprop WM_CLASS _NET_WM_ICON` should show the matching identity and
+nonempty icon data; Wayland does not expose these X11 properties.
+
+The identity is process-wide while the native host is running and is restored
+after it exits. Omit it to preserve the platform defaults. It does not create
+a D-Bus service or enable single-instance activation.
 
 On macOS the icon is assigned to `NSApplication`, so it changes the running
 process's Dock icon, not an individual window. This is a runtime change and
@@ -300,7 +416,8 @@ For each supported engine and release candidate, record:
 7. Application-owned links and navigation behave as intended.
 8. Canvas and WebGL rendering on a hardware GPU.
 9. A supplied icon appears in the platform's window/taskbar or Dock surface;
-   omitting it retains the platform default.
+   omitting it retains the platform default. On Linux test a consumer-installed
+   desktop entry with matching application ID on Wayland and X11.
 
 Automated conformance covers snapshot/SSE, commands, imports, themes, Canvas,
 WebGL pixel readback, focus, resize observation, signal shutdown, joined

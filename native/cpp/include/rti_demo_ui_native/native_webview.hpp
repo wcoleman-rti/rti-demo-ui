@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <rti_demo_ui/demo_ui_app.hpp>
 #include <stdexcept>
+#include <string>
 
 namespace rti::demo::ui::native {
 
@@ -30,6 +31,12 @@ struct NativeWindowOptions {
      * decoders. On macOS this sets the process-wide Dock icon.
      */
     std::filesystem::path icon;
+    /**
+     * Optional lowercase reverse-DNS desktop identity. On Linux sets the
+     * Wayland app ID and X11 window class. Match the consumer desktop-entry
+     * filename without .desktop; does not configure browser storage.
+     */
+    std::string application_id;
 };
 
 /**
