@@ -21,7 +21,7 @@ repos:
         files: ^(python|examples/py|tests/py)/
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v18.1.8
+    rev: v23.1.0
     hooks:
       - id: clang-format
         files: ^(cpp|examples/cpp)/
