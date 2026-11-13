@@ -1,0 +1,57 @@
+.sdk-timeseries {
+    color: var(--sdk-text);
+    background: var(--sdk-surface);
+    border: 1px solid var(--sdk-border);
+    border-radius: 0.6rem;
+    padding: 0.75rem;
+    min-width: 0;
+}
+
+.sdk-timeseries-title,
+.sdk-timeseries-trace h4 {
+    margin: 0 0 0.5rem;
+}
+
+.sdk-timeseries-status {
+    margin: 0 0 0.75rem;
+    color: var(--sdk-muted);
+    font-size: 0.875rem;
+}
+
+.sdk-timeseries-status[data-status="stale"] {
+    color: var(--sdk-warning);
+}
+
+.sdk-timeseries-plots {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.sdk-timeseries-trace {
+    min-width: 0;
+}
+
+.sdk-timeseries-plot,
+.sdk-timeseries-plot .u-wrap {
+    width: 100%;
+    min-width: 0;
+}
+
+.sdk-timeseries-values {
+    width: 100%;
+    margin-top: 0.75rem;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.sdk-timeseries-values th,
+.sdk-timeseries-values td {
+    padding: 0.25rem 0.4rem;
+    border-top: 1px solid var(--sdk-border);
+    text-align: left;
+}
+
+.sdk-timeseries-fallback .sdk-timeseries-plots {
+    min-height: 0;
+}
