@@ -70,18 +70,18 @@ docs/                   architecture, API, lifecycle, and frontend contracts
 
 The core packages remain browser-first and contain no native GUI dependency,
 import, or platform probe. The independently versioned 0.4.x companions host
-the same loopback frontend in a native window on supported Linux systems:
+the same loopback frontend in a native window. Linux Python/C++ is supported;
+Windows Python/C++ and macOS C++ have passed automated qualification and await
+manual release acceptance:
 
-- Python runs pywebview 6.2.1 on the calling main thread and owns the app's
-  asyncio loop in one joined worker.
+- Python runs pywebview 6.2.1 with GTK, Edge Chromium, or Cocoa on the calling
+  main thread and owns the app's asyncio loop in one joined worker.
 - C++ runs webview 0.12.0 on the calling main thread and owns blocking
   `DemoUiApp::run()` in one joined worker.
-- Both wait for listener readiness before initial navigation, permit only the
-  exact bound origin for top-level/new-window navigation, and expose no
-  JavaScript-native bridge.
-- Browser-owned preference cookies persist by explicit Python application ID
-  or C++ executable filename. Dynamic ports prevent a guarantee for
-  origin-scoped localStorage or IndexedDB.
+- Both wait for listener readiness before initial navigation and expose no
+  application JavaScript-native API.
+- Browser storage and frontend navigation use backend defaults. Native mode is
+  a presentation shell, not a navigation or storage-isolation boundary.
 - Signal handlers only set async-safe primitives; managed watchers dispatch
   close and previous handlers are restored.
 
@@ -326,9 +326,18 @@ scene positions with `requestAnimationFrame`. `prefers-reduced-motion` applies
 target positions immediately. For `scene3d`, it dynamically imports the
 optional `/sdk/runtime3d.js` module only after receiving a scene component.
 That renderer caches GLB parsing by URL, clones per-scene hierarchies and
-materials, owns orbit controls and browser-local selection, and always keeps a
-semantic node list and textual fallback beside the canvas. Unsupported custom
-components show a visible isolated diagnostic.
+materials, and owns orbit controls and browser-local selection. The renderer
+context's `materialMode` defaults to `status`; `original` preserves the GLB's
+appearance during pose/status updates and restores original emissive values
+after selection. `setScene3dCamera` applies browser-local position, target, and
+up-vector presets without replacing the canvas, model, or controls. Context
+options and presets survive subsequent snapshots. `showNodeList` defaults to
+`true`; hiding it in the rendered view never hides the semantic list and
+textual fallback on failure. These presentation APIs do not change the
+server-side component schema. Node-list entries are reconciled by node ID so
+live snapshots preserve keyboard focus; removing the focused node moves focus
+to a remaining entry. Unsupported custom components show a visible
+isolated diagnostic.
 
 ## 11. Build and Tests
 

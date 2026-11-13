@@ -60,6 +60,18 @@ rti::demo::ui::DemoUiApp app(
     "Monitor", 0, "127.0.0.1", std::filesystem::path("web"));
 ```
 
+The ready message defaults to `RTI Demo UI listening on <url>`. Pass a
+`listening_message_prefix` as the final constructor argument to customize the
+text before the URL, or pass `std::nullopt` to suppress the announcement. An
+empty prefix prints only the URL:
+
+```cpp
+rti::demo::ui::DemoUiApp app(
+    "Arm Controller", 0, "127.0.0.1", {}, rti::demo::ui::Theme::dark,
+    rti::demo::ui::Layout::automatic,
+    std::string("ArmController listening on"));
+```
+
 The SDK embeds its own assets. The consuming project deploys `web/` and passes
 that directory as `static_root`; it is never copied into the SDK library.
 `stop()` is idempotent and is the programmatic shutdown API. `Card` also owns
@@ -70,8 +82,8 @@ hosts.
 
 ## Native Window
 
-On supported Linux systems, add the separate `native/cpp` CMake project after
-the core target and link `rti_demo_ui_native::native_webview`:
+Add the separate `native/cpp` CMake project after the core target and link
+`rti_demo_ui_native::native_webview`:
 
 ```cpp
 #include <rti_demo_ui_native/native_webview.hpp>
@@ -79,13 +91,15 @@ the core target and link `rti_demo_ui_native::native_webview`:
 rti::demo::ui::native::NativeWindowOptions options;
 options.width = 1280;
 options.height = 800;
+options.icon = "assets/fleet.png";
 rti::demo::ui::native::run(app, options);
 ```
 
 The call owns the native main-thread loop and a joined server thread. Browser
 targets remain core-only and call `app.run()`. See
 [Native Webview Mode](../native-webview.md) for prerequisites, CMake setup,
-profiles, platform support, and troubleshooting. The generated
+icon behavior, profiles, the current Linux, Windows, and macOS qualification
+status, and troubleshooting. The generated
 [C++ API reference](../reference/cpp.rst) also documents the public native
 runner types.
 
@@ -144,6 +158,13 @@ scene->apply_node_batch(Json::array({
 Transforms are glTF right-handed, Y-up meters and local to the addressed
 imported node. Node IDs remain stale after removal. Batch validation is
 copy-then-commit, so failures leave state and revisions unchanged.
+
+## Time Series
+
+The bounded `TimeSeriesViewport` component is rendered by a separate optional
+target; it is not included in the core library. See
+[Time Series](../time-series.md) for installation, `enable_uplot(app)`,
+validation limits, and the matching Python/C++ schema.
 
 ## Lifecycle and Concurrency
 
