@@ -13,10 +13,12 @@
 import { build } from "esbuild";
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = resolve(dirname(new URL(import.meta.url).pathname), "..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 await mkdir(resolve(root, "../../assets"), { recursive: true });
 await build({
+  absWorkingDir: root,
   entryPoints: [resolve(root, "src/runtime3d.js")],
   outfile: resolve(root, "../../assets/runtime3d.js"),
   bundle: true,

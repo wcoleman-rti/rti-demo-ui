@@ -23,16 +23,47 @@
 
 namespace rti::demo::ui {
 
+/// JSON value type used by state, component, and command APIs.
 using Json = nlohmann::json;
 
+/// Scene2D bounds in `{x_min, x_max, y_min, y_max}` order.
 using GridBounds = std::array<double, 4>;
 
-enum class Severity { success, warning, danger };
-enum class Freshness { fresh, aging, stale };
-enum class Theme { dark, light };
-enum class Layout { automatic, grid_2, grid_3, sidebar_main };
-enum class CardArea { main, sidebar };
+/// Semantic status used by entities and state components.
+enum class Severity {
+    success,  ///< Normal or successful state.
+    warning,  ///< Degraded state requiring attention.
+    danger    ///< Error or critical state.
+};
 
+/// Age indication for Scene2D entities.
+enum class Freshness {
+    fresh,  ///< Current data at full opacity.
+    aging,  ///< Aging data at reduced opacity.
+    stale   ///< Stale data at minimum opacity.
+};
+
+/// Built-in frontend color theme.
+enum class Theme {
+    dark,  ///< Dark background and light foreground.
+    light  ///< Light background and dark foreground.
+};
+
+/// Built-in card layout.
+enum class Layout {
+    automatic,    ///< Responsive automatic layout, serialized as `auto`.
+    grid_2,       ///< Two-column grid, serialized as `grid-2`.
+    grid_3,       ///< Three-column grid, serialized as `grid-3`.
+    sidebar_main  ///< One sidebar card and a main area.
+};
+
+/// Region occupied by a card.
+enum class CardArea {
+    main,    ///< Main content area.
+    sidebar  ///< The single sidebar slot.
+};
+
+/// Return the wire-format string for a severity value.
 inline const char* to_string(Severity value) {
     switch (value) {
         case Severity::success:
@@ -45,6 +76,7 @@ inline const char* to_string(Severity value) {
     return "success";
 }
 
+/// Return the wire-format string for a freshness value.
 inline const char* to_string(Freshness value) {
     switch (value) {
         case Freshness::fresh:
@@ -57,6 +89,8 @@ inline const char* to_string(Freshness value) {
     return "fresh";
 }
 
+/// Return the wire-format string for a theme value.
+/// @throws std::invalid_argument if `value` is not a valid enumerator.
 inline const char* to_string(Theme value) {
     switch (value) {
         case Theme::dark:
@@ -67,6 +101,8 @@ inline const char* to_string(Theme value) {
     throw std::invalid_argument("DemoUiApp: invalid theme");
 }
 
+/// Return the wire-format string for a layout value.
+/// @throws std::invalid_argument if `value` is not a valid enumerator.
 inline const char* to_string(Layout value) {
     switch (value) {
         case Layout::automatic:
@@ -81,6 +117,8 @@ inline const char* to_string(Layout value) {
     throw std::invalid_argument("DemoUiApp: invalid layout");
 }
 
+/// Return the wire-format string for a card area value.
+/// @throws std::invalid_argument if `value` is not a valid enumerator.
 inline const char* to_string(CardArea value) {
     switch (value) {
         case CardArea::main:
@@ -91,6 +129,7 @@ inline const char* to_string(CardArea value) {
     throw std::invalid_argument("Card: invalid area");
 }
 
+/// Return the built-in renderer opacity for a freshness value.
 inline double freshness_opacity(Freshness value) {
     switch (value) {
         case Freshness::fresh:
