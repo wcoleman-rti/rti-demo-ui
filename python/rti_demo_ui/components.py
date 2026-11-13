@@ -1814,8 +1814,7 @@ class TimeSeries(_Component):
         retained = series["samples"]
         if retained and batch[0][0] <= retained[-1][0]:
             raise ValueError(
-                "TimeSeries: appended timestamps must be newer than the "
-                "retained tail"
+                "TimeSeries: appended timestamps must be newer than the retained tail"
             )
         series["samples"] = (retained + batch)[-MAX_TIME_SERIES_SAMPLES:]
         self._mutated({"series": [{"id": series_id, "samples": batch}]})
