@@ -55,9 +55,15 @@ async def run_browser(app, animate) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--mode", choices=("browser", "native"), default="browser"
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--native", dest="mode", action="store_const", const="native")
+    mode.add_argument("--browser", dest="mode", action="store_const", const="browser")
+    mode.add_argument(
+        "--mode",
+        choices=("browser", "native"),
+        help="Compatibility alias for --browser or --native",
     )
+    parser.set_defaults(mode="browser")
     args = parser.parse_args()
     app, animate = build_application()
     if args.mode == "native":

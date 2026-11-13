@@ -1,9 +1,8 @@
-#include <rti_demo_ui_native/native_webview.hpp>
-
 #include <chrono>
 #include <csignal>
 #include <exception>
 #include <iostream>
+#include <rti_demo_ui_native/native_webview.hpp>
 #include <thread>
 
 namespace {
@@ -27,7 +26,11 @@ int main() {
     std::thread stopper([&]() {
         app.wait_until_ready();
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+#ifdef _WIN32
+        app.stop();
+#else
         std::raise(SIGINT);
+#endif
     });
     try {
         rti::demo::ui::native::run(app);

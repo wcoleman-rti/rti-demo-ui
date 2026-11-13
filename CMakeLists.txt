@@ -11,8 +11,16 @@
 #
 
 cmake_minimum_required(VERSION 3.16)
-project(rti_demo_ui LANGUAGES CXX)
+include(cmake/rti-demo-ui-version.cmake)
+project(rti_demo_ui VERSION ${RTI_DEMO_UI_VERSION} LANGUAGES CXX)
 
 include(CTest)
 set(RTI_DEMO_TOP_LEVEL_BUILD ON)
+option(RTI_DEMO_BUILD_NATIVE_WEBVIEW
+       "Build the optional native webview companion" OFF)
+
 add_subdirectory(cpp)
+
+if(RTI_DEMO_BUILD_NATIVE_WEBVIEW)
+    add_subdirectory(native/cpp native)
+endif()

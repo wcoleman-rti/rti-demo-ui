@@ -10,13 +10,21 @@
   use or inability to use the software.
 -->
 
-# Python API
+# Python Guide
 
-Install from the repository root:
+## Quick Start
+
+From the repository root:
 
 ```bash
-pip install -e .
+python -m pip install -e .
+python examples/py/simple.py
 ```
+
+Open the URL printed after the server binds. The example owns a small animation
+task and exits cleanly on Ctrl-C.
+
+## Application Setup
 
 The public package is `rti_demo_ui`. Configure components synchronously, then
 own the server lifecycle with `asyncio`:
@@ -50,10 +58,23 @@ Component factory and mutation methods remain synchronous, but after
 startup they must run on the app's owner event loop and thread. A foreign
 thread must schedule its work with `loop.call_soon_threadsafe`.
 
+By default, startup prints `RTI Demo UI listening on <url>`. Set
+`listening_message_prefix` to change the text before the URL or to `None` to
+suppress the announcement. The prefix is followed by a space and the URL;
+an empty prefix prints only the URL:
+
+```python
+app = DemoUiApp(
+    "Fleet demo",
+    listening_message_prefix="ArmController listening on",
+)
+```
+
 ## Structured Async Applications
 
 Application coroutines own periodic work and DDS integration through a
-`TaskGroup` or explicitly retained tasks:
+`TaskGroup` or explicitly retained tasks. For example, with the
+application-specific DDS coroutines omitted:
 
 ```python
 async def main() -> None:
@@ -74,25 +95,29 @@ The SDK does not provide Python timer APIs or lifecycle compatibility adapters.
 ## Native Window
 
 The separately installed `rti-demo-ui-native` companion provides a synchronous
-main-thread runner on supported Linux systems:
+main-thread runner on Linux and Windows:
 
 ```python
 from rti_demo_ui_native import run_native
 
 run_native(
     app,
-    application_id="com.example.fleet-demo",
     async_main=receive_samples,
     width=1280,
     height=800,
+    icon="assets/fleet.png",
 )
 ```
 
 `async_main(app)` starts on the app owner loop after readiness. A normal return
 closes the native window; an exception is re-raised after all managed work is
 joined. Browser mode remains the default and does not import pywebview. See
-[Native Webview Mode](../native-webview.md) for installation, profiles,
-platform support, and troubleshooting.
+[Native Webview Mode](../native-webview.md) for installation, browser storage,
+icon behavior, qualification status, and troubleshooting. Python native mode
+uses pywebview on Linux, Windows, and macOS; Windows and macOS await manual
+release acceptance. The
+[native Python API reference](../reference/native-python.rst) documents the
+runner contract and validation errors.
 
 ## Themes and Layouts
 
@@ -152,21 +177,27 @@ SSE or omits the option to retain polling. See
 [Custom Frontends](../custom-frontends.md#browser-transport).
 
 For complete signatures and validation semantics, use the Python type hints,
-docstrings, and [architecture](../architecture.md) as the source of truth.
+docstrings, and generated [Python API reference](../reference/python.rst).
+Durable cross-language contracts are described in
+[architecture](../architecture.md).
 
 `DemoUiApp.set_data(value)` and `update_data(path, value, create_missing=False)`
 manage application-owned JSON state. `Card` also provides `add_table`,
 `add_metric`, `add_text`, `add_badge`, `add_log`, and
 `add_custom_component`; returned handles expose the live mutation methods
-described by their type hints. Register opt-in actions with
+described by their type hints. Bounded time-series charts are available through
+the separately installed uPlot adapter; see [Time Series](../time-series.md)
+for enabling it, schema limits, timestamp units, and Python/C++ examples.
+Register opt-in actions with
 `register_command(name, schema, handler, confirmation=None)`. Command schemas
 use the shared restricted subset, handlers receive validated objects, and
 responses are JSON envelopes.
 
 ## Scene3D
 
-`add_scene_3d` creates the generic scene contract and validates the asset as an
-absolute same-origin `.glb` under `static_root`:
+For an app whose `static_root` contains `models/scene.glb`, `add_scene_3d`
+creates the generic scene contract and validates the asset as an absolute
+same-origin `.glb` beneath that root:
 
 ```python
 from rti_demo_ui import Severity
@@ -188,3 +219,11 @@ node ID is unique for the scene lifetime, including after removal. Mutations
 are atomic; changed operations bump the application and component revisions
 once, while valid no-ops preserve them. `set_config` replaces the complete
 asset/camera/background/grid configuration atomically.
+
+## Python and C++ Differences
+
+Python application work belongs in retained asyncio tasks; the Python API does
+not provide a timer handle. Python command handlers may be synchronous or
+asynchronous and run on the app's owner event loop. In C++, model operations
+are thread-safe, `run()` blocks the calling thread, `add_timer()` owns a worker
+thread, and command handlers run synchronously on HTTP worker threads.

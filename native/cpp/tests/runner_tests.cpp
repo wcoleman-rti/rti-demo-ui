@@ -1,20 +1,33 @@
-#include <rti_demo_ui_native/native_webview.hpp>
-
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
-#include <csignal>
 #include <condition_variable>
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <optional>
+#include <rti_demo_ui_native/native_webview.hpp>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
+#ifdef __linux__
+#include "gtk_environment.hpp"
+#endif
 #include "runner.hpp"
 
 using namespace rti::demo::ui;
@@ -25,13 +38,40 @@ namespace {
 
 int failures = 0;
 
-#define CHECK(condition)                                                     \
-    do {                                                                      \
-        if (!(condition)) {                                                   \
-            std::fprintf(stderr, "FAILED: %s (line %d)\n", #condition,       \
-                         __LINE__);                                          \
-            ++failures;                                                       \
-        }                                                                     \
+#ifdef _WIN32
+using Socket = SOCKET;
+constexpr Socket kInvalidSocket = INVALID_SOCKET;
+using SocketLength = int;
+
+class SocketRuntime {
+   public:
+    SocketRuntime() {
+        WSADATA data{};
+        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+            throw std::runtime_error("WSAStartup failed");
+        }
+    }
+    ~SocketRuntime() { WSACleanup(); }
+};
+
+void close_socket(Socket socket) { closesocket(socket); }
+#else
+using Socket = int;
+constexpr Socket kInvalidSocket = -1;
+using SocketLength = socklen_t;
+
+class SocketRuntime {};
+
+void close_socket(Socket socket) { close(socket); }
+#endif
+
+#define CHECK(condition)                                               \
+    do {                                                               \
+        if (!(condition)) {                                            \
+            std::fprintf(stderr, "FAILED: %s (line %d)\n", #condition, \
+                         __LINE__);                                    \
+            ++failures;                                                \
+        }                                                              \
     } while (0)
 
 class FakeWindowHost final : public native_detail::WindowHost {
@@ -103,15 +143,14 @@ bool port_is_released(const std::string& url) {
     const auto colon = url.rfind(':');
     const auto slash = url.find('/', colon);
     const int port = std::stoi(url.substr(colon + 1, slash - colon - 1));
-    int probe = socket(AF_INET, SOCK_STREAM, 0);
+    Socket probe = socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-    const bool released =
-        connect(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)) !=
-        0;
-    close(probe);
+    const bool released = connect(probe, reinterpret_cast<sockaddr*>(&address),
+                                  sizeof(address)) != 0;
+    close_socket(probe);
     return released;
 }
 
@@ -139,37 +178,60 @@ void test_normal_close() {
     CHECK(port_is_released(host.url));
 }
 
+void test_icon_path_is_forwarded() {
+    const auto icon =
+        std::filesystem::temp_directory_path() /
+        ("rti_demo_ui_native_icon_" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()) +
+         ".png");
+    {
+        std::ofstream file(icon, std::ios::binary);
+        file << "test image";
+    }
+
+    DemoUiApp app("Icon");
+    FakeWindowHost host;
+    host.close_immediately = true;
+    NativeWindowOptions options;
+    options.icon = icon;
+    native_detail::run_with_host(app, options, host);
+
+    CHECK(host.options.icon == icon);
+    std::error_code error;
+    std::filesystem::remove(icon, error);
+    CHECK(!error);
+}
+
 void test_window_failure_cleans_up() {
     DemoUiApp app("Window failure");
     FakeWindowHost host;
     host.fail_create = true;
-    CHECK(throws_native(
-        [&]() { native_detail::run_with_host(app, {}, host); },
-        "native window failed"));
+    CHECK(throws_native([&]() { native_detail::run_with_host(app, {}, host); },
+                        "native window failed"));
     CHECK(port_is_released(host.url));
 }
 
 void test_bind_failure_does_not_create_window() {
-    int blocker = socket(AF_INET, SOCK_STREAM, 0);
-    CHECK(blocker >= 0);
+    Socket blocker = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(blocker != kInvalidSocket);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = 0;
     inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-    CHECK(bind(blocker, reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
-          0);
+    CHECK(bind(blocker, reinterpret_cast<sockaddr*>(&address),
+               sizeof(address)) == 0);
     CHECK(listen(blocker, 1) == 0);
-    socklen_t size = sizeof(address);
+    SocketLength size = sizeof(address);
     CHECK(getsockname(blocker, reinterpret_cast<sockaddr*>(&address), &size) ==
           0);
 
     DemoUiApp app("Bind failure", ntohs(address.sin_port));
     FakeWindowHost host;
-    CHECK(throws_native(
-        [&]() { native_detail::run_with_host(app, {}, host); },
-        "server failed"));
+    CHECK(throws_native([&]() { native_detail::run_with_host(app, {}, host); },
+                        "server failed"));
     CHECK(host.url.empty());
-    close(blocker);
+    close_socket(blocker);
 }
 
 void test_server_stop_closes_window() {
@@ -189,6 +251,7 @@ void test_server_stop_closes_window() {
 }
 
 void test_signal_closes_window() {
+#ifndef _WIN32
     DemoUiApp app("Signal close");
     FakeWindowHost host;
     std::thread interrupter([&]() {
@@ -200,6 +263,7 @@ void test_signal_closes_window() {
 
     CHECK(host.close_requested());
     CHECK(port_is_released(host.url));
+#endif
 }
 
 void test_validation() {
@@ -217,7 +281,18 @@ void test_validation() {
         DemoUiApp app("Host", 0, "localhost");
         FakeWindowHost host;
         CHECK(throws_native(
-            [&]() { native_detail::run_with_host(app, {}, host); }, "loopback"));
+            [&]() { native_detail::run_with_host(app, {}, host); },
+            "loopback"));
+    }
+    {
+        DemoUiApp app("Missing icon");
+        FakeWindowHost host;
+        NativeWindowOptions options;
+        options.icon = std::filesystem::temp_directory_path() /
+                       "rti_demo_ui_native_missing_icon.png";
+        CHECK(throws_native(
+            [&]() { native_detail::run_with_host(app, options, host); },
+            "readable image file"));
     }
 }
 
@@ -228,20 +303,83 @@ void test_app_is_single_use() {
     native_detail::run_with_host(app, {}, first);
 
     FakeWindowHost second;
-    CHECK(throws_native(
-        [&]() { native_detail::run_with_host(app, {}, second); },
-        "already started"));
+    CHECK(
+        throws_native([&]() { native_detail::run_with_host(app, {}, second); },
+                      "already started"));
 }
+
+#ifdef __linux__
+void test_snap_gtk_environment_is_restored() {
+    const char* names[] = {
+        "GSETTINGS_SCHEMA_DIR",
+        "GTK_PATH",
+        "GIO_MODULE_DIR",
+        "XDG_DATA_DIRS",
+    };
+    std::vector<std::pair<std::string, std::optional<std::string>>> original;
+    for (const auto* name : names) {
+        const auto* value = std::getenv(name);
+        original.emplace_back(name, value ? std::optional<std::string>(value)
+                                          : std::nullopt);
+    }
+
+    const auto* home = std::getenv("HOME");
+    const std::string snap_home =
+        std::string(home ? home : "/tmp") + "/snap/editor";
+    setenv("GSETTINGS_SCHEMA_DIR",
+           (snap_home + "/1/schemas").c_str(), 1);
+    setenv("GTK_PATH", "/snap/editor/1/gtk:/usr/lib/gtk-3.0", 1);
+    setenv("GIO_MODULE_DIR", (snap_home + "/common/gio").c_str(), 1);
+    setenv("XDG_DATA_DIRS",
+           (snap_home + "/1/share:/snap/editor/1/usr/share:/usr/share").c_str(),
+           1);
+    {
+        native_detail::ScopedGtkEnvironment environment;
+        CHECK(std::getenv("GSETTINGS_SCHEMA_DIR") == nullptr);
+        const auto* gtk_path = std::getenv("GTK_PATH");
+        CHECK(gtk_path && std::string(gtk_path) == "/usr/lib/gtk-3.0");
+        CHECK(std::getenv("GIO_MODULE_DIR") == nullptr);
+        const auto* data_dirs = std::getenv("XDG_DATA_DIRS");
+        CHECK(data_dirs && std::string(data_dirs) == "/usr/share");
+    }
+
+    const auto* schema_dir = std::getenv("GSETTINGS_SCHEMA_DIR");
+    CHECK(schema_dir && std::string(schema_dir) == snap_home + "/1/schemas");
+    const auto* gtk_path = std::getenv("GTK_PATH");
+    CHECK(gtk_path &&
+          std::string(gtk_path) == "/snap/editor/1/gtk:/usr/lib/gtk-3.0");
+    const auto* gio_module_dir = std::getenv("GIO_MODULE_DIR");
+    CHECK(gio_module_dir &&
+          std::string(gio_module_dir) == snap_home + "/common/gio");
+    const auto* data_dirs = std::getenv("XDG_DATA_DIRS");
+    CHECK(data_dirs && std::string(data_dirs) ==
+                           snap_home +
+                               "/1/share:/snap/editor/1/usr/share:/usr/share");
+
+    for (const auto& variable : original) {
+        if (variable.second) {
+            setenv(variable.first.c_str(), variable.second->c_str(), 1);
+        } else {
+            unsetenv(variable.first.c_str());
+        }
+    }
+}
+#endif
 
 }  // namespace
 
 int main() {
+    SocketRuntime socket_runtime;
     test_normal_close();
+    test_icon_path_is_forwarded();
     test_window_failure_cleans_up();
     test_bind_failure_does_not_create_window();
     test_server_stop_closes_window();
     test_signal_closes_window();
     test_validation();
     test_app_is_single_use();
+#ifdef __linux__
+    test_snap_gtk_environment_is_restored();
+#endif
     return failures == 0 ? 0 : 1;
 }

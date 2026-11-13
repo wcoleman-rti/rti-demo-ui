@@ -21,4 +21,5 @@ venv/
 .pytest_cache/
 .cache/
 tools/scene3d/node_modules/
+adapters/uplot/node_modules/
 python/rti_demo_ui/_assets
