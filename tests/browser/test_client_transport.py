@@ -176,12 +176,14 @@ def test_sse_patch_recovery_reconnection_and_stop_generation():
                 };
 
                 const notifications = [];
+                const patchUpdates = [];
                 const client = createClient({
                     transport: 'sse',
                     baseUrl: 'http://client.test/'
                 });
-                client.subscribe((snapshot, state) => {
+                client.subscribe((snapshot, state, update) => {
                     notifications.push([snapshot && snapshot.revision, state]);
+                    if (update) patchUpdates.push(update);
                 });
                 client.start();
                 client.start();
@@ -261,7 +263,8 @@ def test_sse_patch_recovery_reconnection_and_stop_generation():
                     reopenedState,
                     revision: client.getSnapshot().revision,
                     connectionState: client.getConnectionState(),
-                    notifications
+                    notifications,
+                    patchUpdates
                 };
             }""",
             CLIENT_MODULE_URL,
@@ -285,5 +288,8 @@ def test_sse_patch_recovery_reconnection_and_stop_generation():
     assert result["reopenedState"] == "connected"
     assert result["revision"] == 4
     assert result["connectionState"] == "stopped"
+    assert result["patchUpdates"] == [
+        [{"op": "replace-app-data", "value": {"value": 2}}]
+    ]
     assert not any(revision == 99 for revision, _state in result["notifications"])
     assert not any(revision == 5 for revision, _state in result["notifications"])

@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 using namespace rti::demo::ui;
 
@@ -40,6 +41,31 @@ static int failures = 0;
     } while (0)
 
 int main() {
+    const auto capture_listening_message =
+        [](std::optional<std::string> prefix) {
+            DemoUiApp app("Listening message", 0, "127.0.0.1", {},
+                          Theme::dark, Layout::automatic, std::move(prefix));
+            std::ostringstream output;
+            auto* old_buffer = std::cout.rdbuf(output.rdbuf());
+            auto runner = std::async(std::launch::async, [&app]() { app.run(); });
+            app.wait_until_ready();
+            const auto info = app.ready_info();
+            app.stop();
+            runner.get();
+            std::cout.rdbuf(old_buffer);
+            return std::make_pair(info->url, output.str());
+        };
+    {
+        const auto [url, output] =
+            capture_listening_message(std::string("ArmController listening on"));
+        CHECK(output == "ArmController listening on " + url + "/\n");
+    }
+    {
+        const auto [url, output] = capture_listening_message(std::nullopt);
+        CHECK(!url.empty());
+        CHECK(output.empty());
+    }
+
     {
         DemoUiApp app("Pre-stop", 19281, "127.0.0.1");
         app.stop();

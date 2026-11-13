@@ -6,7 +6,7 @@ import unittest
 
 from rti_demo_ui import DemoUiApp
 
-from python_runner_prototype import NativeSpikeError, run_with_host
+from python_runner_prototype import NativeWebviewPrototypeError, run_with_host
 
 
 class FakeWindowHost:
@@ -73,7 +73,7 @@ class PythonRunnerPrototypeTests(unittest.TestCase):
             port = blocker.getsockname()[1]
             host = FakeWindowHost()
             with self.assertRaisesRegex(
-                NativeSpikeError, "server failed before readiness"
+                NativeWebviewPrototypeError, "server failed before readiness"
             ):
                 run_with_host(DemoUiApp("bind failure", port=port), host)
 

@@ -14,6 +14,28 @@ cmake_minimum_required(VERSION 3.16)
 
 add_executable(rti_demo_ui_simple simple.cpp)
 target_link_libraries(rti_demo_ui_simple PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_simple PRIVATE _USE_MATH_DEFINES)
+
+add_executable(rti_demo_ui_components components.cpp)
+target_link_libraries(rti_demo_ui_components PRIVATE rti_demo_ui::core)
+
+add_executable(rti_demo_ui_app_data app_data.cpp)
+target_link_libraries(rti_demo_ui_app_data PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_app_data PRIVATE
+    RTI_DEMO_APP_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/app_data"
+)
+
+add_executable(rti_demo_ui_app_shell app_shell.cpp)
+target_link_libraries(rti_demo_ui_app_shell PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_app_shell PRIVATE
+    RTI_DEMO_APP_SHELL_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/app_shell"
+)
+
+add_executable(rti_demo_ui_commands commands.cpp)
+target_link_libraries(rti_demo_ui_commands PRIVATE rti_demo_ui::core)
+target_compile_definitions(rti_demo_ui_commands PRIVATE
+    RTI_DEMO_COMMANDS_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../web/commands"
+)
 
 add_executable(rti_demo_ui_gallery gallery.cpp)
 target_link_libraries(rti_demo_ui_gallery PRIVATE rti_demo_ui::core)
@@ -64,4 +86,5 @@ if(BUILD_CONNEXT_EXAMPLE)
         rti_demo_ui::core
         RTIConnextDDS::cpp2_api
     )
+    target_compile_definitions(rti_demo_ui_connext PRIVATE _USE_MATH_DEFINES)
 endif()

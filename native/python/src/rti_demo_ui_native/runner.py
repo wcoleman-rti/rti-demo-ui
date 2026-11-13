@@ -17,16 +17,15 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import posixpath
 import queue
 import re
 import signal
 import sys
 import threading
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Awaitable, Callable, Protocol
-from urllib.parse import urlsplit
+from typing import Awaitable, Callable, Iterator, Protocol
 
 from rti_demo_ui import DemoUiApp
 
@@ -35,6 +34,19 @@ _APPLICATION_ID = re.compile(
 )
 _MAX_WINDOW_DIMENSION = 16384
 _STARTUP_TIMEOUT_SECONDS = 10.0
+_GTK_PATH_ENVIRONMENT = (
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GDK_PIXBUF_MODULEDIR",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GTK_IM_MODULE_FILE",
+    "GIO_MODULE_DIR",
+    "GIO_EXTRA_MODULES",
+    "GI_TYPELIB_PATH",
+    "XDG_DATA_DIRS",
+)
 
 
 class NativeWebviewError(RuntimeError):
@@ -46,11 +58,11 @@ AsyncMain = Callable[[DemoUiApp], Awaitable[None]]
 
 @dataclass(frozen=True)
 class _Options:
-    application_id: str
+    application_id: str | None
     width: int
     height: int
     devtools: bool
-    profile_path: Path
+    icon: str | None
 
 
 class _WindowHost(Protocol):
@@ -62,6 +74,7 @@ class _WindowHost(Protocol):
         width: int,
         height: int,
         devtools: bool,
+        icon: str | None,
     ) -> None: ...
 
     def run(self) -> None: ...
@@ -70,15 +83,15 @@ class _WindowHost(Protocol):
 
 
 class _PyWebviewHost:
-    def __init__(self, webview_module, profile_path: Path) -> None:
+    def __init__(self, webview_module, gui: str) -> None:
         self._webview = webview_module
-        self._profile_path = profile_path
+        self._gui = gui
         self._window = None
         self._started = threading.Event()
         self._close_requested = threading.Event()
         self._close_error: list[BaseException] = []
         self._devtools = False
-        self._allowed_origin = ""
+        self._icon: str | None = None
 
     def create(
         self,
@@ -88,10 +101,10 @@ class _PyWebviewHost:
         width: int,
         height: int,
         devtools: bool,
+        icon: str | None,
     ) -> None:
         self._devtools = devtools
-        self._allowed_origin = _origin(url)
-        self._webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+        self._icon = icon
         self._window = self._webview.create_window(
             title,
             url,
@@ -99,39 +112,31 @@ class _PyWebviewHost:
             height=height,
             resizable=True,
         )
-        self._window.events.before_show += self._install_navigation_policy
 
-    def _install_navigation_policy(self) -> None:
-        def find_webview(widget):
-            if widget.__gtype__.name == "WebKitWebView":
-                return widget
-            get_children = getattr(widget, "get_children", None)
-            if get_children is not None:
-                for child in get_children():
-                    if (found := find_webview(child)) is not None:
-                        return found
-            return None
-
-        browser = find_webview(self._window.native)
-        if browser is None:
+    def _set_macos_application_icon(self) -> None:
+        if self._icon is None:
+            raise NativeWebviewError("no macOS application icon was configured")
+        try:
+            appkit = importlib.import_module("AppKit")
+        except (ImportError, OSError) as error:
             raise NativeWebviewError(
-                "WebKitWebView native child was not found; verify pywebview "
-                "6.2.1 is using the GTK backend"
+                "macOS Dock icon updates require pywebview's AppKit dependencies"
+            ) from error
+        icon = appkit.NSImage.alloc().initWithContentsOfFile_(self._icon)
+        if icon is None:
+            raise NativeWebviewError(
+                "failed to load macOS application icon; use an image supported "
+                "by NSImage such as PNG or ICNS"
             )
-
-        def block_external_navigation(_browser, decision, _decision_type):
-            get_action = getattr(decision, "get_navigation_action", None)
-            if get_action is None:
-                return False
-            uri = get_action().get_request().get_uri()
-            if _same_origin(uri, self._allowed_origin):
-                return False
-            decision.ignore()
-            return True
-
-        browser.connect("decide-policy", block_external_navigation)
+        appkit.NSApplication.sharedApplication().setApplicationIconImage_(icon)
 
     def _on_started(self) -> None:
+        if self._gui == "cocoa" and self._icon is not None:
+            try:
+                self._set_macos_application_icon()
+            except Exception as error:
+                self._close_error.append(error)
+                self._close_requested.set()
         self._started.set()
         if self._close_requested.is_set():
             self._destroy()
@@ -149,78 +154,144 @@ class _PyWebviewHost:
             self._destroy()
 
     def run(self) -> None:
-        self._webview.start(
-            self._on_started,
-            gui="gtk",
-            debug=self._devtools,
-            private_mode=False,
-            storage_path=str(self._profile_path),
-        )
+        options = {
+            "gui": self._gui,
+            "debug": self._devtools,
+            "private_mode": False,
+        }
+        if self._icon is not None and self._gui != "cocoa":
+            options["icon"] = self._icon
+        self._webview.start(self._on_started, **options)
         if self._close_error:
             raise self._close_error[0]
 
 
-def _origin(url: str) -> str:
-    parsed = urlsplit(url)
-    if parsed.scheme != "http" or not parsed.netloc:
-        raise NativeWebviewError("native window URL must be an HTTP loopback origin")
-    return f"{parsed.scheme}://{parsed.netloc}"
-
-
-def _same_origin(url: str, allowed_origin: str) -> bool:
-    try:
-        return _origin(url) == allowed_origin
-    except NativeWebviewError:
-        return False
-
-
-def _profile_path(application_id: str) -> Path:
-    if sys.platform == "linux":
-        data_root = os.environ.get("XDG_DATA_HOME")
-        root = (
-            Path(data_root).expanduser()
-            if data_root
-            else Path.home() / ".local" / "share"
-        )
-        if not root.is_absolute():
-            raise NativeWebviewError(
-                "XDG_DATA_HOME must be an absolute path for native profile storage"
-            )
-        return root / "rti-demo-ui-native" / application_id
-    raise NativeWebviewError(
-        "native webview mode is supported only on Linux in this release"
+def _is_snap_path(path: str, roots: tuple[str, ...]) -> bool:
+    normalized = posixpath.normpath(path)
+    return any(
+        normalized == root
+        or normalized.startswith(f"{root}{posixpath.sep}")
+        for root in roots
     )
+
+
+@contextmanager
+def _host_gtk_environment() -> Iterator[None]:
+    if sys.platform != "linux":
+        yield
+        return
+
+    roots = ["/snap"]
+    if home := os.environ.get("HOME"):
+        roots.append(posixpath.join(home, "snap"))
+
+    changed: dict[str, tuple[str, str]] = {}
+    try:
+        for name in _GTK_PATH_ENVIRONMENT:
+            original = os.environ.get(name)
+            if original is None:
+                continue
+            filtered = ":".join(
+                path
+                for path in original.split(":")
+                if path and not _is_snap_path(path, tuple(roots))
+            )
+            if filtered == original:
+                continue
+            changed[name] = (original, filtered)
+            if filtered:
+                os.environ[name] = filtered
+            else:
+                os.environ.pop(name, None)
+        yield
+    finally:
+        for name, (original, filtered) in changed.items():
+            if os.environ.get(name) != (filtered or None):
+                continue
+            os.environ[name] = original
+
+
+def _require_supported_production_platform() -> None:
+    if sys.platform in {"darwin", "linux", "win32"}:
+        return
+    raise NativeWebviewError(
+        f"native webview mode is not supported on platform '{sys.platform}'"
+    )
+
+
+def _native_prerequisite_hint() -> str:
+    if sys.platform == "darwin":
+        return "verify pywebview 6.2.1 and macOS WKWebView are available"
+    if sys.platform == "win32":
+        return "verify pywebview 6.2.1 and the WebView2 Runtime are installed"
+    return (
+        "verify the active Python can import PyGObject (`gi`) and that GTK 3 "
+        "and WebKitGTK 4.1 are installed"
+    )
+
+
+def _require_linux_gtk_bindings() -> None:
+    try:
+        importlib.import_module("gi")
+    except (ImportError, OSError) as error:
+        if sys.version_info >= (3, 13):
+            setup = (
+                "on Ubuntu, install `python3-gi` and recreate the virtual "
+                "environment with `python3 -m venv --system-site-packages "
+                ".venv` using the matching distro Python"
+            )
+        else:
+            setup = (
+                "install PyGObject for this Python using the prerequisites "
+                "in docs/native-webview.md"
+            )
+        raise NativeWebviewError(
+            "Linux native mode requires the PyGObject `gi` module in the "
+            f"active Python environment; {setup}"
+        ) from error
 
 
 def _load_pywebview():
     try:
         return importlib.import_module("webview")
     except (ImportError, OSError) as error:
+        if sys.platform == "darwin":
+            requirement = "pywebview 6.2.1 with its Cocoa dependencies is required"
+        elif sys.platform == "win32":
+            requirement = (
+                "pywebview 6.2.1 with pythonnet and the Evergreen WebView2 "
+                "Runtime is required"
+            )
+        else:
+            requirement = (
+                "pywebview 6.2.1 with GTK/WebKitGTK is required; install the "
+                "documented Ubuntu GTK 3 and WebKitGTK 4.1 packages"
+            )
         raise NativeWebviewError(
-            "pywebview 6.2.1 with GTK/WebKitGTK is required; install "
-            "'rti-demo-ui-native' and the documented Ubuntu GTK 3 and "
-            "WebKitGTK 4.1 packages"
+            f"{requirement}; install 'rti-demo-ui-native'"
         ) from error
 
 
 def _validate_options(
     app: DemoUiApp,
-    application_id: str,
+    application_id: str | None,
     async_main: AsyncMain | None,
     width: int,
     height: int,
     devtools: bool,
+    icon: str | os.PathLike[str] | None = None,
 ) -> _Options:
     if threading.current_thread() is not threading.main_thread():
         raise NativeWebviewError("run_native() must be called on the main thread")
     if not isinstance(app, DemoUiApp):
         raise NativeWebviewError("app must be an rti_demo_ui.DemoUiApp instance")
-    if not isinstance(application_id, str) or not _APPLICATION_ID.fullmatch(
-        application_id
+    if application_id is not None and (
+        not isinstance(application_id, str)
+        or not _APPLICATION_ID.fullmatch(application_id)
     ):
         raise NativeWebviewError(
-            "application_id must be a lowercase reverse-DNS identifier such as "
-            "'com.example.factory-dashboard'"
+            "application_id must be None or a lowercase reverse-DNS identifier "
+            "such as 'com.example.factory-dashboard'"
         )
     for name, value in (("width", width), ("height", height)):
         if (
@@ -234,6 +305,23 @@ def _validate_options(
             )
     if not isinstance(devtools, bool):
         raise NativeWebviewError("devtools must be a bool")
+    if icon is None:
+        icon_path = None
+    else:
+        try:
+            icon_path = os.fspath(icon)
+        except TypeError as error:
+            raise NativeWebviewError(
+                "icon must be a path-like string or None"
+            ) from error
+        if not isinstance(icon_path, str):
+            raise NativeWebviewError("icon must be a path-like string or None")
+        if icon_path == "":
+            icon_path = None
+        elif not os.path.isfile(icon_path) or not os.access(icon_path, os.R_OK):
+            raise NativeWebviewError("icon must be a readable image file")
+        else:
+            icon_path = os.path.abspath(icon_path)
     if async_main is not None and not callable(async_main):
         raise NativeWebviewError("async_main must be callable or None")
     if app.host not in {"127.0.0.1", "::1"}:
@@ -245,15 +333,7 @@ def _validate_options(
         raise NativeWebviewError(
             "DemoUiApp has already started; create a new app for run_native()"
         )
-    profile_path = _profile_path(application_id)
-    try:
-        profile_path.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise NativeWebviewError(
-            f"cannot create native profile directory '{profile_path}'; "
-            "check application data directory permissions"
-        ) from error
-    return _Options(application_id, width, height, devtools, profile_path)
+    return _Options(application_id, width, height, devtools, icon_path)
 
 
 def _run_with_host(
@@ -375,6 +455,7 @@ def _run_with_host(
             width=options.width,
             height=options.height,
             devtools=options.devtools,
+            icon=options.icon,
         )
         host.run()
     except BaseException as error:
@@ -409,22 +490,23 @@ def _run_with_host(
         if isinstance(window_error, NativeWebviewError):
             raise window_error
         raise NativeWebviewError(
-            "native window failed; verify GTK 3 and WebKitGTK 4.1 are installed"
+            f"native window failed; {_native_prerequisite_hint()}"
         ) from window_error
 
 
 def _run_native(
     app: DemoUiApp,
     *,
-    application_id: str,
+    application_id: str | None,
     async_main: AsyncMain | None,
     width: int,
     height: int,
     devtools: bool,
+    icon: str | os.PathLike[str] | None = None,
     host_factory: Callable[[_Options], _WindowHost],
 ) -> None:
     options = _validate_options(
-        app, application_id, async_main, width, height, devtools
+        app, application_id, async_main, width, height, devtools, icon
     )
     host = host_factory(options)
     _run_with_host(app, host, options, async_main=async_main)
@@ -433,13 +515,14 @@ def _run_native(
 def run_native(
     app: DemoUiApp,
     *,
-    application_id: str,
+    application_id: str | None = None,
     async_main: AsyncMain | None = None,
     width: int = 1280,
     height: int = 800,
     devtools: bool = False,
+    icon: str | os.PathLike[str] | None = None,
 ) -> None:
-    """Run an application in a Linux native webview.
+    """Run an application in a native webview.
 
     This synchronous main-thread entry point owns the native window loop and
     runs the application's asyncio server on a managed background thread.
@@ -449,14 +532,19 @@ def run_native(
 
     Args:
         app: Configured, single-use application to host.
-        application_id: Lowercase reverse-DNS identifier used to select the
-            persistent browser profile.
+        application_id: Optional stable lowercase reverse-DNS identifier kept
+            for source compatibility. Native browser storage remains owned by
+            the selected platform backend.
         async_main: Optional application coroutine started on the application
             owner loop after the server becomes ready. Returning from it closes
             the window.
         width: Initial window width in pixels, from 1 through 16384.
         height: Initial window height in pixels, from 1 through 16384.
         devtools: Whether to enable the embedded browser's developer tools.
+        icon: Optional filesystem path to the native window icon. Windows
+            requires ICO; Linux uses a GdkPixbuf-supported image; macOS accepts
+            NSImage-supported images such as PNG or ICNS. On macOS this changes
+            the process-wide Dock icon, not an individual window's identity.
 
     Raises:
         NativeWebviewError: If options, platform prerequisites, server startup,
@@ -465,14 +553,25 @@ def run_native(
     """
 
     def create_host(options: _Options) -> _WindowHost:
-        return _PyWebviewHost(_load_pywebview(), options.profile_path)
+        webview_module = _load_pywebview()
+        if sys.platform == "linux":
+            _require_linux_gtk_bindings()
+        gui = {
+            "darwin": "cocoa",
+            "linux": "gtk",
+            "win32": "edgechromium",
+        }[sys.platform]
+        return _PyWebviewHost(webview_module, gui)
 
-    _run_native(
-        app,
-        application_id=application_id,
-        async_main=async_main,
-        width=width,
-        height=height,
-        devtools=devtools,
-        host_factory=create_host,
-    )
+    _require_supported_production_platform()
+    with _host_gtk_environment():
+        _run_native(
+            app,
+            application_id=application_id,
+            async_main=async_main,
+            width=width,
+            height=height,
+            devtools=devtools,
+            icon=icon,
+            host_factory=create_host,
+        )
