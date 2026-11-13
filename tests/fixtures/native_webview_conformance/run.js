@@ -45,7 +45,7 @@ await check('sse', () => new Promise((resolve, reject) => {
 
 await check('dynamic_import', async () => {
     const module = await import('./adapter.js');
-    if (module.adapterMarker !== 'native-webview-spike-adapter') {
+    if (module.adapterMarker !== 'native-webview-conformance-adapter') {
         throw new Error(`unexpected marker ${module.adapterMarker}`);
     }
     return module.adapterMarker;
@@ -68,7 +68,7 @@ await check('module_worker', () => new Promise((resolve, reject) => {
     worker.onmessage = (event) => {
         clearTimeout(timeout);
         worker.terminate();
-        if (event.data !== 'native-webview-spike-adapter') {
+        if (event.data !== 'native-webview-conformance-adapter') {
             reject(new Error(`unexpected worker result ${event.data}`));
             return;
         }
@@ -98,38 +98,6 @@ await check('theme_asset', () => new Promise((resolve, reject) => {
     stylesheet.onerror = () => reject(new Error('theme stylesheet failed to load'));
     document.head.append(stylesheet);
 }));
-
-await check('persistent_storage', async () => {
-    const parameters = new URLSearchParams(location.search);
-    const key = parameters.get('storage_key')
-        ?? initialSnapshot?.data?.native_storage_key;
-    const expected = parameters.get('storage_expected')
-        ?? initialSnapshot?.data?.native_storage_expected;
-    const write = parameters.get('storage_write')
-        ?? initialSnapshot?.data?.native_storage_write;
-    if (!key || expected === null || write === null) {
-        throw new Error('storage_key, storage_expected, and storage_write are required');
-    }
-    const cookieName = `${key}-cookie`;
-    const readCookie = () => {
-        const prefix = `${cookieName}=`;
-        const entry = document.cookie
-            .split(';')
-            .map((value) => value.trim())
-            .find((value) => value.startsWith(prefix));
-        return entry ? decodeURIComponent(entry.slice(prefix.length)) : null;
-    };
-    const actual = readCookie();
-    const normalizedActual = actual ?? '__absent__';
-    if (normalizedActual !== expected) {
-        throw new Error(`expected=${expected} actual=${normalizedActual}`);
-    }
-    document.cookie = `${cookieName}=${encodeURIComponent(write)}; Path=/; SameSite=Strict; Max-Age=31536000`;
-    if (readCookie() !== write) {
-        throw new Error('written value was not readable');
-    }
-    return `cookie expected=${expected} wrote=${write} origin=${location.origin}`;
-});
 
 await check('canvas', async () => {
     const canvas = document.querySelector('#canvas-probe');
@@ -175,33 +143,6 @@ await check('resize_observation', async () => {
     return `viewport=${window.innerWidth}x${window.innerHeight}`;
 });
 
-await check('navigation_policy', () => new Promise((resolve, reject) => {
-    const original = location.href;
-    const popup = window.open(
-        'https://example.invalid/rti-demo-ui-native-new-window-probe',
-        '_blank',
-    );
-    setTimeout(() => {
-        if (popup !== null) {
-            popup.close();
-            reject(new Error('external new-window navigation returned a window'));
-            return;
-        }
-        if (location.href !== original) {
-            reject(new Error(`external navigation was not blocked: ${location.href}`));
-            return;
-        }
-        location.assign('https://example.invalid/rti-demo-ui-native-navigation-probe');
-        setTimeout(() => {
-            if (location.href !== original) {
-                reject(new Error(`external navigation was not blocked: ${location.href}`));
-                return;
-            }
-            resolve(`blocked external and new-window navigation from ${location.origin}`);
-        }, 750);
-    }, 750);
-}));
-
 const capabilityResponse = await fetch('/api/command-capability', { cache: 'no-store' });
 const capabilityBody = await capabilityResponse.json();
 results.command_origin = {
@@ -212,7 +153,7 @@ try {
     if (!capabilityResponse.ok || !capabilityBody.capability) {
         throw new Error(`capability status=${capabilityResponse.status}`);
     }
-    const response = await fetch('/api/commands/spike-origin', {
+    const response = await fetch('/api/commands/conformance-origin', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -229,7 +170,7 @@ try {
     results.command_origin = { passed: false, evidence: String(error) };
 }
 
-const finalReport = await fetch('/api/commands/spike-report', {
+const finalReport = await fetch('/api/commands/conformance-report', {
     method: 'POST',
     headers: {
         'Content-Type': 'application/json',

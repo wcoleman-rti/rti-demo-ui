@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rti_demo_ui_native_webview_spike LANGUAGES CXX)
+project(rti_demo_ui_native_webview_prototype LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,9 +13,9 @@ add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../.." core-build)
 add_executable(native_webview_cpp_lifecycle cpp_lifecycle.cpp)
 target_link_libraries(native_webview_cpp_lifecycle PRIVATE rti_demo_ui::core)
 
-option(NATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST
+option(NATIVE_WEBVIEW_PROTOTYPE_BUILD_REAL_HOST
        "Build the webview 0.12.0 real-engine host" OFF)
-if(NATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST)
+if(NATIVE_WEBVIEW_PROTOTYPE_BUILD_REAL_HOST)
     set(WEBVIEW_WEBKITGTK_API 4.1 CACHE STRING "" FORCE)
     FetchContent_Declare(
         webview
@@ -33,6 +33,6 @@ if(NATIVE_WEBVIEW_SPIKE_BUILD_REAL_HOST)
     )
     target_compile_definitions(
         native_webview_cpp_host PRIVATE
-        SPIKE_STATIC_ROOT="${CMAKE_CURRENT_LIST_DIR}/conformance"
+        NATIVE_CONFORMANCE_STATIC_ROOT="${CMAKE_CURRENT_LIST_DIR}/../../tests/fixtures/native_webview_conformance"
     )
 endif()

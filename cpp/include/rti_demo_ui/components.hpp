@@ -28,6 +28,37 @@ namespace detail {
 class Model;
 }
 
+/// Application-supplied state shown by a time-series renderer.
+enum class TimeSeriesStatus { waiting, live, stale };
+
+/// One bounded chart sample; timestamp is milliseconds since the Unix epoch.
+struct TimeSeriesSample {
+    double timestamp_ms;
+    std::optional<double> value;
+};
+
+/// Stable metadata and optional initial samples for one chart series.
+struct TimeSeriesSeries {
+    std::string id;
+    std::string label;
+    std::string unit;
+    std::string color = "var(--sdk-accent)";
+    std::vector<TimeSeriesSample> samples;
+};
+
+/// Return the wire-format string for a time-series status.
+inline const char* to_string(TimeSeriesStatus value) {
+    switch (value) {
+        case TimeSeriesStatus::waiting:
+            return "waiting";
+        case TimeSeriesStatus::live:
+            return "live";
+        case TimeSeriesStatus::stale:
+            return "stale";
+    }
+    throw std::invalid_argument("TimeSeries: invalid status");
+}
+
 /**
  * Base handle for a component owned by a Card.
  *
@@ -51,11 +82,15 @@ class Component {
 
    protected:
     void mutated_locked();
+    void mutated_append_locked(const Json& append);
     detail::Model& model_;
     std::string id_;
     std::string type_;
     std::string card_id_;
     long revision_ = 0;
+
+   private:
+    friend class detail::Model;
 };
 
 /**
@@ -424,6 +459,54 @@ class Log final : public Component {
 };
 
 /**
+ * Bounded timestamped data rendered by the optional uPlot adapter.
+ *
+ * Timestamps are finite milliseconds since the Unix epoch; sample values may
+ * be finite numbers or gaps (`std::nullopt`). At most 8 series and 10,000
+ * retained samples per series are supported.
+ */
+class TimeSeriesViewport final : public Component {
+   public:
+    /** @cond INTERNAL */
+    TimeSeriesViewport(detail::Model& model, std::string id, std::string title,
+                       std::vector<TimeSeriesSeries> series,
+                       TimeSeriesStatus status, std::string x_label,
+                       std::string y_label,
+                       std::optional<std::array<double, 2>> x_range,
+                       std::optional<std::array<double, 2>> y_range);
+    /** @endcond */
+
+    /// Atomically replace one series with up to 10,000 ordered samples.
+    void replace_series(const std::string& series_id,
+                        std::vector<TimeSeriesSample> samples);
+
+    /// Append up to 1,024 ordered samples, retaining the newest 10,000.
+    void append(const std::string& series_id,
+                std::vector<TimeSeriesSample> samples);
+
+    /// Set the application-supplied waiting, live, or stale status.
+    void set_status(TimeSeriesStatus status);
+
+    /// Replace optional axis ranges; `std::nullopt` selects automatic range.
+    void set_range(std::optional<std::array<double, 2>> x_range = std::nullopt,
+                   std::optional<std::array<double, 2>> y_range = std::nullopt);
+
+    /** @cond INTERNAL */
+    Json to_json_locked() const override;
+    /** @endcond */
+
+   private:
+    std::string title_;
+    std::string x_label_;
+    std::string y_label_;
+    TimeSeriesStatus status_;
+    std::optional<std::array<double, 2>> x_range_;
+    std::optional<std::array<double, 2>> y_range_;
+    std::vector<TimeSeriesSeries> series_;
+    TimeSeriesSeries& find_series(const std::string& series_id);
+};
+
+/**
  * Opaque JSON state rendered by an application-owned frontend component.
  *
  * The type must not be `scene2d`, `table`, `metric`, `text`, `badge`, or `log`.
@@ -560,6 +643,19 @@ class Card {
      */
     Log* add_log(Json entries, std::string empty_state = "",
                  int max_entries = 100);
+
+    /**
+     * Add an opt-in bounded time-series chart.
+     *
+     * `enable_uplot(app)` from the optional adapter target must be called
+     * before adding this component and before `run()`.
+     */
+    TimeSeriesViewport* add_time_series(
+        const std::string& title, std::vector<TimeSeriesSeries> series,
+        TimeSeriesStatus status = TimeSeriesStatus::waiting,
+        std::string x_label = "", std::string y_label = "",
+        std::optional<std::array<double, 2>> x_range = std::nullopt,
+        std::optional<std::array<double, 2>> y_range = std::nullopt);
 
     /**
      * Add opaque custom component data.

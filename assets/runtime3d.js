@@ -25094,6 +25094,7 @@ function statusColor(status) {
 }
 function setFallback(host, message, data, state) {
   host.classList.add("sdk-scene3d-fallback");
+  if (state) updateListVisibility(state);
   const fallback = host.querySelector(".sdk-scene3d-fallback-text");
   if (fallback) {
     fallback.hidden = false;
@@ -25110,35 +25111,48 @@ function hasVisibleFrame(renderer) {
   return pixel.some((value) => value !== 0);
 }
 function renderList(list, data, state) {
-  list.replaceChildren();
-  const activeId = state?.selected || data.nodes?.[0]?.id;
-  for (const node of data.nodes || []) {
-    const option = document.createElement("div");
+  const nodes = data.nodes || [];
+  const focusedId = list.contains(document.activeElement) ? document.activeElement.dataset.nodeId : null;
+  const activeId = [focusedId, state?.selected, nodes[0]?.id].find((id) => nodes.some((node) => node.id === id));
+  const existing = new Map([...list.children].map((option) => [option.dataset.nodeId, option]));
+  for (const [index, node] of nodes.entries()) {
+    let option = existing.get(node.id);
+    if (!option) {
+      option = document.createElement("div");
+      option.setAttribute("role", "option");
+      option.dataset.nodeId = node.id;
+      option.addEventListener("click", () => select(state, node.id));
+      option.addEventListener("keydown", (event) => {
+        const options = [...list.querySelectorAll('[role="option"]')];
+        const index2 = options.indexOf(option);
+        let next = index2;
+        if (event.key === "ArrowDown") next = Math.min(options.length - 1, index2 + 1);
+        else if (event.key === "ArrowUp") next = Math.max(0, index2 - 1);
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = options.length - 1;
+        else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          select(state, node.id);
+          return;
+        } else return;
+        event.preventDefault();
+        options.forEach((item, itemIndex) => {
+          item.tabIndex = itemIndex === next ? 0 : -1;
+        });
+        options[next]?.focus();
+      });
+    }
+    existing.delete(node.id);
     option.id = `${data.asset}-${node.id}`.replace(/[^A-Za-z0-9_-]/g, "_");
-    option.setAttribute("role", "option");
     option.tabIndex = activeId === node.id ? 0 : -1;
     option.setAttribute("aria-selected", String(state && state.selected === node.id));
     option.setAttribute("aria-label", `${node.id}, ${node.status}, ${node.visible ? "visible" : "hidden"}`);
     option.textContent = `${node.id} - ${node.status}`;
-    option.dataset.nodeId = node.id;
-    option.addEventListener("click", () => select(state, node.id));
-    option.addEventListener("keydown", (event) => {
-      const options = [...list.querySelectorAll('[role="option"]')];
-      const index = options.indexOf(option);
-      let next = index;
-      if (event.key === "ArrowDown") next = Math.min(options.length - 1, index + 1);
-      else if (event.key === "ArrowUp") next = Math.max(0, index - 1);
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = options.length - 1;
-      else if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        select(state, node.id);
-        return;
-      } else return;
-      event.preventDefault();
-      options[next]?.focus();
-    });
-    list.appendChild(option);
+    if (list.children[index] !== option) list.insertBefore(option, list.children[index] || null);
+  }
+  for (const option of existing.values()) option.remove();
+  if (focusedId && !list.contains(document.activeElement)) {
+    [...list.children].find((option) => option.dataset.nodeId === activeId)?.focus();
   }
 }
 function select(state, nodeId) {
@@ -25157,11 +25171,63 @@ function select(state, nodeId) {
   const live = state.host.querySelector(".sdk-scene3d-live");
   if (live) live.textContent = state.selected ? `${nodeId} selected` : `${nodeId} deselected`;
   if (state.root) {
-    state.root.traverse((object) => {
-      if (!object.isMesh || !object.userData.scene3dNodeId) return;
-      object.material.emissive?.setHex(object.userData.scene3dNodeId === state.selected ? 16777215 : 0);
-    });
+    updateMaterials(state);
   }
+}
+function meshMaterials(object) {
+  return Array.isArray(object.material) ? object.material : [object.material];
+}
+function updateMaterials(state) {
+  state.root?.traverse((object) => {
+    if (!object.isMesh) return;
+    meshMaterials(object).forEach((material, index) => {
+      const original = state.originalMaterials.get(object)?.[index];
+      if (!original) return;
+      const nodeId = object.userData.scene3dNodeId;
+      const status = state.nodeStatuses.get(nodeId);
+      if (material.color) {
+        if (state.materialMode === "status" && status !== void 0) material.color.setHex(statusColor(status));
+        else if (!material.color.equals(original.color)) material.color.copy(original.color);
+      }
+      if (material.emissive) {
+        if (nodeId && nodeId === state.selected) material.emissive.setHex(16777215);
+        else material.emissive.copy(original.emissive);
+      }
+    });
+  });
+}
+function updateListVisibility(state) {
+  const hidden = !state.showNodeList && !state.host.classList.contains("sdk-scene3d-fallback");
+  state.elements.list.hidden = hidden;
+  state.elements.list.parentElement.classList.toggle("sdk-scene3d-body-no-list", hidden);
+}
+function validateCamera(view) {
+  const vector = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+  if (!view || !vector(view.position) || !vector(view.target) || !vector(view.up)) {
+    throw new TypeError("Scene3D camera position, target, and up must be finite three-element arrays");
+  }
+  const direction = new Vector3().fromArray(view.position).sub(new Vector3().fromArray(view.target));
+  const up = new Vector3().fromArray(view.up);
+  if (direction.lengthSq() === 0 || up.lengthSq() === 0 || new Vector3().crossVectors(direction, up).lengthSq() === 0) {
+    throw new RangeError("Scene3D camera must have distinct position/target and a nonparallel, nonzero up vector");
+  }
+  return { position: [...view.position], target: [...view.target], up: [...view.up] };
+}
+function applyCamera(state, view) {
+  if (!state.camera || !state.controls) return;
+  state.camera.position.fromArray(view.position);
+  state.camera.up.fromArray(view.up).normalize();
+  state.controls.target.fromArray(view.target);
+  state.controls._quat.setFromUnitVectors(state.camera.up, new Vector3(0, 1, 0));
+  state.controls._quatInverse.copy(state.controls._quat).invert();
+  state.controls.update();
+  state.controls.saveState();
+}
+function setScene3dCamera(componentId, view) {
+  const state = scenes.get(componentId);
+  if (!state) throw new Error(`Scene3D scene is not mounted: ${componentId}`);
+  state.cameraPreset = validateCamera(view);
+  applyCamera(state, state.cameraPreset);
 }
 function pathObject(root, path) {
   let current = root;
@@ -25172,9 +25238,9 @@ function pathObject(root, path) {
   }
   return current;
 }
-function disposeObject(root) {
+function disposeObject(root, sharedAsset = false) {
   root?.traverse((object) => {
-    object.geometry?.dispose();
+    if (sharedAsset) object.geometry?.dispose();
     if (Array.isArray(object.material)) object.material.forEach((material) => material.dispose());
     else object.material?.dispose();
   });
@@ -25203,7 +25269,7 @@ function releaseAsset(url, entry) {
   entry.refs -= 1;
   if (entry.refs > 0) return;
   assets.delete(url);
-  entry.promise.then((gltf) => disposeObject(gltf.scene)).catch(() => {
+  entry.promise.then((gltf) => disposeObject(gltf.scene, true)).catch(() => {
   });
 }
 function makeHost(host) {
@@ -25247,17 +25313,24 @@ function makeHost(host) {
   host.append(toolbar, body);
   return { canvas, list, fallback, live, loading: loading2, reset, zoom };
 }
-async function reconcileScene3d(component, host, context) {
-  const data = component.data;
+async function reconcileScene3d(component, host, context = {}) {
   let state = scenes.get(component.id);
+  const materialMode = context.materialMode ?? state?.materialMode ?? "status";
+  const showNodeList = context.showNodeList ?? state?.showNodeList ?? true;
+  if (!["original", "status"].includes(materialMode)) throw new TypeError("Scene3D materialMode must be original or status");
+  if (typeof showNodeList !== "boolean") throw new TypeError("Scene3D showNodeList must be a boolean");
+  const data = component.data;
   if (!state) {
     const elements = makeHost(host);
-    state = { componentId: component.id, host, elements, selected: null, asset: null, assetUrl: null, loading: null, generation: 0, root: null, renderer: null, controls: null, animation: 0, targets: /* @__PURE__ */ new Map(), onSelection: context.onSelection };
+    state = { componentId: component.id, host, elements, selected: null, asset: null, assetUrl: null, loading: null, generation: 0, root: null, renderer: null, controls: null, animation: 0, targets: /* @__PURE__ */ new Map(), originalMaterials: /* @__PURE__ */ new Map(), nodeStatuses: /* @__PURE__ */ new Map(), cameraPreset: null, onSelection: context.onSelection };
     scenes.set(component.id, state);
     elements.reset.addEventListener("click", () => state.controls?.reset());
     elements.zoom.addEventListener("click", () => zoomToModel(state));
   }
   state.onSelection = context.onSelection;
+  state.materialMode = materialMode;
+  state.showNodeList = showNodeList;
+  updateListVisibility(state);
   renderList(state.elements.list, data, state);
   const showFailure = (error) => {
     context.onLoadState?.("failed");
@@ -25289,6 +25362,12 @@ async function reconcileScene3d(component, host, context) {
   if (state.assetUrl !== data.asset) {
     state.generation += 1;
     const generation = state.generation;
+    cancelAnimationFrame(state.animation);
+    state.resizeObserver?.disconnect();
+    state.controls?.dispose();
+    disposeObject(state.root);
+    state.targets.clear();
+    state.originalMaterials.clear();
     state.asset?.release();
     state.asset = null;
     state.root = null;
@@ -25310,6 +25389,10 @@ async function reconcileScene3d(component, host, context) {
       state.root.traverse((object) => {
         if (object.isMesh) {
           object.material = Array.isArray(object.material) ? object.material.map((material) => material.clone()) : object.material.clone();
+          state.originalMaterials.set(object, meshMaterials(object).map((material) => ({
+            color: material.color?.clone(),
+            emissive: material.emissive?.clone()
+          })));
         }
       });
       const canvas = state.elements.canvas;
@@ -25330,6 +25413,7 @@ async function reconcileScene3d(component, host, context) {
       state.controls.saveState();
       state.scene = scene;
       state.camera = camera;
+      if (state.cameraPreset) applyCamera(state, state.cameraPreset);
       const resize = () => {
         const rect = canvas.getBoundingClientRect();
         camera.aspect = Math.max(1, rect.width) / Math.max(1, rect.height);
@@ -25364,7 +25448,12 @@ async function reconcileScene3d(component, host, context) {
   }
   if (!state.root) return;
   host.classList.remove("sdk-scene3d-fallback");
+  updateListVisibility(state);
   state.elements.fallback.hidden = true;
+  state.nodeStatuses.clear();
+  state.root.traverse((object) => {
+    delete object.userData.scene3dNodeId;
+  });
   for (const node of data.nodes || []) {
     const object = pathObject(state.root, node.path);
     if (!object) {
@@ -25375,13 +25464,12 @@ async function reconcileScene3d(component, host, context) {
     object.visible = node.visible;
     const prior = state.targets.get(node.id);
     state.targets.set(node.id, { object, from: prior?.to || { position: object.position.clone(), quaternion: object.quaternion.clone(), scale: object.scale.clone() }, to: { position: new Vector3().fromArray(node.position), quaternion: new Quaternion().fromArray(node.rotation), scale: new Vector3().fromArray(node.scale) } });
+    state.nodeStatuses.set(node.id, node.status);
     object.traverse((child) => {
-      if (child.isMesh) {
-        child.userData.scene3dNodeId = node.id;
-        child.material.color.setHex(statusColor(node.status));
-      }
+      if (child.isMesh) child.userData.scene3dNodeId = node.id;
     });
   }
+  updateMaterials(state);
   for (const [nodeId, target] of state.targets) if (!data.nodes.some((node) => node.id === nodeId)) state.targets.delete(nodeId);
   cancelAnimationFrame(state.animation);
   const started = performance.now();
@@ -25415,5 +25503,6 @@ function disposeScene3d(componentId) {
 }
 export {
   disposeScene3d,
-  reconcileScene3d
+  reconcileScene3d,
+  setScene3dCamera
 };
