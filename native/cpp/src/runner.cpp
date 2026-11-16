@@ -6,6 +6,7 @@
 #include <exception>
 #include <fstream>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <thread>
 
@@ -24,6 +25,14 @@ constexpr int kMaximumWindowDimension = 16384;
 }
 
 void validate(DemoUiApp& app, const NativeWindowOptions& options) {
+    if (!options.application_id.empty() &&
+        !std::regex_match(
+            options.application_id,
+            std::regex(
+                R"([a-z](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z](?:[a-z0-9-]*[a-z0-9])?)+)"))) {
+        throw NativeWebviewError(
+            "application_id must be a lowercase reverse-DNS identifier");
+    }
     if (options.width < 1 || options.width > kMaximumWindowDimension) {
         throw NativeWebviewError("width must be between 1 and 16384");
     }

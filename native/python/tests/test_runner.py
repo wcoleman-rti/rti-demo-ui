@@ -226,7 +226,9 @@ def test_run_native_selects_platform_pywebview_backend(monkeypatch, platform, gu
     captured = {}
 
     def capture_run(_app, **kwargs):
-        captured["host"] = kwargs["host_factory"](None)
+        captured["host"] = kwargs["host_factory"](
+            runner._Options("com.example.demo", 1280, 800, False, None)
+        )
 
     monkeypatch.setattr(runner.sys, "platform", platform)
     monkeypatch.setattr(runner, "_load_pywebview", lambda: fake_webview)
@@ -237,6 +239,7 @@ def test_run_native_selects_platform_pywebview_backend(monkeypatch, platform, gu
 
     assert captured["host"]._webview is fake_webview
     assert captured["host"]._gui == gui
+    assert captured["host"]._application_id == "com.example.demo"
 
 
 def test_missing_pywebview_is_actionable(monkeypatch):
@@ -306,14 +309,13 @@ def test_pywebview_uses_platform_defaults(gui):
     assert fake_webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] is True
 
 
-@pytest.mark.parametrize("gui", ["edgechromium", "gtk"])
-def test_pywebview_forwards_native_icon(gui):
+def test_pywebview_forwards_windows_icon():
     starts = []
     fake_webview = SimpleNamespace(
         create_window=lambda *args, **kwargs: SimpleNamespace(),
         start=lambda *args, **kwargs: starts.append(kwargs),
     )
-    host = runner._PyWebviewHost(fake_webview, gui)
+    host = runner._PyWebviewHost(fake_webview, "edgechromium")
     host.create(
         title="icon",
         url="http://127.0.0.1:42000/",
@@ -324,8 +326,85 @@ def test_pywebview_forwards_native_icon(gui):
     )
     host._close_requested.set()
     host.run()
-    assert starts[0]["gui"] == gui
+    assert starts[0]["gui"] == "edgechromium"
     assert starts[0]["icon"] == "/tmp/app.ico"
+
+
+@pytest.mark.parametrize("width,height", [(1024, 512), (64, 32)])
+def test_linux_icon_is_normalized_and_identity_restored(
+    monkeypatch, tmp_path, width, height
+):
+    state = {"name": "python", "class": "Python"}
+    image = SimpleNamespace(
+        get_width=lambda: width,
+        get_height=lambda: height,
+    )
+    scaled = SimpleNamespace(
+        savev=lambda path, *_args: Path(path).write_bytes(b"normalized")
+    )
+    scales = []
+
+    def scale(*args):
+        scales.append(args)
+        return scaled
+
+    modules = {
+        "gi": SimpleNamespace(require_version=lambda *_args: None),
+        "gi.repository.Gtk": SimpleNamespace(init_check=lambda: (True, [])),
+        "gi.repository.Gdk": SimpleNamespace(
+            get_program_class=lambda: state["class"],
+            set_program_class=lambda value: state.update({"class": value}),
+        ),
+        "gi.repository.GLib": SimpleNamespace(
+            Error=RuntimeError,
+            get_prgname=lambda: state["name"],
+            set_prgname=lambda value: state.update({"name": value}),
+        ),
+        "gi.repository.GdkPixbuf": SimpleNamespace(
+            Pixbuf=SimpleNamespace(
+                new_from_file=lambda _path: image,
+                new_from_file_at_scale=scale,
+            )
+        ),
+    }
+    monkeypatch.setattr(runner.importlib, "import_module", modules.__getitem__)
+    source = str(tmp_path / "source.png")
+    Path(source).write_bytes(b"original")
+    with pytest.raises(ValueError, match="host failure"):
+        with runner._linux_window_options(source, "com.example.demo") as path:
+            assert state == {"name": "com.example.demo", "class": "com.example.demo"}
+            if width > 256:
+                assert scales == [(source, 256, 256, True)]
+                assert Path(path).read_bytes() == b"normalized"
+            else:
+                assert scales == []
+                assert path == source
+                assert Path(path).read_bytes() == b"original"
+            normalized = Path(path)
+            raise ValueError("host failure")
+    assert normalized.exists() is (width <= 256)
+    assert state == {"name": "python", "class": "Python"}
+
+
+def test_linux_invalid_image_is_reported(monkeypatch):
+    def invalid(_path):
+        raise RuntimeError("invalid PNG")
+
+    modules = {
+        "gi": SimpleNamespace(require_version=lambda *_args: None),
+        "gi.repository.Gtk": SimpleNamespace(init_check=lambda: (True, [])),
+        "gi.repository.Gdk": SimpleNamespace(get_program_class=lambda: "Python"),
+        "gi.repository.GLib": SimpleNamespace(
+            Error=RuntimeError, get_prgname=lambda: "python"
+        ),
+        "gi.repository.GdkPixbuf": SimpleNamespace(
+            Pixbuf=SimpleNamespace(new_from_file=invalid)
+        ),
+    }
+    monkeypatch.setattr(runner.importlib, "import_module", modules.__getitem__)
+    with pytest.raises(NativeWebviewError, match="failed to load.*invalid PNG"):
+        with runner._linux_window_options("/tmp/invalid.png", None):
+            pytest.fail("invalid icon was accepted")
 
 
 def test_pywebview_sets_macos_dock_icon(monkeypatch, tmp_path):
@@ -376,9 +455,7 @@ def test_pywebview_reports_unsupported_macos_icon(monkeypatch, tmp_path):
     icon_path.write_bytes(b"not an image")
     fake_appkit = SimpleNamespace(
         NSImage=SimpleNamespace(
-            alloc=lambda: SimpleNamespace(
-                initWithContentsOfFile_=lambda _path: None
-            )
+            alloc=lambda: SimpleNamespace(initWithContentsOfFile_=lambda _path: None)
         ),
         NSApplication=SimpleNamespace(sharedApplication=lambda: SimpleNamespace()),
     )
