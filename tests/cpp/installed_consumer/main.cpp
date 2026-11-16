@@ -12,8 +12,17 @@
 
 #include <rti_demo_ui/rti_demo_ui.hpp>
 
+#ifdef RTI_DEMO_TEST_UPLOT
+#include <rti_demo_ui/uplot.hpp>
+#endif
+
 int main() {
     rti::demo::ui::DemoUiApp app("Installed package consumer");
+#ifdef RTI_DEMO_TEST_UPLOT
+    rti::demo::ui::enable_uplot(app);
+    app.add_card("Trends")->add_time_series(
+        "Rate", {{"rate", "Rate"}});
+#endif
     app.add_card("Status")->add_metric("Ready", 1);
     return 0;
 }

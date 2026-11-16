@@ -23,7 +23,8 @@ import re
 import signal
 import sys
 import threading
-from contextlib import contextmanager, suppress
+import tempfile
+from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Iterator, Protocol
 
@@ -83,7 +84,9 @@ class _WindowHost(Protocol):
 
 
 class _PyWebviewHost:
-    def __init__(self, webview_module, gui: str) -> None:
+    def __init__(
+        self, webview_module, gui: str, application_id: str | None = None
+    ) -> None:
         self._webview = webview_module
         self._gui = gui
         self._window = None
@@ -92,6 +95,7 @@ class _PyWebviewHost:
         self._close_error: list[BaseException] = []
         self._devtools = False
         self._icon: str | None = None
+        self._application_id = application_id
 
     def create(
         self,
@@ -159,11 +163,66 @@ class _PyWebviewHost:
             "debug": self._devtools,
             "private_mode": False,
         }
-        if self._icon is not None and self._gui != "cocoa":
-            options["icon"] = self._icon
-        self._webview.start(self._on_started, **options)
+        context = (
+            _linux_window_options(self._icon, self._application_id)
+            if self._gui == "gtk"
+            else nullcontext(self._icon)
+        )
+        with context as icon:
+            if icon is not None and self._gui != "cocoa":
+                options["icon"] = icon
+            self._webview.start(self._on_started, **options)
         if self._close_error:
             raise self._close_error[0]
+
+
+@contextmanager
+def _linux_window_options(
+    icon: str | None, application_id: str | None
+) -> Iterator[str | None]:
+    if icon is None and application_id is None:
+        yield None
+        return
+    gi = importlib.import_module("gi")
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("GdkPixbuf", "2.0")
+    gtk = importlib.import_module("gi.repository.Gtk")
+    if not gtk.init_check()[0]:
+        raise NativeWebviewError("native window failed; could not initialize GTK")
+    gdk = importlib.import_module("gi.repository.Gdk")
+    glib = importlib.import_module("gi.repository.GLib")
+    pixbuf = importlib.import_module("gi.repository.GdkPixbuf")
+    original_name = glib.get_prgname()
+    original_class = gdk.get_program_class()
+    try:
+        if application_id is not None:
+            glib.set_prgname(application_id)
+            gdk.set_program_class(application_id)
+        with tempfile.TemporaryDirectory(prefix="rti-demo-ui-icon-") as directory:
+            normalized_icon = icon
+            if icon is not None:
+                try:
+                    image = pixbuf.Pixbuf.new_from_file(icon)
+                    if max(image.get_width(), image.get_height()) > 256:
+                        image = pixbuf.Pixbuf.new_from_file_at_scale(
+                            icon, 256, 256, True
+                        )
+                        normalized_icon = os.path.join(directory, "icon.png")
+                        if not image.savev(normalized_icon, "png", [], []):
+                            raise NativeWebviewError(
+                                "failed to save normalized native window icon"
+                            )
+                except (glib.Error, OSError) as error:
+                    raise NativeWebviewError(
+                        f"failed to load native window icon: {error}"
+                    ) from error
+            yield normalized_icon
+    finally:
+        if application_id is not None:
+            glib.set_prgname(original_name)
+            if original_class is not None:
+                gdk.set_program_class(original_class)
 
 
 def _is_snap_path(path: str, roots: tuple[str, ...]) -> bool:
@@ -532,9 +591,10 @@ def run_native(
 
     Args:
         app: Configured, single-use application to host.
-        application_id: Optional stable lowercase reverse-DNS identifier kept
-            for source compatibility. Native browser storage remains owned by
-            the selected platform backend.
+        application_id: Optional stable lowercase reverse-DNS identifier.
+            On Linux this sets the Wayland app ID and X11 window class; match
+            the consumer's desktop-entry filename without ``.desktop``.
+            It does not configure browser storage or install desktop entries.
         async_main: Optional application coroutine started on the application
             owner loop after the server becomes ready. Returning from it closes
             the window.
@@ -561,7 +621,7 @@ def run_native(
             "linux": "gtk",
             "win32": "edgechromium",
         }[sys.platform]
-        return _PyWebviewHost(webview_module, gui)
+        return _PyWebviewHost(webview_module, gui, options.application_id)
 
     _require_supported_production_platform()
     with _host_gtk_environment():

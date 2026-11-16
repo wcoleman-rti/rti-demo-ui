@@ -64,3 +64,13 @@ add_test(
     NAME presentation_contract_tests
     COMMAND rti_demo_ui_presentation_contract_tests
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME desktop_install_test
+        COMMAND "${CMAKE_COMMAND}"
+            "-DDESKTOP_MODULE=${CMAKE_CURRENT_SOURCE_DIR}/../../cpp/cmake/rti-demo-ui-desktop.cmake"
+            "-DTEST_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/desktop_consumer"
+            "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/desktop-install-test"
+            "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/desktop_install_test.cmake")
+endif()

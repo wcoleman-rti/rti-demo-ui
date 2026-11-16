@@ -69,7 +69,7 @@ docs/                   architecture, API, lifecycle, and frontend contracts
 ## 3.1 Optional Native Host
 
 The core packages remain browser-first and contain no native GUI dependency,
-import, or platform probe. The independently versioned 0.4.x companions host
+import, or platform probe. The independently versioned 0.5.x companions host
 the same loopback frontend in a native window. Linux Python/C++ is supported;
 Windows Python/C++ and macOS C++ have passed automated qualification and await
 manual release acceptance:

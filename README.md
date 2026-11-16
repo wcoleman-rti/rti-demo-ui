@@ -127,9 +127,9 @@ For C++, link `rti_demo_ui::core` from `cpp/` with `add_subdirectory()`, or use
 the Linux C++ development bundle attached to a matching GitHub Release:
 
 ```bash
-tar -xzf rti-demo-ui-cpp-0.4.1-linux-x86_64-gcc11.tar.gz
+tar -xzf rti-demo-ui-cpp-0.5.0-linux-x86_64-gcc11.tar.gz
 cmake -S . -B build \
-  -DCMAKE_PREFIX_PATH="$PWD/rti-demo-ui-cpp-0.4.1-linux-x86_64-gcc11"
+  -DCMAKE_PREFIX_PATH="$PWD/rti-demo-ui-cpp-0.5.0-linux-x86_64-gcc11"
 ```
 
 ```cmake
@@ -137,18 +137,24 @@ find_package(rti_demo_ui CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE rti_demo_ui::core)
 ```
 
-The bundle contains the static library, public headers, pinned header-only
-dependencies, CMake package metadata, and applicable licenses. It targets
+The bundle contains the core and optional uPlot static libraries, public
+headers, pinned header-only dependencies, CMake package metadata, and applicable
+licenses. It targets
 Ubuntu 22.04 x86_64 with GCC 11. Other platforms should build from the tagged
 source until they are covered by routine CI and release testing. The optional
 native C++ companion remains source-build-only because its GTK/WebKit runtime
 ABI is system-specific.
 
-Each stable `vX.Y.Z` tag publishes the two Python wheels and source
-distributions, the C++ development bundle, `SHA256SUMS`, and GitHub artifact
+Each stable `vX.Y.Z` tag publishes the core, native companion, and optional uPlot
+Python wheels and source distributions, the C++ development bundle,
+`SHA256SUMS`, and GitHub artifact
 attestations for the release artifacts. Packages are not uploaded to PyPI or
 another hosted package repository. The release workflow can be run manually
 to build and verify the complete artifact set without publishing a release.
+The uPlot Python distribution is versioned independently (currently 1.0.0);
+install its wheel alongside the matching 0.5.x core wheel. C++ consumers opt in
+by linking `rti_demo_ui::uplot`; linking only `rti_demo_ui::core` retains the
+core-only behavior. See [Time Series](docs/time-series.md) for enablement.
 
 ## Documentation
 

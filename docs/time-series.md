@@ -38,7 +38,13 @@ chart = app.add_card("Trends").add_time_series(
 
 In this repository, install the optional Python distribution with
 `pip install -e adapters/uplot/python`. Published users install
-`rti-demo-ui-adapter-uplot` separately.
+the independently versioned `rti-demo-ui-adapter-uplot` 1.0.0 wheel alongside
+the 0.5.x core wheel from the same GitHub release:
+
+```bash
+pip install rti_demo_ui-0.5.0-py3-none-any.whl \
+  rti_demo_ui_adapter_uplot-1.0.0-py3-none-any.whl
+```
 
 C++ applications configure the SDK with
 `-DRTI_DEMO_BUILD_UPLOT_ADAPTER=ON`, build the `rti_demo_ui_uplot` target, link
@@ -46,7 +52,10 @@ C++ applications configure the SDK with
 `<rti_demo_ui/uplot.hpp>`, and call `enable_uplot(app)` before
 `card->add_time_series(...)` and `app.run()`. The default core target embeds no
 uPlot assets. Both adapters serve pinned local assets from same-origin SDK
-routes; neither uses a CDN.
+routes; neither uses a CDN. The Linux C++ release bundle includes the optional
+library and headers: installed-package consumers use
+`find_package(rti_demo_ui CONFIG REQUIRED)` and link `rti_demo_ui::uplot` in
+addition to `rti_demo_ui::core`, without a source-build option.
 
 ## Data contract
 

@@ -22,3 +22,13 @@ add_executable(rti_demo_ui_installed_consumer main.cpp)
 target_link_libraries(
     rti_demo_ui_installed_consumer PRIVATE rti_demo_ui::core
 )
+
+option(RTI_DEMO_TEST_UPLOT "Test the installed optional uPlot adapter" OFF)
+if(RTI_DEMO_TEST_UPLOT)
+    target_link_libraries(
+        rti_demo_ui_installed_consumer PRIVATE rti_demo_ui::uplot
+    )
+    target_compile_definitions(
+        rti_demo_ui_installed_consumer PRIVATE RTI_DEMO_TEST_UPLOT
+    )
+endif()

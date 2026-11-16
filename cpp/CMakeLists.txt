@@ -19,6 +19,7 @@ include(FetchContent)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/rti-demo-ui-version.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/rti-demo-ui-desktop.cmake")
 
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -215,6 +216,7 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/rti_demo_ui-config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/rti_demo_ui-config-version.cmake"
+        "${CMAKE_CURRENT_LIST_DIR}/cmake/rti-demo-ui-desktop.cmake"
     DESTINATION "${RTI_DEMO_UI_CMAKE_INSTALL_DIR}"
 )
 

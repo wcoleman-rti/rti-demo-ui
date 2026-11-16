@@ -64,6 +64,12 @@ def main() -> None:
         help="Compatibility alias for --browser or --native",
     )
     parser.set_defaults(mode="browser")
+    parser.add_argument("--icon", help="Native application icon image path")
+    parser.add_argument(
+        "--application-id",
+        default="org.rti.demo-ui.dual-mode-example",
+        help="Linux desktop-entry identity",
+    )
     args = parser.parse_args()
     app, animate = build_application()
     if args.mode == "native":
@@ -71,7 +77,8 @@ def main() -> None:
 
         run_native(
             app,
-            application_id="org.rti.demo-ui.dual-mode-example",
+            application_id=args.application_id,
+            icon=args.icon,
             async_main=animate,
         )
     else:
