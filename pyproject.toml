@@ -43,7 +43,7 @@ dev = [
     "playwright==1.62.0",
     "ruff==0.16.5",
     "clang-format==23.1.0",
-    "pre-commit==4.6.2",
+    "pre-commit==4.7.0",
 ]
 docs = [
     "breathe==4.36.0",
