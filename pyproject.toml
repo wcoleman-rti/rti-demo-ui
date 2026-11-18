@@ -32,7 +32,7 @@ test = [
 browser = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "playwright==1.62.0",
+    "playwright==1.65.2",
 ]
 lint = [
     "ruff==0.16.5",
@@ -40,7 +40,7 @@ lint = [
 dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
-    "playwright==1.62.0",
+    "playwright==1.65.2",
     "ruff==0.16.5",
     "clang-format==23.1.0",
     "pre-commit==4.6.2",
