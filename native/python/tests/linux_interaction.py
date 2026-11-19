@@ -77,7 +77,7 @@ def element(app, role, name):
         (
             node
             for node in descendants(app)
-            if node.get_role_name() == role and node.get_name() == name
+            if node.get_role() == role and node.get_name() == name
         ),
         None,
     )
@@ -208,7 +208,9 @@ def desktop_host(command):
                 app = wait_for(
                     "desktop accessible application", lambda: application(pid)
                 )
-                wait_for("desktop web page", lambda: element(app, "heading", TITLE))
+                wait_for(
+                    "desktop web page", lambda: element(app, Atspi.Role.HEADING, TITLE)
+                )
                 window = wait_for(
                     "desktop X11 window",
                     lambda: subprocess.run(
@@ -267,7 +269,7 @@ def run_host(command, *, interactive, supplied_icon=None):
             with urllib.request.urlopen(url + "api/state", timeout=5) as response:
                 assert response.status == 200
             app = wait_for("accessible application", lambda: application(process.pid))
-            wait_for("web page", lambda: element(app, "heading", TITLE))
+            wait_for("web page", lambda: element(app, Atspi.Role.HEADING, TITLE))
             window = wait_for(
                 "X11 window",
                 lambda: subprocess.run(
@@ -278,7 +280,7 @@ def run_host(command, *, interactive, supplied_icon=None):
                 ).stdout.strip(),
             ).splitlines()[-1]
             xdotool("windowfocus", "--sync", window)
-            frame = element(app, "frame", TITLE)
+            frame = element(app, Atspi.Role.FRAME, TITLE)
             frame_width = (
                 frame.get_component_iface().get_extents(Atspi.CoordType.SCREEN).width
             )
@@ -296,10 +298,12 @@ def run_host(command, *, interactive, supplied_icon=None):
             if interactive:
                 assert "_NET_WM_ICON(CARDINAL)" in identity, identity
 
-                entry = wait_for("Name input", lambda: element(app, "entry", "Name"))
-                assert element(app, "button", "Greet")
-                assert element(app, "link", "Open local page")
-                assert element(app, "list box", "Scene nodes")
+                entry = wait_for(
+                    "Name input", lambda: element(app, Atspi.Role.ENTRY, "Name")
+                )
+                assert element(app, Atspi.Role.PUSH_BUTTON, "Greet")
+                assert element(app, Atspi.Role.LINK, "Open local page")
+                assert element(app, Atspi.Role.LIST_BOX, "Scene nodes")
                 assert entry.get_component_iface().grab_focus()
                 xdotool("key", "ctrl+a")
                 xdotool("type", "--clearmodifiers", "Reviewer")
@@ -310,38 +314,40 @@ def run_host(command, *, interactive, supplied_icon=None):
                 )
                 assert entry.get_component_iface().grab_focus()
                 xdotool("key", "ctrl+a", "BackSpace")
-                click(element(app, "button", "Greet"))
+                click(element(app, Atspi.Role.PUSH_BUTTON, "Greet"))
                 wait_for(
                     "invalid command error",
                     lambda: text_present(app, "Command failed:", prefix=True),
                 )
                 assert entry.get_component_iface().grab_focus()
                 xdotool("type", "--clearmodifiers", "Mouse")
-                click(element(app, "button", "Greet"))
+                click(element(app, Atspi.Role.PUSH_BUTTON, "Greet"))
                 wait_for(
                     "mouse command result", lambda: text_present(app, "Hello, Mouse!")
                 )
 
                 tool = wait_for(
                     "tool option",
-                    lambda: element(app, "list item", "tool, success, visible"),
+                    lambda: element(
+                        app, Atspi.Role.LIST_ITEM, "tool, success, visible"
+                    ),
                 )
                 click(tool, hold=0.35)
                 wait_for("tool selection", lambda: text_present(app, "tool: selected"))
-                tool = element(app, "list item", "tool, success, visible")
+                tool = element(app, Atspi.Role.LIST_ITEM, "tool, success, visible")
                 assert tool.get_state_set().contains(Atspi.StateType.SELECTED)
                 click(tool, hold=0.35)
                 wait_for(
                     "tool deselection", lambda: text_present(app, "tool: deselected")
                 )
-                tool = element(app, "list item", "tool, success, visible")
+                tool = element(app, Atspi.Role.LIST_ITEM, "tool, success, visible")
                 assert not tool.get_state_set().contains(Atspi.StateType.SELECTED)
                 rect = tool.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
                 click(tool, offset=rect.width - 4, hold=0.35)
                 wait_for(
                     "padding selection", lambda: text_present(app, "tool: selected")
                 )
-                tool = element(app, "list item", "tool, success, visible")
+                tool = element(app, Atspi.Role.LIST_ITEM, "tool, success, visible")
                 assert tool.get_component_iface().grab_focus()
                 xdotool("key", "space")
                 wait_for(
@@ -352,17 +358,19 @@ def run_host(command, *, interactive, supplied_icon=None):
                 wait_for(
                     "keyboard selection", lambda: text_present(app, "base: selected")
                 )
-                base = element(app, "list item", "base, success, visible")
+                base = element(app, Atspi.Role.LIST_ITEM, "base, success, visible")
                 assert base.get_state_set().contains(Atspi.StateType.SELECTED)
 
-                click(element(app, "link", "Open local page"))
+                click(element(app, Atspi.Role.LINK, "Open local page"))
                 wait_for(
                     "local navigation",
-                    lambda: element(app, "heading", "Local navigation test"),
+                    lambda: element(app, Atspi.Role.HEADING, "Local navigation test"),
                 )
-                click(element(app, "link", "Return to manual test"))
-                wait_for("return navigation", lambda: element(app, "heading", TITLE))
-                click(element(app, "button", "Greet"))
+                click(element(app, Atspi.Role.LINK, "Return to manual test"))
+                wait_for(
+                    "return navigation", lambda: element(app, Atspi.Role.HEADING, TITLE)
+                )
+                click(element(app, Atspi.Role.PUSH_BUTTON, "Greet"))
                 wait_for(
                     "command after navigation",
                     lambda: text_present(app, "Hello, World!"),
@@ -372,7 +380,10 @@ def run_host(command, *, interactive, supplied_icon=None):
                     xdotool("windowsize", "--sync", window, width * SCALE, 800 * SCALE)
 
                     def controls_fit():
-                        for role, name in (("entry", "Name"), ("button", "Greet")):
+                        for role, name in (
+                            (Atspi.Role.ENTRY, "Name"),
+                            (Atspi.Role.PUSH_BUTTON, "Greet"),
+                        ):
                             control = element(app, role, name)
                             if control is None:
                                 return False
