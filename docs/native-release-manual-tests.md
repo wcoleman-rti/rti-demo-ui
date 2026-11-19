@@ -1,302 +1,160 @@
-# Native Release Manual Tests
+# Native release manual tests
 
-Use this guide for each release candidate before publication. It supplements,
-but does not replace, hosted CI and the release artifact checks. Run the tests
-on an interactive desktop with a hardware GPU, not an Xvfb or other headless
-session. Record the results using the [template](#review-record-template).
-Do not treat an untested or blocked check as a pass.
+## Report template
 
-The currently release-supported configurations are the Python and C++ Linux
-native hosts on Ubuntu 22.04+ x86-64, using GTK 3 and WebKitGTK 4.1. Run the
-checks for **both hosts**, in a native Wayland session and with the X11 backend
-(an X11 session or XWayland). Record each host/backend combination separately.
-Windows and macOS have automated qualification but remain pending manual
-acceptance; this Linux procedure does not qualify them for release support.
-See the [support matrix and platform prerequisites](native-webview.md#support-and-qualification).
+Paste into the release PR. Copy the session block once per backend. Run both
+hosts on Ubuntu 22.04+ x86-64: native Wayland and either X11 or XWayland. No Xvfb.
 
-## 1. Prepare the candidate
+```markdown
+### Native release acceptance
 
-Check out the exact candidate commit in a clean source tree. Run these commands
-from its root and record both values. If the eventual release commit differs,
-verify that its tree matches the tested tree or repeat the tests.
+- Candidate version:
+- Candidate commit:
+- Candidate tree:
+- Passing CI URL:
+- Release dry-run URL:
+- Artifact checksums: PASS / FAIL
+
+#### Session: Wayland / X11 / XWayland
+
+- System output:
+- M2 monitor scales (shared if identical for both hosts):
+  - 100%:
+  - Above 100%:
+  - Mixed:
+
+| Check | Python | C++ |
+| --- | --- | --- |
+| M1 Window | | |
+| M2a Live scale change | | |
+| M2b Move across scales | | |
+| M3 Orca | | |
+| M4 Shell launcher and icon | | |
+
+- Exceptions (host, check ID, observed mismatch or blocker):
+- Session result: PASS / FAIL / BLOCKED
+```
+
+Use **PASS** if all listed expectations hold, **FAIL** if an observation
+differs, or **BLOCKED** if a prerequisite prevents the check. Explain only
+non-passes. **DEFERRED** is allowed only for M3 below. Session result: **FAIL**
+if any check failed, otherwise **BLOCKED** if any is blocked, otherwise **PASS**.
+Both session results must pass. If the release commit changes, verify the
+release tree still matches the reported tree or rerun the checks.
+
+## Manual tests
+
+### 1. Candidate and setup
+
+From the clean candidate checkout root, with authenticated `gh`, run:
 
 ```bash
 git status --short
-git rev-parse HEAD
-git rev-parse 'HEAD^{tree}'
+git rev-parse HEAD 'HEAD^{tree}'
+read -rp 'Passing CI run ID: ' CI_ID
+read -rp 'Release dry-run ID: ' RUN_ID
+gh run view "$CI_ID" --json workflowName,headSha,conclusion,url
+gh run view "$RUN_ID" --json workflowName,headSha,event,conclusion,url
 ```
 
-Obtain the `verified-release` artifact from the successful, non-publishing
-Release workflow for that same commit. In the example below, replace
-`RUN_ID` with that workflow run's numeric ID; check that the displayed SHA
-matches the candidate before continuing. Use a new empty directory so files
-from another run cannot be mistaken for this candidate.
+Expect empty status and two successful runs for `HEAD`: **CI** and
+**Release** (`workflow_dispatch`). Record commit, tree, and URLs.
 
 ```bash
-RUN_ID=REPLACE_WITH_RUN_ID
-gh run view "$RUN_ID" --json headSha,event,conclusion,url
-mkdir manual-release-artifacts &&
-  gh run download "$RUN_ID" --name verified-release \
-    --dir manual-release-artifacts &&
-  (cd manual-release-artifacts && sha256sum --check SHA256SUMS)
+WORK=$(mktemp -d)
+REVIEW=tests/fixtures/native_webview_manual/review.sh
+gh run download "$RUN_ID" --name verified-release --dir "$WORK/artifacts" &&
+  (cd "$WORK/artifacts" && sha256sum --check SHA256SUMS)
 ```
 
-Require `event` to be `workflow_dispatch`, `conclusion` to be `success`, and
-every checksum to pass. If the output directory already contains files, use a
-different empty directory. Review the artifact names and versions as well.
+Expect all checksums `OK` and the Python wheel filenames to contain the
+candidate version. Record **Artifact checksums** and **Candidate version**.
+Stop if any candidate or artifact check fails.
 
-Install the Linux prerequisites from the [platform instructions](native-webview.md#linux),
-including Python, CMake, GTK 3 and WebKitGTK 4.1. Install the Orca screen reader
-and `glxinfo` for the checks below. The SVG icon requires a GdkPixbuf SVG
-loader. The `gh` CLI must be authenticated to download the workflow artifact.
+Install the [Linux prerequisites](native-webview.md#linux), then run:
 
 ```bash
-sudo apt-get install orca mesa-utils librsvg2-common
+sudo apt-get install orca librsvg2-common
+python3.11 -m venv "$WORK/venv"  # python3.12 also works
 ```
 
-On Ubuntu with Python 3.11 installed (or substitute `python3.12`):
+On Ubuntu with Python 3.13+, use the distro `python3`, install `python3-gi`,
+and replace the venv command with `python3 -m venv --system-site-packages "$WORK/venv"`.
 
 ```bash
-python3.11 -m venv .venv-manual-release
-```
-
-On Ubuntu with Python 3.13 or newer, use the matching distro Python and its
-`python3-gi` package:
-
-```bash
-python3 -m venv --system-site-packages .venv-manual-release
-```
-
-Then install the candidate wheels and build the C++ test host. The Python
-host uses the downloaded wheels; the source-only C++ native companion and
-its core are built from the candidate checkout. The C++ release bundle is
-independently exercised by the release workflow's installed-consumer tests.
-
-```bash
-.venv-manual-release/bin/python -m pip install \
-  manual-release-artifacts/rti_demo_ui-*.whl \
-  manual-release-artifacts/rti_demo_ui_native-*.whl
-cmake -S native/cpp -B build-manual \
+"$WORK/venv/bin/python" -m pip install \
+  "$WORK"/artifacts/rti_demo_ui-*.whl "$WORK"/artifacts/rti_demo_ui_native-*.whl
+cmake -S native/cpp -B "$WORK/build" \
   -DBUILD_TESTING=ON -DRTI_DEMO_NATIVE_REAL_ENGINE_TESTS=ON
-cmake --build build-manual --target rti_demo_ui_native_manual_release --parallel
+cmake --build "$WORK/build" --target rti_demo_ui_native_manual_release --parallel
 ```
 
-Confirm the wheel filenames contain the candidate version. These commands create
-only a local test environment and build; they do not publish anything.
+Expect all commands to succeed. Run `printf '%s\n' "$WORK"` to get the
+scratch path. In a new terminal, set `WORK` to that path and `REVIEW` as above.
 
-## 2. Launch commands
-
-Run the following separately for Python and C++ from a terminal in the candidate
-root. First run in a Wayland session with `BACKEND=wayland`, then repeat using
-`BACKEND=x11` in X11 or XWayland. Confirm the actual session/backend in the
-record. When using a desktop launcher later, it must receive the same backend
-setting.
+### 2. System info
 
 ```bash
-# Choose one: wayland or x11
-BACKEND=wayland
-ICON="$PWD/tests/fixtures/native_webview_manual/icon.svg"
-
-# Python host
-GDK_BACKEND="$BACKEND" .venv-manual-release/bin/python \
-  native/python/tests/manual_release.py --icon "$ICON" \
-  --application-id org.rti.manualpython
-
-# C++ host, in a separate run
-GDK_BACKEND="$BACKEND" \
-  ./build-manual/tests/rti_demo_ui_native_manual_release --icon "$ICON" \
-  --application-id org.rti.manualcpp
+bash "$REVIEW" system
 ```
 
-Each command should print a loopback URL and open a **Native release manual
-test** window. The fixture intentionally requests a nonexistent 3D model;
-the fallback message is expected. If a host fails to start or reports an icon
-error, record a failure and retain its terminal output.
+Paste the output into **System output** once per desktop session. With
+`BACKEND=x11`, a Wayland session means **XWayland**; an X11 session means **X11**.
 
-## 3. Perform the checks
-
-Perform **every** check below for each host/backend combination. Unless a
-check says to relaunch, use the window and terminal from the launch commands.
-The fixture's local page, rendering probes and Scene3D fallback are the same
-for both hosts.
-
-On Ubuntu 24.04, Linux CI drives the actual X11 native windows with keyboard
-and mouse input and checks commands, live Scene3D selection, accessibility roles
-and selected state, local navigation, resizing at GTK scales 1 and 2, desktop
-launcher and icon identity, close, signal and port cleanup. Ubuntu 22.04 retains
-native conformance and lifecycle CI coverage, but its accessibility-driven
-interaction tests are deferred because of
-[issue #36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36). Separate
-native conformance tests check Canvas and WebGL pixel readback. CI uses Xvfb
-and software rendering; it does not qualify a real Wayland session, hardware
-GPU, desktop shell, monitor transitions, or screen-reader experience.
-
-### M1. Window integration
-
-Launch the host. Verify the native title bar looks appropriate for the desktop
-and the page shows **Native release manual test**.
-
-### M2. Scaling and multiple monitors
-
-At normal desktop scaling, confirm text and controls are legible and usable.
-Change the desktop to a high-DPI scale, resize the window, and type in **Name**.
-Move the window between monitors with different scaling if available; check
-that it stays legible, correctly sized and interactive. Record actual scale
-factors. If the required display configuration is unavailable, mark the
-affected check **blocked**, not passed.
-
-### M3. Canvas and hardware WebGL
-
-The Canvas 2D probe must show a yellow rectangle on a blue background; the
-WebGL probe must be red and show a `WebGL renderer:` status, not `WebGL
-unavailable`. Record that status and hardware-GPU evidence from the system,
-for example:
+### 3. M1 and M4: window and launcher
 
 ```bash
-glxinfo -B
+BACKEND=wayland  # repeat with x11 in an X11 or Wayland session
+bash "$REVIEW" launcher python "$BACKEND" "$WORK"
 ```
 
-Record the renderer/device and how hardware acceleration was confirmed.
-`glxinfo` describes the X11/XWayland context, so it alone does not establish
-which device a Wayland WebKit context used. A masked/ambiguous renderer or a
-software renderer is not evidence of a hardware-GPU pass; investigate or mark
-the hardware check blocked.
+1. Open **RTI Manual Python** from the app menu. For C++, rerun with `cpp`
+   and open **RTI Manual C++**.
+2. **M1:** Expect one window with a title bar and a page heading reading
+   **Native release manual test**.
+3. **M4:** Expect the fixture icon (yellow circle and dark cross on blue)
+   beside the named launcher in the menu and for its window in the overview
+   and Alt+Tab. Keep another app open so Alt+Tab shows a switcher.
+4. Record **M1** and **M4**. If the launcher is missing, mark M4 **FAIL** and
+   the window checks **BLOCKED**. Otherwise, keep the window open for M2 and M3.
+   Then close it and press Enter in the launcher terminal to remove the entry.
 
-### M4. Screen-reader usability
+### 4. M2: display scaling
 
-Ubuntu 22.04's unpatched WebKitGTK 2.50.4 reports incorrect accessibility roles.
-For that specific configuration, record M4 as **DEFERRED**, record the installed
-WebKitGTK package version, and link [issue #36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36).
-This known limitation is accepted for release, not a pass. If a distribution
-update backports the fix, perform the check rather than deferring it.
-For other configurations, perform the check below; failures or unavailable
-equipment remain release blockers.
-
-On Ubuntu, check the installed version with:
+In another terminal, with the window open, run after each scale configuration:
 
 ```bash
-dpkg-query -W -f='${Version}\n' libwebkit2gtk-4.1-0
+bash tests/fixtures/native_webview_manual/review.sh monitors
 ```
 
-Start Orca from another terminal:
+On non-GNOME desktops, copy connector and scale from Display Settings in
+`connector: N%` format, sorted by connector.
+
+1. **M2a:** In Display Settings, set the window's display to 100%, then to
+   the lowest offered scale above 100%, without relaunching the fixture.
+   At each scale, make the window wider and narrower. Clear **Name**, then
+   type `Reviewer`. Expect the label, field, and button to remain visible
+   and unclipped, and the field to show `Reviewer`.
+2. **M2b:** Set the two displays to those different scales and drag the
+   window fully onto each display. Expect the same result on both displays.
+3. Paste scale output in **M2 monitor scales** and record **M2a** and **M2b**
+   separately. Mark a setup you cannot reproduce **BLOCKED**. Restore the
+   original display settings.
+
+### 5. M3: Orca
 
 ```bash
 orca --replace
 ```
 
-In the fixture window, use Tab to reach **Name** and **Greet**. Verify Orca
-announces their names and roles as you move between them. Continue tabbing
-past the camera controls to a **Scene nodes** option. Use the arrow keys to
-move to `tool`, then press Space. Verify the option and its selected state are
-announced. A visible accessibility tree alone is not enough for this check.
-Record the screen reader and its behavior; if audio or the screen reader is
-unavailable, mark the check blocked.
+1. Focus the fixture. Tab to **Name**, then **Greet**. Expect Orca to speak
+   each name and identify the controls as a text field and a button.
+2. Tab past the camera controls to **Scene nodes**. Arrow to `tool`, then
+   press Space. Expect Orca to speak `tool` and indicate that it is selected.
+3. Record **M3**. If audio is unavailable, mark **BLOCKED**. On Ubuntu
+   22.04 with unpatched WebKitGTK 2.50.4 only, mark **DEFERRED** and cite
+   [#36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36). If patched, run M3.
 
-### M5. Linux desktop entry and icon
-
-Run this once per backend in the candidate root in the active desktop session.
-It creates two uniquely named per-user test launchers, one for each host, and
-refuses to overwrite an existing launcher. Use a checkout path without quotes,
-backslashes, percent signs or newlines; desktop-entry `Exec` has its own
-escaping rules. Set `BACKEND` to `wayland` or `x11` for the session being tested.
-
-```bash
-BACKEND=wayland  # use x11 for the X11/XWayland run
-ROOT="$PWD"
-ICON="$ROOT/tests/fixtures/native_webview_manual/icon.svg"
-DESKTOP="$HOME/.local/share/applications"
-CPP_ENTRY="$DESKTOP/org.rti.manualcpp.desktop"
-PY_ENTRY="$DESKTOP/org.rti.manualpython.desktop"
-mkdir -p "$DESKTOP"
-if [ -e "$CPP_ENTRY" ] || [ -L "$CPP_ENTRY" ] ||
-   [ -e "$PY_ENTRY" ] || [ -L "$PY_ENTRY" ]; then
-  echo "Test launcher already exists; choose a clean test account." >&2
-else
-  (
-  set -C
-  {
-    printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=RTI Manual C++'
-    printf 'Exec=/usr/bin/env GDK_BACKEND=%s "%s" ' \
-      "$BACKEND" "$ROOT/build-manual/tests/rti_demo_ui_native_manual_release"
-    printf -- '--icon "%s" --application-id %s\n' \
-      "$ICON" org.rti.manualcpp
-    printf 'Icon=%s\nStartupWMClass=%s\nTerminal=false\n' \
-      "$ICON" org.rti.manualcpp
-  } > "$CPP_ENTRY" &&
-  {
-    printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=RTI Manual Python'
-    printf 'Exec=/usr/bin/env GDK_BACKEND=%s "%s" ' \
-      "$BACKEND" "$ROOT/.venv-manual-release/bin/python"
-    printf '"%s" --icon "%s" ' "$ROOT/native/python/tests/manual_release.py" "$ICON"
-    printf '%s\n' '--application-id org.rti.manualpython'
-    printf 'Icon=%s\nStartupWMClass=%s\nTerminal=false\n' \
-      "$ICON" org.rti.manualpython
-  } > "$PY_ENTRY"
-  )
-fi
-```
-
-If either launcher already existed or creation failed, stop and do not launch
-or remove an existing launcher. If creation failed partway through, remove
-only a launcher that this attempt created.
-Otherwise, close any existing fixture window. Launch each corresponding entry
-from the application menu or with:
-
-```bash
-gtk-launch org.rti.manualcpp
-gtk-launch org.rti.manualpython
-```
-
-For each, verify the test icon (a yellow circle with a dark cross on blue) in
-the menu, window overview and Alt-Tab, and verify that the window belongs to
-the correct launcher. Record each host's result separately. After testing both,
-close the windows and remove only the two test launchers created above. Recreate
-them with the other backend for the second run.
-
-```bash
-rm "$CPP_ENTRY" "$PY_ENTRY"
-```
-
-## Review record template
-
-Copy this block into the release PR or its linked release-acceptance record.
-Use **PASS**, **FAIL**, or **BLOCKED** for each item, with evidence or a
-blocker. Use **DEFERRED** only for the specific M4 exception described above.
-Make one copy per host/backend combination; do not combine results.
-Link logs or screenshots where useful, without including credentials or other
-sensitive data.
-
-```markdown
-### Native manual release record
-
-- Candidate version:
-- Candidate commit and tree:
-- Passing CI run URL:
-- Release dry-run URL and artifact checksum result:
-- Reviewer and date:
-- Host: Python / C++
-- OS/version/architecture:
-- Backend: Wayland / X11 / XWayland
-- Desktop environment/version:
-- WebKitGTK and GTK versions:
-- Screen reader/version:
-- GPU, renderer and hardware-acceleration evidence:
-- Monitor(s) and scale factors:
-
-| Check | PASS / FAIL / BLOCKED / DEFERRED | Evidence or blocker |
-| --- | --- | --- |
-| M1 Window integration | | |
-| M2 Scaling and multiple monitors | | |
-| M3 Canvas and hardware WebGL | | |
-| M4 Screen-reader usability | | |
-| M5 Desktop entry and shell icon | | |
-
-- Issues or follow-up links:
-- Overall result: PASS / FAIL / BLOCKED
-```
-
-The release owner should verify that every required host/backend record passes,
-apart from the documented M4 exception, that the records and dry-run artifacts
-match the candidate, and that other failures or blockers have been resolved
-before publishing. Record an overall PASS only when all required checks pass
-or qualify for the specific M4 deferral.
+CI covers Canvas/WebGL, command and selection behavior, and X11 window checks
+under Xvfb. The manual checks cover the real desktop shell, live display
+transitions, and spoken feedback.

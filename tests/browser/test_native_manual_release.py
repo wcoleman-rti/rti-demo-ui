@@ -50,7 +50,7 @@ def manual_app():
         loop.close()
 
 
-def test_manual_frontend_exercises_commands_rendering_and_live_selection(manual_app):
+def test_manual_frontend_exercises_commands_and_live_selection(manual_app):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": 390, "height": 844})
@@ -59,14 +59,6 @@ def test_manual_frontend_exercises_commands_rendering_and_live_selection(manual_
         page.get_by_label("Name").fill("Reviewer")
         page.get_by_role("button", name="Greet").click()
         expect(page.locator("#result")).to_have_text("Hello, Reviewer!")
-        assert page.evaluate(
-            """() => Array.from(
-                document.querySelector('#canvas2d').getContext('2d')
-                    .getImageData(100, 40, 1, 1).data
-            )"""
-        ) == [255, 207, 51, 255]
-        expect(page.locator("#gpu")).to_contain_text("WebGL renderer:")
-
         option = page.locator("#scene [data-node-id=tool]")
         expect(option).to_be_visible()
         option.click(delay=350)

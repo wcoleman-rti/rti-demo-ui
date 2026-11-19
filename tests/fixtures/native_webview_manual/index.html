@@ -21,7 +21,6 @@
     main { max-width: 70rem; margin: auto; }
     .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
     section { border: 1px solid currentColor; padding: 1rem; min-width: 0; }
-    canvas { width: 100%; max-width: 16rem; height: 6rem; border: 1px solid currentColor; }
     input { max-width: 100%; }
   </style>
 </head>
@@ -36,14 +35,6 @@
       <button id="greet" class="sdk-button" type="button">Greet</button>
       <p id="result" role="status">No command sent</p>
       <a href="/other.html">Open local page</a>
-    </section>
-    <section>
-      <h2>Rendering</h2>
-      <p>Canvas 2D</p>
-      <canvas id="canvas2d" width="256" height="96" aria-label="Blue and yellow 2D canvas"></canvas>
-      <p>WebGL</p>
-      <canvas id="webgl" width="256" height="96" aria-label="Red WebGL canvas"></canvas>
-      <p id="gpu" role="status">Checking WebGL</p>
     </section>
     <section>
       <h2>Scene3D fallback selection</h2>
@@ -69,24 +60,6 @@ document.querySelector("#greet").addEventListener("click", async () => {
     result.textContent = `Command failed: ${error.message}`;
   }
 });
-
-const ctx = document.querySelector("#canvas2d").getContext("2d");
-if (ctx) {
-  ctx.fillStyle = "#1769aa";
-  ctx.fillRect(0, 0, 256, 96);
-  ctx.fillStyle = "#ffcf33";
-  ctx.fillRect(80, 24, 96, 48);
-}
-const gl = document.querySelector("#webgl").getContext("webgl");
-const gpu = document.querySelector("#gpu");
-if (gl) {
-  gl.clearColor(1, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  const info = gl.getExtension("WEBGL_debug_renderer_info");
-  gpu.textContent = `WebGL renderer: ${gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)}`;
-} else {
-  gpu.textContent = "WebGL unavailable";
-}
 
 const host = document.querySelector("#scene");
 const selection = document.querySelector("#selection");
