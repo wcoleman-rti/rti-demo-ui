@@ -25147,7 +25147,9 @@ function renderList(list, data, state) {
     option.tabIndex = activeId === node.id ? 0 : -1;
     option.setAttribute("aria-selected", String(state && state.selected === node.id));
     option.setAttribute("aria-label", `${node.id}, ${node.status}, ${node.visible ? "visible" : "hidden"}`);
-    option.textContent = `${node.id} - ${node.status}`;
+    const label = `${node.id} - ${node.status}`;
+    if (!option.firstChild) option.append(document.createTextNode(label));
+    else if (option.firstChild.nodeValue !== label) option.firstChild.nodeValue = label;
     if (list.children[index] !== option) list.insertBefore(option, list.children[index] || null);
   }
   for (const option of existing.values()) option.remove();

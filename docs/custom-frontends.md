@@ -92,6 +92,11 @@ client.subscribe((snapshot, connectionState) => {
 client.start();
 ```
 
+Reconcile snapshots in place rather than replacing interactive subtrees. Preserve
+controls and their text nodes so pointer gestures, held input, and keyboard focus
+survive live updates. Updating `textContent` replaces a text hit target even when
+its label has not changed; update the existing text node only when needed.
+
 High-update-rate applications may explicitly select SSE:
 
 ```js
