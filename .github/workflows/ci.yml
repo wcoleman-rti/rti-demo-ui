@@ -166,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2022, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04, windows-2022, macos-15]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -282,6 +282,16 @@ jobs:
               --build-dir build/native-platform \
               --static-root tests/fixtures/native_webview_conformance \
               | tee "$work/conformance.log"
+          SCRIPT
+      - name: Run Linux native interaction and accessibility tests
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          dbus-run-session -- xvfb-run -a -s "-screen 0 2800x1800x24" \
+            bash -euo pipefail <<'SCRIPT'
+          work="$RUNNER_TEMP/native-webview"
+          mkdir -p "$work"
           for scale in 1 2; do
             XDG_DATA_HOME="$work/interaction-$scale" GDK_BACKEND=x11 GDK_SCALE="$scale" \
               timeout 150s /usr/bin/python3 native/python/tests/linux_interaction.py \

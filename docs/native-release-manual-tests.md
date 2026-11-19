@@ -120,13 +120,16 @@ check says to relaunch, use the window and terminal from the launch commands.
 The fixture's local page, rendering probes and Scene3D fallback are the same
 for both hosts.
 
-Linux CI drives the actual X11 native windows with keyboard and mouse input
-and checks commands, live Scene3D selection, accessibility roles and selected
-state, local navigation, resizing at GTK scales 1 and 2, desktop launcher and
-icon identity, close, signal and port cleanup. Separate native conformance
-tests check Canvas and WebGL pixel readback. CI uses Xvfb and software
-rendering; it does not qualify a real Wayland session, hardware GPU, desktop
-shell, monitor transitions, or screen-reader experience.
+On Ubuntu 24.04, Linux CI drives the actual X11 native windows with keyboard
+and mouse input and checks commands, live Scene3D selection, accessibility roles
+and selected state, local navigation, resizing at GTK scales 1 and 2, desktop
+launcher and icon identity, close, signal and port cleanup. Ubuntu 22.04 retains
+native conformance and lifecycle CI coverage, but its accessibility-driven
+interaction tests are deferred because of
+[issue #36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36). Separate
+native conformance tests check Canvas and WebGL pixel readback. CI uses Xvfb
+and software rendering; it does not qualify a real Wayland session, hardware
+GPU, desktop shell, monitor transitions, or screen-reader experience.
 
 ### M1. Window integration
 
@@ -160,6 +163,20 @@ software renderer is not evidence of a hardware-GPU pass; investigate or mark
 the hardware check blocked.
 
 ### M4. Screen-reader usability
+
+Ubuntu 22.04's unpatched WebKitGTK 2.50.4 reports incorrect accessibility roles.
+For that specific configuration, record M4 as **DEFERRED**, record the installed
+WebKitGTK package version, and link [issue #36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36).
+This known limitation is accepted for release, not a pass. If a distribution
+update backports the fix, perform the check rather than deferring it.
+For other configurations, perform the check below; failures or unavailable
+equipment remain release blockers.
+
+On Ubuntu, check the installed version with:
+
+```bash
+dpkg-query -W -f='${Version}\n' libwebkit2gtk-4.1-0
+```
 
 Start Orca from another terminal:
 
@@ -244,7 +261,8 @@ rm "$CPP_ENTRY" "$PY_ENTRY"
 
 Copy this block into the release PR or its linked release-acceptance record.
 Use **PASS**, **FAIL**, or **BLOCKED** for each item, with evidence or a
-blocker. Make one copy per host/backend combination; do not combine results.
+blocker. Use **DEFERRED** only for the specific M4 exception described above.
+Make one copy per host/backend combination; do not combine results.
 Link logs or screenshots where useful, without including credentials or other
 sensitive data.
 
@@ -265,7 +283,7 @@ sensitive data.
 - GPU, renderer and hardware-acceleration evidence:
 - Monitor(s) and scale factors:
 
-| Check | PASS / FAIL / BLOCKED | Evidence or blocker |
+| Check | PASS / FAIL / BLOCKED / DEFERRED | Evidence or blocker |
 | --- | --- | --- |
 | M1 Window integration | | |
 | M2 Scaling and multiple monitors | | |
@@ -278,5 +296,7 @@ sensitive data.
 ```
 
 The release owner should verify that every required host/backend record passes,
-that the records and dry-run artifacts match the candidate, and that failures
-or blockers have been resolved before publishing.
+apart from the documented M4 exception, that the records and dry-run artifacts
+match the candidate, and that other failures or blockers have been resolved
+before publishing. Record an overall PASS only when all required checks pass
+or qualify for the specific M4 deferral.

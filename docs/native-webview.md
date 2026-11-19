@@ -24,6 +24,15 @@ manual checklist below is recorded.
 Python uses pywebview 6.2.1 on all three platforms: GTK on Linux, Edge Chromium
 on Windows, and Cocoa/WKWebView on macOS.
 
+On Ubuntu 22.04, the distribution's WebKitGTK 2.50.4 reports incorrect
+accessibility roles for web content, which can affect screen-reader users of
+both native hosts. WebKitGTK 2.50.5 includes the upstream fix, but the system
+package must be updated or patched to provide it. Ubuntu 22.04 retains native
+CI coverage; accessibility-driven interaction tests run on Ubuntu 24.04 until
+the fix is available for 22.04. See
+[issue #36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36) for the
+limitation and follow-up. This does not affect browser mode.
+
 ## Platform Prerequisites
 
 ### Linux
