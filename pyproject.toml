@@ -26,11 +26,11 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "pytest-asyncio==1.4.0",
 ]
 browser = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "pytest-asyncio==1.4.0",
     "playwright==1.62.0",
 ]
@@ -38,7 +38,7 @@ lint = [
     "ruff==0.16.5",
 ]
 dev = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "pytest-asyncio==1.4.0",
     "playwright==1.62.0",
     "ruff==0.16.5",
