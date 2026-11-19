@@ -10,6 +10,7 @@ frontend process or a runtime dependency on Connext.
 - [Python guide](api/python.md)
 - [C++ guide](api/cpp.md)
 - [Native webview mode](native-webview.md)
+- [Native release manual tests](native-release-manual-tests.md)
 
 ## Learn more
 
@@ -29,6 +30,7 @@ frontend process or a runtime dependency on Connext.
 api/python
 api/cpp
 native-webview
+native-release-manual-tests
 custom-frontends
 time-series
 momentary-actions

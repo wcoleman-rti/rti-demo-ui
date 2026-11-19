@@ -42,7 +42,7 @@ the independently versioned `rti-demo-ui-adapter-uplot` 1.0.0 wheel alongside
 the 0.5.x core wheel from the same GitHub release:
 
 ```bash
-pip install rti_demo_ui-0.5.0-py3-none-any.whl \
+pip install rti_demo_ui-0.5.1-py3-none-any.whl \
   rti_demo_ui_adapter_uplot-1.0.0-py3-none-any.whl
 ```
 

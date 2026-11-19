@@ -166,7 +166,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-2022, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04, windows-2022, macos-15]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -191,15 +191,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            at-spi2-core \
             dbus-x11 \
+            desktop-file-utils \
             gir1.2-gtk-3.0 \
+            gir1.2-atspi-2.0 \
             gir1.2-webkit2-4.1 \
             libcairo2-dev \
             libgirepository1.0-dev \
             libgl1-mesa-dri \
+            libgtk-3-bin \
             libgtk-3-dev \
+            librsvg2-common \
             libwebkit2gtk-4.1-dev \
             pkg-config \
+            python3-gi \
+            python3-xlib \
+            x11-utils \
+            xdotool \
             xvfb
       - name: Install Python test and native-host dependencies
         run: >
@@ -242,7 +251,7 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
-          dbus-run-session -- xvfb-run -a -s "-screen 0 1440x900x24" \
+          dbus-run-session -- xvfb-run -a -s "-screen 0 2800x1800x24" \
             bash -euo pipefail <<'SCRIPT'
           work="$RUNNER_TEMP/native-webview"
           mkdir -p "$work"
@@ -273,6 +282,23 @@ jobs:
               --build-dir build/native-platform \
               --static-root tests/fixtures/native_webview_conformance \
               | tee "$work/conformance.log"
+          SCRIPT
+      - name: Run Linux native interaction and accessibility tests
+        if: matrix.os == 'ubuntu-24.04'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          dbus-run-session -- xvfb-run -a -s "-screen 0 2800x1800x24" \
+            bash -euo pipefail <<'SCRIPT'
+          work="$RUNNER_TEMP/native-webview"
+          mkdir -p "$work"
+          for scale in 1 2; do
+            XDG_DATA_HOME="$work/interaction-$scale" GDK_BACKEND=x11 GDK_SCALE="$scale" \
+              timeout 150s /usr/bin/python3 native/python/tests/linux_interaction.py \
+                --python "$(command -v python)" \
+                --cpp "$PWD/build/native-platform/tests/rti_demo_ui_native_manual_release" \
+                | tee "$work/interaction-$scale.log"
+          done
           SCRIPT
       - name: Run native C++ real-engine smoke
         if: runner.os != 'Linux'

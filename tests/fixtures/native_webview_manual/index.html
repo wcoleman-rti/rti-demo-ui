@@ -1,0 +1,97 @@
+<!--
+  (c) 2026 Copyright, Real-Time Innovations, Inc.  All rights reserved.
+
+  RTI grants Licensee a license to use, modify, compile, and create derivative
+  works of the Software.  Licensee has the right to distribute object form
+  only for use with RTI products.  The Software is provided "as is", with no
+  warranty of any type, including any warranty for fitness for any purpose.
+  RTI is under no obligation to maintain or support the Software.  RTI shall
+  not be liable for any incidental or consequential damages arising out of the
+  use or inability to use the software.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Native release manual test</title>
+  <link rel="stylesheet" href="/sdk/theme.css">
+  <style>
+    body { margin: 1rem; }
+    main { max-width: 70rem; margin: auto; }
+    .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; }
+    section { border: 1px solid currentColor; padding: 1rem; min-width: 0; }
+    input { max-width: 100%; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Native release manual test</h1>
+  <div class="panels">
+    <section>
+      <h2>Input and command</h2>
+      <label for="name">Name</label>
+      <input id="name" value="World">
+      <button id="greet" class="sdk-button" type="button">Greet</button>
+      <p id="result" role="status">No command sent</p>
+      <a href="/other.html">Open local page</a>
+    </section>
+    <section>
+      <h2>Scene3D fallback selection</h2>
+      <p>A missing model is intentional. The list continues updating.</p>
+      <div id="scene"></div>
+      <p id="selection" role="status">No scene selection</p>
+    </section>
+  </div>
+</main>
+<script type="module">
+import { createClient } from "/sdk/client.js";
+import { reconcileScene3d } from "/sdk/runtime3d.js";
+
+const client = createClient();
+const result = document.querySelector("#result");
+document.querySelector("#greet").addEventListener("click", async () => {
+  try {
+    const reply = await client.invokeCommand("greet", {
+      name: document.querySelector("#name").value,
+    });
+    result.textContent = reply.message;
+  } catch (error) {
+    result.textContent = `Command failed: ${error.message}`;
+  }
+});
+
+const host = document.querySelector("#scene");
+const selection = document.querySelector("#selection");
+host.addEventListener("scene3dselect", (event) => {
+  selection.textContent = `${event.detail.nodeId}: ${event.detail.selected ? "selected" : "deselected"}`;
+});
+const component = {
+  id: "manual-scene",
+  type: "scene3d",
+  revision: 1,
+  data: {
+    asset: "/intentionally-missing.glb",
+    background: "#0a0e17",
+    camera: { position: [4, 3, 6], target: [0, 1.5, 0], min_distance: 0.1, max_distance: 100 },
+    nodes: ["base", "tool"].map((id) => ({
+      id, path: id, position: [0, 0, 0], rotation: [0, 0, 0, 1],
+      scale: [1, 1, 1], status: "success", visible: true,
+    })),
+  },
+};
+async function updateScene() {
+  try {
+    await reconcileScene3d(component, host, { reducedMotion: true });
+  } catch (error) {
+    selection.textContent = `Scene update failed: ${error.message}`;
+  }
+}
+await updateScene();
+setInterval(() => {
+  component.revision += 1;
+  void updateScene();
+}, 100);
+</script>
+</body>
+</html>

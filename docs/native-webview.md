@@ -24,6 +24,15 @@ manual checklist below is recorded.
 Python uses pywebview 6.2.1 on all three platforms: GTK on Linux, Edge Chromium
 on Windows, and Cocoa/WKWebView on macOS.
 
+On Ubuntu 22.04, the distribution's WebKitGTK 2.50.4 reports incorrect
+accessibility roles for web content, which can affect screen-reader users of
+both native hosts. WebKitGTK 2.50.5 includes the upstream fix, but the system
+package must be updated or patched to provide it. Ubuntu 22.04 retains native
+CI coverage; accessibility-driven interaction tests run on Ubuntu 24.04 until
+the fix is available for 22.04. See
+[issue #36](https://github.com/wcoleman-rti/rti-demo-ui/issues/36) for the
+limitation and follow-up. This does not affect browser mode.
+
 ## Platform Prerequisites
 
 ### Linux
@@ -99,10 +108,10 @@ Download the core and companion wheels attached to a GitHub release, then
 install both local files. The project does not publish them to a package index:
 
 ```bash
-gh release download v0.5.0 --repo wcoleman-rti/rti-demo-ui \
+gh release download v0.5.1 --repo wcoleman-rti/rti-demo-ui \
   --pattern '*.whl' --dir dist
-.venv/bin/pip install dist/rti_demo_ui-0.5.0-py3-none-any.whl \
-  dist/rti_demo_ui_native-0.5.0-py3-none-any.whl
+.venv/bin/pip install dist/rti_demo_ui-0.5.1-py3-none-any.whl \
+  dist/rti_demo_ui_native-0.5.1-py3-none-any.whl
 ```
 
 From a source checkout:
@@ -405,21 +414,16 @@ Common failures:
 
 ## Manual Release Checklist
 
-For each supported engine and release candidate, record:
+For setup commands, expected observations, and a copyable result record, use
+the [native release manual test guide](native-release-manual-tests.md).
 
-1. Launch and native window chrome integration.
-2. Narrow and wide resizing without clipped controls.
-3. Keyboard traversal, text input, and command interaction.
-4. Accessibility-tree inspection with the platform tool.
-5. Standard and high-DPI behavior, including moving between monitors.
-6. Normal close and Ctrl-C cleanup.
-7. Application-owned links and navigation behave as intended.
-8. Canvas and WebGL rendering on a hardware GPU.
-9. A supplied icon appears in the platform's window/taskbar or Dock surface;
-   omitting it retains the platform default. On Linux test a consumer-installed
-   desktop entry with matching application ID on Wayland and X11.
+For each supported engine and release candidate, record real-desktop window
+integration, scaling and multi-monitor behavior, hardware-GPU rendering,
+screen-reader usability, and shell icon integration.
 
-Automated conformance covers snapshot/SSE, commands, imports, themes, Canvas,
-WebGL pixel readback, focus, resize observation, signal shutdown, joined
-contexts, and released ports. The manual record is still required before
-publishing a release candidate.
+Automated conformance covers snapshot/SSE, commands, imports, themes, Canvas
+and WebGL pixel readback. Linux CI additionally drives the actual Python and
+C++ X11 windows to check input, live selection, accessibility roles and state,
+navigation, resizing at two GTK scales, desktop launch, icon identity, shutdown
+and released ports. These tests use a virtual display and software rendering;
+the manual record is still required before publishing a release candidate.
