@@ -341,11 +341,11 @@ isolated diagnostic.
 
 ## 11. Build and Tests
 
-C++ uses pinned cpp-httplib v0.18.3 and nlohmann/json v3.11.3 through CMake
+C++ uses pinned cpp-httplib v0.67.0 and nlohmann/json v3.11.3 through CMake
 `FetchContent`; nlohmann/json is a public link dependency because it appears in
 public C++ APIs. Python requires `aiohttp>=3.10,<4`; development extras include
 pytest, pytest-asyncio, and Playwright. The optional runtime3d artifact is built
-with Node 22.14.0, Three.js 0.173.0, and esbuild 0.25.0 from
+with Node 22.23.5, Three.js 0.173.0, and esbuild 0.25.0 from
 `tools/scene3d/package-lock.json`.
 
 The focused validation gates are:

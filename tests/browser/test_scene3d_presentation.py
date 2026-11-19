@@ -108,7 +108,7 @@ def _page(browser, bundled=False):
 
 
 @pytest.mark.parametrize("bundled", [False, True], ids=["source", "shipped"])
-def test_node_list_preserves_keyboard_focus_during_snapshots(bundled):
+def test_node_list_preserves_keyboard_focus_and_pointer_targets(bundled):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = _page(browser, bundled=bundled)
@@ -132,12 +132,17 @@ def test_node_list_preserves_keyboard_focus_during_snapshots(bundled):
         page.locator("#original [role=option]").first.press("ArrowDown")
         page.evaluate(
             """async () => {
+                window.nodeLabel = host.querySelector('[data-node-id=tool]').firstChild;
                 component.revision++;
                 component.data.nodes[1].status = 'warning';
                 await runtime.reconcileScene3d(component, host);
             }"""
         )
         assert page.evaluate("document.activeElement?.dataset.nodeId") == "tool"
+        assert page.evaluate(
+            "host.querySelector('[data-node-id=tool]').firstChild === nodeLabel"
+            " && nodeLabel.isConnected"
+        )
         assert (
             page.locator("#original [data-node-id=tool]").inner_text()
             == "tool - warning"
@@ -147,6 +152,36 @@ def test_node_list_preserves_keyboard_focus_during_snapshots(bundled):
             page.locator("#original [data-node-id=tool]").get_attribute("aria-selected")
             == "true"
         )
+        page.evaluate(
+            """() => {
+                window.snapshotTimer = setInterval(() => {
+                    component.revision++;
+                    runtime.reconcileScene3d(component, host);
+                }, 50);
+            }"""
+        )
+        option = page.locator("#original [data-node-id=tool]")
+        try:
+            for region in ("padding", "text"):
+                selected = option.get_attribute("aria-selected")
+                point = option.evaluate(
+                    """(node, region) => {
+                        const box = node.getBoundingClientRect();
+                        const range = document.createRange();
+                        range.selectNodeContents(node);
+                        const text = range.getBoundingClientRect();
+                        return {
+                            x: region === 'text' ? text.x + text.width / 2 - box.x : box.width - 4,
+                            y: box.height / 2,
+                        };
+                    }""",
+                    region,
+                )
+                option.click(position=point, delay=150)
+                assert option.get_attribute("aria-selected") != selected
+                assert page.evaluate("nodeLabel.isConnected")
+        finally:
+            page.evaluate("clearInterval(snapshotTimer)")
         page.evaluate(
             """async () => {
                 component.revision++;

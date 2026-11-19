@@ -21,7 +21,7 @@ provide that artifact-level view when package artifacts are published.
 | Component | Version or pin | Purpose | License | Source |
 | --- | --- | --- | --- | --- |
 | aiohttp | `>=3.10,<4` | Python runtime HTTP server | Apache-2.0 | [aio-libs/aiohttp](https://github.com/aio-libs/aiohttp) |
-| cpp-httplib | `a7bc00e3307fecdb4d67545e93be7b88cfb1e186` (v0.18.3) | C++ HTTP server | MIT | [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
+| cpp-httplib | `7800c3dc5b33285cbb18baa5998de4ff7ef63515` (v0.67.0) | C++ HTTP server | MIT | [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
 | nlohmann/json | `9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03` (v3.11.3) | C++ JSON support | MIT | [nlohmann/json](https://github.com/nlohmann/json) |
 
 ## Optional Native Webview Dependencies
@@ -84,7 +84,7 @@ Update the pins with `npm ci --ignore-scripts`, rebuild the artifact, refresh
 `assets/runtime3d.sha256`, and review the generated diff and upstream license
 notices together.
 
-Use Node.js 22.14.0 and run `npm run build:runtime3d` from `tools/scene3d`.
+Use Node.js 22.23.5 and run `npm run build:runtime3d` from `tools/scene3d`.
 The build script fixes esbuild's working directory so generated source-path
 comments do not depend on the caller's directory. CI verifies both the
 recorded checksum and an unchanged generated artifact.
