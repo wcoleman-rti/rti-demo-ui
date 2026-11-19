@@ -29,7 +29,7 @@ set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     cpp_httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG a7bc00e3307fecdb4d67545e93be7b88cfb1e186 # v0.18.3
+    GIT_TAG 7800c3dc5b33285cbb18baa5998de4ff7ef63515 # v0.67.0
 )
 FetchContent_Declare(
     nlohmann_json
