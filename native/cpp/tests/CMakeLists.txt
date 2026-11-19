@@ -12,6 +12,16 @@ add_test(NAME native_runner_tests COMMAND rti_demo_ui_native_runner_tests)
 set_tests_properties(native_runner_tests PROPERTIES TIMEOUT 15)
 
 if(RTI_DEMO_NATIVE_REAL_ENGINE_TESTS)
+    add_executable(rti_demo_ui_native_manual_release manual_release.cpp)
+    target_compile_definitions(
+        rti_demo_ui_native_manual_release PRIVATE
+        NATIVE_MANUAL_STATIC_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/fixtures/native_webview_manual"
+    )
+    target_link_libraries(
+        rti_demo_ui_native_manual_release PRIVATE
+        rti_demo_ui_native::native_webview
+    )
+
     add_executable(rti_demo_ui_native_real_smoke real_host_smoke.cpp)
     target_link_libraries(
         rti_demo_ui_native_real_smoke PRIVATE
